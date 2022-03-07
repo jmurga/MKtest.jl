@@ -157,6 +157,10 @@ function summary_statistics(;param::parameters,h5_file::String,analysis_folder::
 
 	#Subset index
 	idx    = sample(1:size(tmp["models"],1),summstat_size,replace=false)
+	#idx =  map(x-> sample(1:size(tmp["models"],1),x),fill(summstat_size,length(s_file)))
+	models = map(x-> Array(view(tmp["models"],x,:)),idx);
+	dsdn = map(x-> Array(view(tmp["dsdn"],x,:)),idx);
+
 	models = Array(view(tmp["models"],idx,:));
 	dsdn   = Array(view(tmp["dsdn"],idx,:));
 
@@ -165,26 +169,30 @@ function summary_statistics(;param::parameters,h5_file::String,analysis_folder::
 	s    = hcat(map(x -> view(tmp["sel"][x],:),param.dac)...);
 	neut = Array(view(n,idx,:));
 	sel  = Array(view(s,idx,:));
-
-	#Making summaries
+	# neut = map(x-> Array(view(n,x,:)),idx);
+	# sel  = map(x-> Array(view(s,x,:)),idx);
+	
+	# Making summaries
 	expected_values = sampled_from_rates(models,sfs[1],divergence[1],neut,sel,dsdn);
+	expected_values = pmapbatch(sampled_from_rates,models,sfs,divergence,neut,sel,dsdn);
 
+    #Making summaries
 	w(x,name) = CSV.write(name,DataFrame(x,:auto),delim='\t',header=false);
 
 	# Controling outlier cases
 	flt_inf(e) = replace!(e, -Inf=>NaN)
 	flt_nan(e) = e[vec(.!any(isnan.(e),dims=2)),:]
 	
-	expected_values = flt_inf(expected_values)
-	expected_values = flt_nan(expected_values)
-	expected_values = expected_values[(expected_values[:,3] .> 0 ) .& (expected_values[:,3] .<1 ),:]
+	expected_values = flt_inf.(expected_values)
+	expected_values = flt_nan.(expected_values)
+	# expected_values = expected_values[(expected_values[:,3] .> 0 ) .& (expected_values[:,3] .<1 ),:]
 	
 	# Writting ABCreg input
-	w(vcat(α...), analysis_folder * "/alphas.txt");
-	w(expected_values, analysis_folder * "/summstat.txt");
+	# w(vcat(α...), analysis_folder * "/alphas.txt");
+	# w(expected_values, analysis_folder * "/summstat.txt");
 
-	# pmapbatch(w, α, analysis_folder * "/alphas_" .* string.(1:size(sfs,1)) .* ".txt");
-	# pmapbatch(w, expected_values,  analysis_folder * "/summstat_" .* string.(1:size(sfs,1)) .* ".txt");
+	pmapbatch(w, α, analysis_folder * "/alphas_" .* string.(1:size(sfs,1)) .* ".txt");
+	pmapbatch(w, expected_values,  analysis_folder * "/summstat_" .* string.(1:size(sfs,1)) .* ".txt");
 
 	return(expected_values)
 end

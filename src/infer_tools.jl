@@ -93,16 +93,16 @@ Files containing posterior distributions from ABCreg
 """
 function ABCreg(;analysis_folder::String,S::Int64,P::Int64=5,tol::Float64,abcreg::String)
 	
-	# List alphas and summstat files
-    a_file   = analysis_folder * "/alphas.txt"
-    sum_file = analysis_folder * "/summstat.txt"
+    # List alphas and summstat files
+    a_file     = filter(x -> occursin("alphas",x), readdir(analysis_folder,join=true));
+    sum_file   = filter(x -> occursin("summstat",x), readdir(analysis_folder,join=true));
 
-	# Creating output names
-	out = analysis_folder * "/out"
+    # Creating output names
+    out = analysis_folder .* "/out_" .* string.(1:size(a_file,1))
 
-	r(a,s,o,abcreg=abcreg,S=S,tol=tol) = run(`$abcreg -d $a -p $s -P $P -S $S -t $tol -b $o`)
+	r(a,s,o,abcreg=abcreg,P=P,S=S,tol=tol) = run(`$abcreg -d $a -p $s -P $P -S $S -t $tol -b $o`)
 
-	r(a_file,sum_file,out);
+	pmapbatch(r,a_file,sum_file,out);
 end
 
 """
@@ -154,10 +154,15 @@ end
 """
 	Function to download and source plotMap function. We do not include at part of the module to avoid external dependecies. Once the function is execute properly you will have a function called *plotMap which used R to 
 		estimate and plot the Maximum A Posterior following ABCreg example. It uses locfit and ggplot2 libraries.
+#Arguments
+- `script_path::String`: Path and name to save MAP scritp.
 """
-function source_plot_map_r(;script::String)
+function source_plot_map_r(script_path::String)
 
-    download("https://raw.githubusercontent.com/jmurga/MKtest.jl/main/scripts/plot_map.jl",script)
-
-    include(script)
+	try
+		download("https://raw.githubusercontent.com/jmurga/MKtest.jl/main/scripts/plot_map.jl",script_path)
+		include(script_path)
+	catch
+		println("\nPlease be sure you have R and the pacakges data.table, ggplot2 and locfit installed in your system. You can install them using Conda inside julia with the following commands:\n\n\tusing Pkg\n\tPkg.add(\"conda\")\n\tENV[\"R_HOME\"]=\"*\"\n\tPkg.add(\"Conda\")\n\tusing Conda\n\tConda.add(\"r-base\",channel=\"conda-forge\")\n\tConda.add([\"r-locfit\",\"r-ggplot2\",\"r-data.table\",\"r-r.utils\"],channel=\"conda-forge\")\n\tPkg.add(\"RCall\")\n")
+	end
 end

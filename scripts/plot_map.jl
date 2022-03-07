@@ -44,12 +44,12 @@ function plot_map(;analysis_folder::String,weak::Bool=true,title::String="Poster
 	if !weak
 		posteriors = [posteriors[i][:,3:end] for i in eachindex(posteriors)]
 		tmp          = getmap.(posteriors)
-		maxp         = DataFrame(vcat(tmp...),[:a,:gamNeg,:shape])
+		maxp         = DataFrame(vcat(tmp...),[:a,:gam_neg,:shape])
 		al           = maxp[:,1:1]
 		gam          = maxp[:,2:end]
 	else
 		tmp          = getmap.(posteriors)
-		maxp         = DataFrame(vcat(tmp...),[:aw,:as,:a,:gamNeg,:shape])
+		maxp         = DataFrame(vcat(tmp...),[:aw,:as,:a,:gam_neg,:shape])
 		al           = maxp[:,1:3]
 		gam          = maxp[:,4:end]
 	end
