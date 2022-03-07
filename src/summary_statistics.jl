@@ -152,28 +152,28 @@ function summary_statistics(;param::parameters,h5_file::String,analysis_folder::
 	sfs,divergence,α = open_sfs_div(s_file,d_file,param.dac,replicas,bootstrap);
 
 	#Open rates
-	h = jldopen(h5_file);
-	tmp    = h[string(param.N) * "/" * string(param.n)]
+    h   = jldopen(h5_file);
+    tmp = h[string(param.N) * "/" * string(param.n)]
 
 	#Subset index
-	idx    = sample(1:size(tmp["models"],1),summstat_size,replace=false)
-	#idx =  map(x-> sample(1:size(tmp["models"],1),x),fill(summstat_size,length(s_file)))
-	models = map(x-> Array(view(tmp["models"],x,:)),idx);
-	dsdn = map(x-> Array(view(tmp["dsdn"],x,:)),idx);
+    # idx  = sample(1:size(tmp["models"],1),summstat_size,replace=false)
+    idx    = pmapbatch(x-> sample(1:size(tmp["models"],1),x),fill(summstat_size,length(s_file)));
+    models = pmapbatch(x-> Array(view(tmp["models"],x,:)),idx);
+    dsdn   = pmapbatch(x-> Array(view(tmp["dsdn"],x,:)),idx);
 
-	models = Array(view(tmp["models"],idx,:));
-	dsdn   = Array(view(tmp["dsdn"],idx,:));
+	# models = Array(view(tmp["models"],idx,:));
+	# dsdn   = Array(view(tmp["dsdn"],idx,:));
 
 	# Filtering polymorphic rate by dac
 	n    = hcat(map(x -> view(tmp["neut"][x],:),param.dac)...);
 	s    = hcat(map(x -> view(tmp["sel"][x],:),param.dac)...);
-	neut = Array(view(n,idx,:));
-	sel  = Array(view(s,idx,:));
-	# neut = map(x-> Array(view(n,x,:)),idx);
-	# sel  = map(x-> Array(view(s,x,:)),idx);
+	# neut = Array(view(n,idx,:));
+	# sel  = Array(view(s,idx,:));
+	neut = pmapbatch(x-> Array(view(n,x,:)),idx);
+	sel  = pmapbatch(x-> Array(view(s,x,:)),idx);
 	
 	# Making summaries
-	expected_values = sampled_from_rates(models,sfs[1],divergence[1],neut,sel,dsdn);
+	# expected_values = sampled_from_rates(models,sfs[1],divergence[1],neut,sel,dsdn);
 	expected_values = pmapbatch(sampled_from_rates,models,sfs,divergence,neut,sel,dsdn);
 
     #Making summaries
