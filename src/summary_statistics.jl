@@ -160,19 +160,22 @@ function summary_statistics(;param::parameters,h5_file::String,analysis_folder::
 	tmp_sel   = deepcopy(tmp["sel"]);
 
 	#Subset index
-	idx    = map(x-> sample(1:size(tmp_model,1),x),fill(summstat_size,length(s_file)));
-	models = map(x-> view(tmp_model,x,:),idx);
-	dsdn   = map(x-> view(tmp_dsdn,x,:),idx);
+	idx    = sample(1:size(tmp_model,1),summstat_size,replace=false);
+	models = view(tmp_model,idx,:);
+	dsdn   = view(tmp_dsdn,idx,:);
 
 	# Filtering polymorphic rate by dac
 	n    = hcat(map(x -> view(tmp_neut[x],:),param.dac)...);
 	s    = hcat(map(x -> view(tmp_sel[x],:),param.dac)...);
 
-	neut = map(x-> view(n,x,:),idx);
-	sel  = map(x-> view(s,x,:),idx);
+	neut = view(n,idx,:);
+	sel  = view(s,idx,:);
 	
+
+    f(x,y,m=models,n=neut,s=sel,d=dsdn) = MKtest.sampled_from_rates(m,x,y,n,s,d)
+
 	# Making summaries
-	expected_values = map(sampled_from_rates,models,sfs,divergence,neut,sel,dsdn);
+	expected_values = pmapbatch(f,sfs,divergence);
 
     #Making summaries
 	w(x,name) = CSV.write(name,DataFrame(x,:auto),delim='\t',header=false);
@@ -185,7 +188,7 @@ function summary_statistics(;param::parameters,h5_file::String,analysis_folder::
 	expected_values = flt_nan.(expected_values)
 
 	map(w, α, analysis_folder * "/alphas_" .* string.(1:size(sfs,1)) .* ".txt");
-	pmapbatch(w, expected_values,  analysis_folder * "/summstat_" .* string.(1:size(sfs,1)) .* ".txt");
+	pmap(w, expected_values,  analysis_folder * "/summstat_" .* string.(1:size(sfs,1)) .* ".txt");
 
 	return(expected_values)
 end
