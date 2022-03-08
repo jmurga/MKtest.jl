@@ -102,11 +102,12 @@ function ABCreg(;analysis_folder::String,S::Int64,P::Int64=5,tol::Float64,abcreg
     sum_file   = filter(x -> occursin("summstat",x), readdir(analysis_folder,join=true));
 
     # Creating output names
-    out = analysis_folder .* "/out_" .* string.(1:size(a_file,1))
+    out = [analysis_folder .* "/out"]
+    # out = analysis_folder .* "/out_" .* string.(1:size(a_file,1))
 
 	r(a,s,o,abcreg=abcreg,P=P,S=S,tol=tol) = run(`$abcreg -d $a -p $s -P $P -S $S -t $tol -b $o`)
 
-	pmapbatch(r,a_file,sum_file,out);
+	r.(a_file,sum_file,out);
 end
 
 """
@@ -133,14 +134,14 @@ function bootstrap_data(s_file::Array{Float64,2},d_file::Array{Float64,2},replic
 	end
 end
 
-function open_sfs_div(x::Array{String,1},y::Array{String,1},dac::Vector{Int64},replicas::Int64,bootstrap::Bool)
+function open_sfs_div(x::Array{String,1},y::Array{String,1},dac::Vector{Int64},bootstrap::Union{Bool,Int64})
 
 	sfs = Array.(CSV.read.(x,DataFrame,header=false))
 	divergence = Array.(CSV.read.(y,DataFrame,header=false))
 
-	if bootstrap
-		sfs = repeat(sfs,replicas)
-		divergence = repeat(divergence,replicas)
+	if bootstrap != false
+		sfs = repeat(sfs,bootstrap)
+		divergence = repeat(divergence,bootstrap)
 		pr(x) = hcat(x[:,1],pois_rand.(x[:,2:end]))
 		sfs[2:end] .= pr.(sfs[2:end])
 	end

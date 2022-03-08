@@ -143,13 +143,27 @@ Estimate summary statistics using observed data and analytical rates. *analysis_
 # Output
  - Summary statistics to ABC inference
 """
-function summary_statistics(;param::parameters,h5_file::String,analysis_folder::String,summstat_size::Int64,replicas::Int64=1,bootstrap::Bool=false)
+function summary_statistics(;param::parameters,h5_file::String,analysis_folder::String,summstat_size::Int64,bootstrap::Union{Bool,Int64}=false)
 
 	#Opening files
 	s_file   = filter(x -> occursin("sfs",x), readdir(analysis_folder,join=true));
 	d_file   = filter(x -> occursin("div",x), readdir(analysis_folder,join=true));
 
-	sfs,divergence,α = open_sfs_div(s_file,d_file,param.dac,replicas,bootstrap);
+	if length(s_file) > 1 
+		b = false
+		l = length(s_file);
+		@warn "You have more than one SFS and divergence file. Please be sure you have on set of files to bootstrap manually your data."
+	else 
+		if bootstrap != false
+			b = bootstrap
+			l = length(s_file);
+		else
+			l = 1;
+			b = false
+		end		
+	end
+
+	sfs,divergence,α = MKtest.open_sfs_div(s_file,d_file,param.dac,b);
 
 	# Open rates
 	h         = jldopen(h5_file);
@@ -159,8 +173,8 @@ function summary_statistics(;param::parameters,h5_file::String,analysis_folder::
 	tmp_neut  = deepcopy(tmp["neut"]);
 	tmp_sel   = deepcopy(tmp["sel"]);
 
-	#Subset index
-	idx    = sample(1:size(tmp_model,1),summstat_size,replace=false);
+	# Subset index
+	idx    = sample(1:size(tmp_model,1),Int64(summstat_size/l),replace=false);
 	models = view(tmp_model,idx,:);
 	dsdn   = view(tmp_dsdn,idx,:);
 
@@ -172,7 +186,7 @@ function summary_statistics(;param::parameters,h5_file::String,analysis_folder::
 	sel  = view(s,idx,:);
 	
 
-    f(x,y,m=models,n=neut,s=sel,d=dsdn) = sampled_from_rates(m,x,y,n,s,d)
+	@everywhere f(x,y,m=models,n=neut,s=sel,d=dsdn) = MKtest.sampled_from_rates(m,x,y,n,s,d)
 
 	# Making summaries
 	expected_values = pmap(f,sfs,divergence);
@@ -181,14 +195,21 @@ function summary_statistics(;param::parameters,h5_file::String,analysis_folder::
 	w(x,name) = CSV.write(name,DataFrame(x,:auto),delim='\t',header=false);
 
 	# Controling outlier cases
-	flt_inf(e) = replace!(e, -Inf=>NaN)
-	flt_nan(e) = e[vec(.!any(isnan.(e),dims=2)),:]
-	
-	expected_values = flt_inf.(expected_values)
-	expected_values = flt_nan.(expected_values)
+	expected_values = pmap(filter_expected,expected_values)
 
-	map(w, α, analysis_folder * "/alphas_" .* string.(1:size(sfs,1)) .* ".txt");
-	pmap(w, expected_values,  analysis_folder * "/summstat_" .* string.(1:size(sfs,1)) .* ".txt");
+	w(vcat(α...), analysis_folder * "/alphas.txt");
+	w(vcat(expected_values...), analysis_folder * "/summstat.txt");
+	# map(w, α, analysis_folder * "/alphas_" .* string.(1:size(sfs,1)) .* ".txt");
+	# pmap(w, expected_values,  analysis_folder * "/summstat_" .* string.(1:size(sfs,1)) .* ".txt");
 
 	return(expected_values)
+end
+
+function filter_expected(x::Matrix{Float64})
+        
+    replace!(x, -Inf=>NaN)
+    x = x[vec(.!any(isnan.(x),dims=2)),:]
+    x = x[(x[:,3] .< 1),:]
+
+    return(x)
 end
