@@ -22,7 +22,7 @@ Function to parse polymorphism and divergence by subset of genes. The input data
  - `Array{Float64,2}`: Site Frequency Spectrum
  - `Array{Float64,1}`: Synonymous and non-synonymous divergence counts
 """
-function parse_sfs(;sample_size::Int64,data::String,gene_list::Union{Nothing,Matrix{String}}=nothing,sfs_columns::Array{Int64,1}=[3,5],div_columns::Array{Int64,1}=[6,7],bins::Union{Nothing,Int64}=nothing,isolines::Bool=false)
+function parse_sfs(;sample_size::Int64,data::Union{String,DataFrame},gene_list::Union{Nothing,Vector{String},Matrix{String}}=nothing,sfs_columns::Array{Int64,1}=[3,5],div_columns::Array{Int64,1}=[6,7],bins::Union{Nothing,Int64}=nothing,isolines::Bool=false)
 
 	g(x) = parse.(Float64,x[2:end-1])
 	
@@ -32,9 +32,13 @@ function parse_sfs(;sample_size::Int64,data::String,gene_list::Union{Nothing,Mat
 		s = (sample_size*2)
 	end
 	
-	freq = OrderedDict(round.(collect(1:(s-1))/s,digits=4) .=> 0)
+	freq = OrderedDict(round.(collect(1:(sm-1))/sm,digits=4) .=> 0)
 
-	df   = CSV.read(data,header=false,delim='\t',DataFrame)
+	if typeof(data) != String
+		df   = CSV.read(data,header=false,delim='\t',DataFrame)
+	else
+		df = data
+	end
 
 	if(!isnothing(gene_list))
 		df =  vcat([ df[df[:,1] .==i,:]  for i in gene_list]...);
