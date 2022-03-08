@@ -34,7 +34,7 @@ function parse_sfs(;sample_size::Int64,data::Union{String,DataFrame},gene_list::
 	
 	freq = OrderedDict(round.(collect(1:(s-1))/s,digits=4) .=> 0)
 
-	if typeof(data) != String
+	if typeof(data) == String
 		df   = CSV.read(data,header=false,delim='\t',DataFrame)
 	else
 		df = data
