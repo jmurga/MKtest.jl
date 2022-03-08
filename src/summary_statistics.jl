@@ -149,7 +149,7 @@ function summary_statistics(;param::parameters,h5_file::String,analysis_folder::
 	s_file   = filter(x -> occursin("sfs",x), readdir(analysis_folder,join=true));
 	d_file   = filter(x -> occursin("div",x), readdir(analysis_folder,join=true));
 
-	sfs,divergence,α = MKtest.open_sfs_div(s_file,d_file,param.dac,replicas,bootstrap);
+	sfs,divergence,α = open_sfs_div(s_file,d_file,param.dac,replicas,bootstrap);
 
 	# Open rates
 	h         = jldopen(h5_file);
@@ -172,10 +172,10 @@ function summary_statistics(;param::parameters,h5_file::String,analysis_folder::
 	sel  = view(s,idx,:);
 	
 
-    f(x,y,m=models,n=neut,s=sel,d=dsdn) = MKtest.sampled_from_rates(m,x,y,n,s,d)
+    f(x,y,m=models,n=neut,s=sel,d=dsdn) = sampled_from_rates(m,x,y,n,s,d)
 
 	# Making summaries
-	expected_values = pmapbatch(f,sfs,divergence);
+	expected_values = pmap(f,sfs,divergence);
 
     #Making summaries
 	w(x,name) = CSV.write(name,DataFrame(x,:auto),delim='\t',header=false);
