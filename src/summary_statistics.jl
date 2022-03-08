@@ -20,7 +20,7 @@ Divergence sampling from Poisson distribution. The expected neutral and selected
  - `Array{Int64,1}` containing the expected count of neutral and selected fixations.
 
 """
-function poisson_fixation(;observed_values::Array, λds::Array, λdn::Array,λweak::Array,λstrong::Array)
+function poisson_fixation(;observed_values::Vector{Int64}, λds::Vector{Float64}, λdn::Vector{Float64},λweak::Vector{Float64},λstrong::Vector{Float64})
 
 	ds = @. λds / (λds + λdn) * observed_values
 	dn = @. λdn / (λds + λdn) * observed_values
@@ -61,7 +61,7 @@ The success rate managing the Poisson distribution by the observed count each fr
  - `Array{Int64,2}` containing the expected total count of neutral and selected polymorphism.
 
 """
-function poisson_polymorphism(;observed_values::Array, λps::Array, λpn::Array)
+function poisson_polymorphism(;observed_values::Vector{Float64}, λps::Matrix{Float64}, λpn::Matrix{Float64})
 
 	# Neutral λ;
 	λ1 = @. λps / (λps + λpn) * observed_values
@@ -105,7 +105,7 @@ Ouput the expected values from the Poisson sampling process. Please check [`pois
 	sampled_from_rates(gammaL,gammaH,ppos_l,ppos_h,observedData,nopos)
 
 """
-function sampled_from_rates(models::Matrix{Float64},fs::Vector{Float64},d::Vector{Int64},neut::Matrix{Float64},sel::Matrix{Float64},dsdn::Matrix{Float64})
+function sampled_from_rates(models::SubArray,fs::Vector{Float64},d::Vector{Int64},neut::SubArray,sel::SubArray,dsdn::SubArray)
 
 	ds             = dsdn[:,1]
 	dn             = dsdn[:,2]
@@ -149,32 +149,30 @@ function summary_statistics(;param::parameters,h5_file::String,analysis_folder::
 	s_file   = filter(x -> occursin("sfs",x), readdir(analysis_folder,join=true));
 	d_file   = filter(x -> occursin("div",x), readdir(analysis_folder,join=true));
 
-	sfs,divergence,α = open_sfs_div(s_file,d_file,param.dac,replicas,bootstrap);
+	sfs,divergence,α = MKtest.open_sfs_div(s_file,d_file,param.dac,replicas,bootstrap);
 
-	#Open rates
-    h   = jldopen(h5_file);
-    tmp = h[string(param.N) * "/" * string(param.n)]
+	# Open rates
+	h         = jldopen(h5_file);
+	tmp       = h[string(param.N) * "/" * string(param.n)]
+	tmp_model = Array(deepcopy(tmp["models"]));
+	tmp_dsdn  = deepcopy(tmp["dsdn"]);
+	tmp_neut  = deepcopy(tmp["neut"]);
+	tmp_sel   = deepcopy(tmp["sel"]);
 
 	#Subset index
-    # idx  = sample(1:size(tmp["models"],1),summstat_size,replace=false)
-    idx    = pmapbatch(x-> sample(1:size(tmp["models"],1),x),fill(summstat_size,length(s_file)));
-    models = pmapbatch(x-> Array(view(tmp["models"],x,:)),idx);
-    dsdn   = pmapbatch(x-> Array(view(tmp["dsdn"],x,:)),idx);
-
-	# models = Array(view(tmp["models"],idx,:));
-	# dsdn   = Array(view(tmp["dsdn"],idx,:));
+	idx    = map(x-> sample(1:size(tmp_model,1),x),fill(summstat_size,length(s_file)));
+	models = map(x-> view(tmp_model,x,:),idx);
+	dsdn   = map(x-> view(tmp_dsdn,x,:),idx);
 
 	# Filtering polymorphic rate by dac
-	n    = hcat(map(x -> view(tmp["neut"][x],:),param.dac)...);
-	s    = hcat(map(x -> view(tmp["sel"][x],:),param.dac)...);
-	# neut = Array(view(n,idx,:));
-	# sel  = Array(view(s,idx,:));
-	neut = pmapbatch(x-> Array(view(n,x,:)),idx);
-	sel  = pmapbatch(x-> Array(view(s,x,:)),idx);
+	n    = hcat(map(x -> view(tmp_neut[x],:),param.dac)...);
+	s    = hcat(map(x -> view(tmp_sel[x],:),param.dac)...);
+
+	neut = map(x-> view(n,x,:),idx);
+	sel  = map(x-> view(s,x,:),idx);
 	
 	# Making summaries
-	# expected_values = sampled_from_rates(models,sfs[1],divergence[1],neut,sel,dsdn);
-	expected_values = pmapbatch(sampled_from_rates,models,sfs,divergence,neut,sel,dsdn);
+	expected_values = map(sampled_from_rates,models,sfs,[divergence,neut,sel,dsdn);
 
     #Making summaries
 	w(x,name) = CSV.write(name,DataFrame(x,:auto),delim='\t',header=false);
@@ -185,13 +183,8 @@ function summary_statistics(;param::parameters,h5_file::String,analysis_folder::
 	
 	expected_values = flt_inf.(expected_values)
 	expected_values = flt_nan.(expected_values)
-	# expected_values = expected_values[(expected_values[:,3] .> 0 ) .& (expected_values[:,3] .<1 ),:]
-	
-	# Writting ABCreg input
-	# w(vcat(α...), analysis_folder * "/alphas.txt");
-	# w(expected_values, analysis_folder * "/summstat.txt");
 
-	pmapbatch(w, α, analysis_folder * "/alphas_" .* string.(1:size(sfs,1)) .* ".txt");
+	map(w, α, analysis_folder * "/alphas_" .* string.(1:size(sfs,1)) .* ".txt");
 	pmapbatch(w, expected_values,  analysis_folder * "/summstat_" .* string.(1:size(sfs,1)) .* ".txt");
 
 	return(expected_values)
