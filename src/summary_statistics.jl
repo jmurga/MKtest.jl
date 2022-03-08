@@ -172,7 +172,7 @@ function summary_statistics(;param::parameters,h5_file::String,analysis_folder::
 	sel  = map(x-> view(s,x,:),idx);
 	
 	# Making summaries
-	expected_values = map(sampled_from_rates,models,sfs,[divergence,neut,sel,dsdn);
+	expected_values = map(sampled_from_rates,models,sfs,divergence,neut,sel,dsdn);
 
     #Making summaries
 	w(x,name) = CSV.write(name,DataFrame(x,:auto),delim='\t',header=false);
