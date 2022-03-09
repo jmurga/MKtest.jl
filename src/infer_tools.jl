@@ -24,16 +24,13 @@ Function to parse polymorphism and divergence by subset of genes. The input data
 """
 function parse_sfs(;sample_size::Int64,data::Union{String,DataFrame},gene_list::Union{Nothing,Vector{String},Matrix{String}}=nothing,sfs_columns::Array{Int64,1}=[3,5],div_columns::Array{Int64,1}=[6,7],bins::Union{Nothing,Int64}=nothing,isolines::Bool=false)
 
-	g(x) = parse.(Float64,x[2:end-1])
 	
 	if isolines
-		s = sample_size
+		s_size = sample_size
 	else
-		s = (sample_size*2)
+		s_size = (sample_size*2)
 	end
 	
-	freq = OrderedDict(round.(collect(1:(s-1))/s,digits=4) .=> 0)
-
 	if typeof(data) == String
 		df   = CSV.read(data,header=false,delim='\t',DataFrame)
 	else
@@ -41,24 +38,35 @@ function parse_sfs(;sample_size::Int64,data::Union{String,DataFrame},gene_list::
 	end
 
 	if(!isnothing(gene_list))
-		df =  vcat([ df[df[:,1] .==i,:]  for i in gene_list]...);
-	end
+		ids = @view df[:,1];
 
-	#=if(!isnothing(B))
-		df = df[df[:,end] .== B,:]
-		println(nrow(df))
-		tmp  = split.(df[:,sfs_columns], ",")
+		out = SubDataFrame[]
+		for c in eachcol(gene_list)
+			tmp = @view df[filter(!isnothing,indexin(c,ids)),:];
+			push!(out,tmp);
+		end
+		α, sfs, divergence = unzip(map(i-> get_pol_div(i,s_size,sfs_columns,div_columns,bins),out));
 	else
-	end=#
+		α, sfs, divergence = get_pol_div(df,sfs_columns,div_columns,bins);
+	end
 	
-	tmp  = split.(df[:,sfs_columns], ",")
+	return α, sfs, divergence
+end
 
-	pn   = sort!(OrderedDict(round.(reduce(vcat,tmp[:,1] .|> g),digits=4) |> countmap))
-	ps   = sort!(OrderedDict(round.(reduce(vcat,tmp[:,2] .|> g),digits=4) |> countmap))
+function get_pol_div(df_subset::Union{DataFrame,SubDataFrame},s_size::Int64,sfs_columns::Vector{Int64},div_columns::Vector{Int64},bins::Union{Nothing,Int64})
+	
+	g(x) = parse.(Float64,x[2:end-1])
+	
+	freq = OrderedDict(round.(collect(1:(s_size-1))/s_size,digits=4) .=> 0)
+
+	tmp  = split.(df_subset[:,sfs_columns], ",")
+
+	pn   = sort!(OrderedDict(countmap(round.(reduce(vcat,tmp[:,1] .|> g),digits=4))))
+	ps   = sort!(OrderedDict(countmap(round.(reduce(vcat,tmp[:,2] .|> g),digits=4))))
 
 	# Dn, Ds, Pn, Ps, sfs
-	Dn           = sum(df[:,div_columns[1]])
-	Ds           = sum(df[:,div_columns[2]])
+	Dn           = sum(df_subset[:,div_columns[1]])
+	Ds           = sum(df_subset[:,div_columns[2]])
 	Pn           = sum(values(pn))
 	Ps           = sum(values(ps))
 	sfs_pn        = reduce(vcat,values(merge(+,freq,pn)))
@@ -72,13 +80,11 @@ function parse_sfs(;sample_size::Int64,data::Union{String,DataFrame},gene_list::
 	else
         sfs   = hcat(freq.keys,merge(+,freq,pn).vals,merge(+,freq,ps).vals)
 	end
-
+	
 	scumu = cumulative_sfs(sfs)
-    α     = round.(1 .- (Ds/Dn .*  scumu[:,2] ./scumu[:,3]),digits=5)
-
+	α     = round.(1 .- (Ds/Dn .*  scumu[:,2] ./scumu[:,3]),digits=5)
 	return (α,sfs,[Dn,Ds])
 end
-
 """
 	ABCreg(analysis_folder, replicas, S, tol, abcreg)
 

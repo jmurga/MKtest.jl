@@ -145,71 +145,70 @@ Estimate summary statistics using observed data and analytical rates. *analysis_
 """
 function summary_statistics(;param::parameters,h5_file::String,analysis_folder::String,summstat_size::Int64,bootstrap::Union{Bool,Int64}=false)
 
-	#Opening files
+	# Opening files
 	s_file   = filter(x -> occursin("sfs",x), readdir(analysis_folder,join=true));
 	d_file   = filter(x -> occursin("div",x), readdir(analysis_folder,join=true));
 
 	if length(s_file) > 1 
 		b = false
 		l = length(s_file);
-		@warn "You have more than one SFS and divergence file. Please be sure you have on set of files to bootstrap manually your data."
+		if bootstrap != false
+			@warn "You have more than one SFS and divergence file. Please be sure you have on set of files to bootstrap manually your data."
+		end
 	else 
 		if bootstrap != false
 			b = bootstrap
-			l = length(s_file);
+			l = bootstrap;
 		else
 			l = 1;
 			b = false
 		end		
 	end
 
-	sfs,divergence,α = MKtest.open_sfs_div(s_file,d_file,param.dac,b);
+	sfs,divergence,α = open_sfs_div(s_file,d_file,param.dac,b);
+
+	if any(0 .∈ sfs) | any(0 .∈ divergence)
+		throw(ArgumentError("Your SFS contains 0 values at the selected DACs or the divergence is 0. Please consider to bin the SFS and re-estimate the rates using the selected bin as sample the new sample size."))
+	end
 
 	# Open rates
 	h         = jldopen(h5_file);
 	tmp       = h[string(param.N) * "/" * string(param.n)]
-	tmp_model = Array(deepcopy(tmp["models"]));
-	tmp_dsdn  = deepcopy(tmp["dsdn"]);
-	tmp_neut  = deepcopy(tmp["neut"]);
-	tmp_sel   = deepcopy(tmp["sel"]);
 
 	# Subset index
-	idx    = sample(1:size(tmp_model,1),Int64(summstat_size/l),replace=false);
-	models = view(tmp_model,idx,:);
-	dsdn   = view(tmp_dsdn,idx,:);
+	idx    = sample(1:size(tmp["models"],1),Int64(summstat_size/l),replace=false);
+	models = view(Array(tmp["models"]),idx,:);
+	dsdn   = view(Array(tmp["dsdn"]),idx,:);
 
 	# Filtering polymorphic rate by dac
-	n    = hcat(map(x -> view(tmp_neut[x],:),param.dac)...);
-	s    = hcat(map(x -> view(tmp_sel[x],:),param.dac)...);
+	n    = hcat(map(x -> view(tmp["neut"][x],:),param.dac)...);
+	s    = hcat(map(x -> view(tmp["sel"][x],:),param.dac)...);
 
 	neut = view(n,idx,:);
 	sel  = view(s,idx,:);
 	
-
-	@everywhere f(x,y,m=models,n=neut,s=sel,d=dsdn) = MKtest.sampled_from_rates(m,x,y,n,s,d)
+	f(x,y,m=models,n=neut,s=sel,d=dsdn) = sampled_from_rates(m,x,y,n,s,d)
 
 	# Making summaries
-	expected_values = pmap(f,sfs,divergence);
-
-    #Making summaries
-	w(x,name) = CSV.write(name,DataFrame(x,:auto),delim='\t',header=false);
+	expected_values = map(f,sfs,divergence);
 
 	# Controling outlier cases
-	expected_values = pmap(filter_expected,expected_values)
+	# expected_values = map(filter_expected,expected_values)
+	expected_values = filter_expected(vcat(expected_values...))
+
+	w(x,name) = CSV.write(name,DataFrame(x,:auto),delim='\t',header=false);
 
 	w(vcat(α...), analysis_folder * "/alphas.txt");
-	w(vcat(expected_values...), analysis_folder * "/summstat.txt");
-	# map(w, α, analysis_folder * "/alphas_" .* string.(1:size(sfs,1)) .* ".txt");
-	# pmap(w, expected_values,  analysis_folder * "/summstat_" .* string.(1:size(sfs,1)) .* ".txt");
-
+	w(expected_values, analysis_folder * "/summstat.txt");
+	
 	return(expected_values)
 end
 
 function filter_expected(x::Matrix{Float64})
-        
-    replace!(x, -Inf=>NaN)
-    x = x[vec(.!any(isnan.(x),dims=2)),:]
-    x = x[(x[:,3] .< 1),:]
+		
+	replace!(x, -Inf=>NaN)
+	x = x[vec(.!any(isnan.(x),dims=2)),:]
+	x = x[(x[:,3] .< 1),:]
 
-    return(x)
+	return(x)
 end
