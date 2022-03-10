@@ -24,7 +24,6 @@ Function to parse polymorphism and divergence by subset of genes. The input data
 """
 function parse_sfs(;sample_size::Int64,data::Union{String,DataFrame},gene_list::Union{Nothing,Vector{String},Matrix{String}}=nothing,sfs_columns::Array{Int64,1}=[3,5],div_columns::Array{Int64,1}=[6,7],bins::Union{Nothing,Int64}=nothing,isolines::Bool=false)
 
-	
 	if isolines
 		s_size = sample_size
 	else
@@ -47,9 +46,10 @@ function parse_sfs(;sample_size::Int64,data::Union{String,DataFrame},gene_list::
 		end
 		α, sfs, divergence = unzip(map(i-> get_pol_div(i,s_size,sfs_columns,div_columns,bins),out));
 	else
-		α, sfs, divergence = get_pol_div(df,sfs_columns,div_columns,bins);
+		α, sfs, divergence = get_pol_div(df,s_size,sfs_columns,div_columns,bins);
+		α = [α]; sfs = [sfs]; divergence = [divergence]
 	end
-	
+
 	return α, sfs, divergence
 end
 
@@ -73,17 +73,17 @@ function get_pol_div(df_subset::Union{DataFrame,SubDataFrame},s_size::Int64,sfs_
 	sfs_ps        = reduce(vcat,values(merge(+,freq,ps)))
 
 	if(!isnothing(bins))
-        sfs_pn = reduce_sfs(hcat(collect(1:(s-1)),sfs_pn),bins)[:,2]
-        sfs_ps = reduce_sfs(hcat(collect(1:(s-1)),sfs_ps),bins)[:,2]
+		sfs_pn = reduce_sfs(hcat(collect(1:(s-1)),sfs_pn),bins)[:,2]
+		sfs_ps = reduce_sfs(hcat(collect(1:(s-1)),sfs_ps),bins)[:,2]
 
-        sfs   = reduce_sfs(hcat(freq.keys,merge(+,freq,pn).vals,merge(+,freq,ps).vals),bins)
+		sfs   = reduce_sfs(hcat(freq.keys,merge(+,freq,pn).vals,merge(+,freq,ps).vals),bins)
 	else
-        sfs   = hcat(freq.keys,merge(+,freq,pn).vals,merge(+,freq,ps).vals)
+		sfs   = hcat(freq.keys,merge(+,freq,pn).vals,merge(+,freq,ps).vals)
 	end
 	
 	scumu = cumulative_sfs(sfs)
 	α     = round.(1 .- (Ds/Dn .*  scumu[:,2] ./scumu[:,3]),digits=5)
-	return (α,sfs,[Dn,Ds])
+	return (α,sfs,[Dn Ds])
 end
 """
 	ABCreg(analysis_folder, replicas, S, tol, abcreg)
@@ -103,41 +103,40 @@ Files containing posterior distributions from ABCreg
 """
 function ABCreg(;analysis_folder::String,S::Int64,P::Int64=5,tol::Float64,abcreg::String)
 	
-    # List alphas and summstat files
-    a_file     = filter(x -> occursin("alphas",x), readdir(analysis_folder,join=true));
-    sum_file   = filter(x -> occursin("summstat",x), readdir(analysis_folder,join=true));
+	# List alphas and summstat files
+	a_file     = filter(x -> occursin("alphas",x), readdir(analysis_folder,join=true));
+	sum_file   = filter(x -> occursin("summstat",x), readdir(analysis_folder,join=true));
 
-    # Creating output names
-    out = [analysis_folder .* "/out"]
-    # out = analysis_folder .* "/out_" .* string.(1:size(a_file,1))
+	# Creating output names
+	# out = [analysis_folder .* "/out"]
+	out = analysis_folder .* "/out_" .* string.(1:size(a_file,1))
 
 	r(a,s,o,abcreg=abcreg,P=P,S=S,tol=tol) = run(`$abcreg -d $a -p $s -P $P -S $S -t $tol -b $o`)
 
-	r.(a_file,sum_file,out);
+	progress_pmap(r,a_file,sum_file,out);
 end
 
 """
 	Bootstrap data following polyDFE manual
 """
-function bootstrap_data(s_file::Array{Float64,2},d_file::Array{Float64,2},replicas::Int64,outputFolder::String)
+function data_to_poisson(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{Int64}},dac::Vector{Int64},bootstrap::Union{Bool,Int64})
 	
-	# Open Data
-	sfs        = Array(CSV.read(s_file,DataFrame))
-	divergence = fill(Array(CSV.read(d_file,DataFrame)),replicas)
-	scumu      = fill(cumulative_sfs(sfs[:,2:end]),replicas)
-
-	# Bootstraping
-	b(x)       = pois_rand.(x)
-	bootstrap  = b.(scumu)
-
-	# Output
-	outSfs = @. output * "sfs" * string(1:replicas) * ".tsv"
-	outDiv = @. output * "div" * string(1:replicas) * ".tsv"
-	for i  = 1:replicas
-		tmp = hcat(sfs[:,1],bootstrap[i])
-		CSV.write(out,DataFrame(tmp),header=false)
-		CSV.write(out,DataFrame(divergence[i]),header=false)
+	if bootstrap != false
+		sfs         = repeat(sfs,bootstrap)
+		divergence  = repeat(divergence,bootstrap)
+		pr(x)       = hcat(x[:,1],pois_rand.(x[:,2:end]))
+		sfs[2:end] .= pr.(sfs[2:end])
 	end
+
+	scumu         = cumulative_sfs.(sfs)
+	f(x,d=dac)    = sum(x[:,2:3],dims=2)[d]
+	s             = f.(scumu)
+
+	d             = [[sum(divergence[i][1:2])] for i in eachindex(divergence)]
+	al(a,b,c=dac) = @. round(1 - (b[2]/b[1] * a[:,2]/a[:,3])[c],digits=5)
+	α = permutedims.(al.(scumu,divergence))
+
+	return(s,d,α)
 end
 
 function open_sfs_div(x::Array{String,1},y::Array{String,1},dac::Vector{Int64},bootstrap::Union{Bool,Int64})

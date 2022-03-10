@@ -27,7 +27,7 @@ CSV.write("analysis/tpg_sfs.tsv",DataFrame(sfs,:auto),delim='\t',header=false)
 CSV.write("analysis/tpg_div.tsv",DataFrame(permutedims(divergence),:auto),delim='\t',header=false)
 ```
 
-It is possible to directly subset genes IDs using Ensembl or Flybase id. Use a variable of type ```Matrix{String}``` into the argument *gene_list*
+It is possible to directly subset genes IDs using Ensembl or Flybase id. Use a variable of type ```Matrix{String} or Vector{String}``` into the argument *gene_list*. The input ```Matrix{String}``` will be subset by columns creating *ncol* SFS and divergence Matrix.
 
 ```julia
 download('https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/ensembl_list.txt','analysis/ensembl_list.txt')

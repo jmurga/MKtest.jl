@@ -105,7 +105,7 @@ Ouput the expected values from the Poisson sampling process. Please check [`pois
 	sampled_from_rates(gammaL,gammaH,ppos_l,ppos_h,observedData,nopos)
 
 """
-function sampled_from_rates(models::SubArray,fs::Vector{Float64},d::Vector{Int64},neut::SubArray,sel::SubArray,dsdn::SubArray)
+function sampled_from_rates(models::SubArray,fs::Vector{Float64},d::Vector{Int64},neut::SubArray,sel::SubArray,dsdn::SubArray,output::String)
 
 	ds             = dsdn[:,1]
 	dn             = dsdn[:,2]
@@ -124,8 +124,11 @@ function sampled_from_rates(models::SubArray,fs::Vector{Float64},d::Vector{Int64
 
 
 	expected_values = hcat(round.(alphas,digits=5),gn,sh,α_summaries);
+	
+	expected_values = filter_expected(expected_values);
 
-	return expected_values
+	w(x,name) = CSV.write(name,DataFrame(x,:auto),delim='\t',header=false);
+	w(expected_values,output)
 end
 
 """
@@ -136,36 +139,27 @@ Estimate summary statistics using observed data and analytical rates. *analysis_
 # Arguments
  - `param::parameters` : Mutable structure containing the models
  - `h5_file::String` : HDF5 containing solved models, fixation and polymorphic rates
- - `analysis_folder::String` : Folder containing the SFS and divergence files. It will be used to output the observed data and summary estatistics.
+ - `sfs::Vector{Matrix{Float64}}`: SFS matrix.
+ - `divergence::Vector{Matrix{Float64}}` : divergence matrix.
  - `summstat_size::Int64` : Number of summary statistics
  - `replicas::Int64` : Number of bootstrap replicas
  - `bootstrap::Bool` : Boolean to perform or not bootstrapping
 # Output
  - Summary statistics to ABC inference
 """
-function summary_statistics(;param::parameters,h5_file::String,analysis_folder::String,summstat_size::Int64,bootstrap::Union{Bool,Int64}=false)
+function summary_statistics(;param::parameters,h5_file::String,sfs::Vector,divergence::Vector,analysis_folder::String,summstat_size::Int64,bootstrap::Union{Bool,Int64}=false)
 
-	# Opening files
-	s_file   = filter(x -> occursin("sfs",x), readdir(analysis_folder,join=true));
-	d_file   = filter(x -> occursin("div",x), readdir(analysis_folder,join=true));
+	# # Opening files
+	# s_file   = filter(x -> occursin("sfs",x), readdir(analysis_folder,join=true));
+	# d_file   = filter(x -> occursin("div",x), readdir(analysis_folder,join=true));
 
-	if length(s_file) > 1 
-		b = false
-		l = length(s_file);
-		if bootstrap != false
-			@warn "You have more than one SFS and divergence file. Please be sure you have on set of files to bootstrap manually your data."
-		end
-	else 
-		if bootstrap != false
-			b = bootstrap
-			l = bootstrap;
-		else
-			l = 1;
-			b = false
-		end		
+	if length(sfs) > 1 & bootstrap != false
+		throw(ArgumentError("You have more than one SFS and divergence file. Please be sure you have on set of files to bootstrap manually your data."))
 	end
 
-	sfs,divergence,α = open_sfs_div(s_file,d_file,param.dac,b);
+
+	# sfs,divergence,α = open_sfs_div(s_file,d_file,param.dac,bootstrap);
+	sfs,divergence,α = data_to_poisson(sfs,divergence,param.dac,bootstrap);
 
 	if any(0 .∈ sfs) | any(0 .∈ divergence)
 		throw(ArgumentError("Your SFS contains 0 values at the selected DACs or the divergence is 0. Please consider to bin the SFS and re-estimate the rates using the selected bin as sample the new sample size."))
@@ -176,7 +170,7 @@ function summary_statistics(;param::parameters,h5_file::String,analysis_folder::
 	tmp       = h[string(param.N) * "/" * string(param.n)]
 
 	# Subset index
-	idx    = sample(1:size(tmp["models"],1),Int64(summstat_size/l),replace=false);
+	idx    = sample(1:size(tmp["models"],1),summstat_size,replace=false);
 	models = view(Array(tmp["models"]),idx,:);
 	dsdn   = view(Array(tmp["dsdn"]),idx,:);
 
@@ -187,21 +181,15 @@ function summary_statistics(;param::parameters,h5_file::String,analysis_folder::
 	neut = view(n,idx,:);
 	sel  = view(s,idx,:);
 	
-	f(x,y,m=models,n=neut,s=sel,d=dsdn) = sampled_from_rates(m,x,y,n,s,d)
-
 	# Making summaries
-	expected_values = map(f,sfs,divergence);
-
-	# Controling outlier cases
-	# expected_values = map(filter_expected,expected_values)
-	expected_values = filter_expected(vcat(expected_values...))
+	summ_output = analysis_folder .* "/summstat_" .* string.(1:size(sfs,1)) .* ".txt"
+	progress_pmap((x,y,z) -> sampled_from_rates(models,x,y,neut,sel,dsdn,z),sfs,divergence,summ_output);
 
 	w(x,name) = CSV.write(name,DataFrame(x,:auto),delim='\t',header=false);
-
-	w(vcat(α...), analysis_folder * "/alphas.txt");
-	w(expected_values, analysis_folder * "/summstat.txt");
+	α_output = analysis_folder * "/alphas_" .* string.(1:size(sfs,1)) .* ".txt";
 	
-	return(expected_values)
+	w.(α, α_output);
+
 end
 
 function filter_expected(x::Matrix{Float64})

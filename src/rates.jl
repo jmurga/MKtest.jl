@@ -87,7 +87,7 @@ function rates(;param::parameters,
 	n_binom  = [binom for i in 1:iterations];
 	
 	# Estimations to distributed workers
-	out = ParallelUtilities.pmapbatch(iter_rates,n_param, n_binom, n_tot, n_low, n_gh, n_gl, n_gam_neg, afac, θ, ρ);
+	out = progress_pmap(iter_rates,n_param, n_binom, n_tot, n_low, n_gh, n_gl, n_gam_neg, afac, θ, ρ);
 
 	# Remove the workers to free memory resources
 	#=for i in workers()

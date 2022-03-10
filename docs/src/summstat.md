@@ -52,12 +52,22 @@ h5["1000/661/dac"]
  1000
 ```
 
-To standardize the summary statistic estimation, the function ```MKtest.summaryStatsFromRates``` will search and read the SFS and divergence files given a folder. Please be sure that you write the SFS and divergence files (check [Parsing genomic data](input.md)) using the prefix *sfs* and *div* to read the files correctly. Otherwise, the function will not read the files correctly.
-
-We include the argument ```bootstrap``` to perform bootstrap analysis following [polyDFE](https://github.com/paula-tataru/polyDFE) manual. In the following example we boostrap the SFS and divegence file 100 times subseting 10^5 summary statistic for each dataset:
+The function ```MKtest.summary_statistics``` use the SFS and divergence Matrix output from ```MKtest.parse_sfs```. We include the argument ```bootstrap``` to perform bootstrap analysis following [polyDFE](https://github.com/paula-tataru/polyDFE) manual. In the following example we boostrap the SFS and divegence file 100 times subseting 10^5 summary statistic for each dataset:
 
 ```julia
-@time summstat = MKtest.summary_statistics(param=adap,h5_file="analysis/rates.jld2",analysis_folder="analysis/",summstat_size=10^5,replicas=100,bootstrap=true);
+@time summstat = MKtest.summary_statistics(param=adap,h5_file="analysis/rates.jld2",sfs,divergence,analysis_folder="analysis/",summstat_size=10^5,replicas=100,bootstrap=true);
 ```
 
-The function will create a summary statistic file and the observed data file (*summaries.txt* and *alphas.txt* respectively). Both files will be used to perform the ABC inference. Each line in *alphas.txt* contains the $\alpha_(x)$ estimations from the bootstrapped SFS.
+Nonetheless, you can read your SFS and divergence files using the packages CSV and DataFrames to create the input Matrix. In such case, please be sure that sfs and divergence arguments are of type ```Vector``` using square braces (```[]```) comprehesion
+
+```
+using CSV, DataFrames
+sfs = CSV.read("/path/to/sfs_file.txt", header=false, DataFrame) |> Matrix
+divergence = CSV.read("/path/to/divergence_file.txt", header=false, DataFrame) |> Matrix
+
+# Note we modified both variables into a Vector using square braces ([]) comprehesion
+@time summstat = MKtest.summary_statistics(param=adap,h5_file="analysis/rates.jld2",sfs=[sfs],divergence=[divergence],analysis_folder="analysis/",summstat_size=10^5,replicas=100,bootstrap=true);
+
+```
+
+The function will create summary statistic files and the observed data files (*summaries_N.txt* and *alpha_N.txt* respectively). Both files will be used to perform the ABC inference. Each file will be used to infer $\alpha$ using the bootstrapped SFS.
