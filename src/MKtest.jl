@@ -1,6 +1,6 @@
 module MKtest
 
-	using Parameters, SparseArrays, Distributed, CSV, JLD2, DataFrames, ProgressMeter, Quadmath, GZip, StatsBase, Unzip, ThreadsX
+	using Parameters, SparseArrays, Distributed, CSV, JLD2, DataFrames, ProgressMeter, Quadmath, GZip, StatsBase, Unzip, ThreadsX, ParallelUtilities
 
 	# Analytical solutions
 	import Roots: find_zero

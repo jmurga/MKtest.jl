@@ -90,7 +90,7 @@ function rates(;param::parameters,
 	if threads
 		out = ThreadsX.map(iter_rates,n_param, n_binom, n_tot, n_low, n_gh, n_gl, n_gam_neg, afac, θ, ρ);
 	else
-		out = progress_pmap(iter_rates,n_param, n_binom, n_tot, n_low, n_gh, n_gl, n_gam_neg, afac, θ, ρ);
+		out = pmapbatch(iter_rates,n_param, n_binom, n_tot, n_low, n_gh, n_gl, n_gam_neg, afac, θ, ρ);
 	end
 
 	# Remove the workers to free memory resources
