@@ -9,11 +9,9 @@ julia abcmk_cli.jl
 ```bash
 See --help of each command for usages  
   rates  
-  parseTgpData  
-  parseDgnData  
+  data
   summaries  
-  abcInference  
-  plotMap  
+  inference  
 ```
 
 To reproduce the examples you can follow the steps described at [Empirical estimation](https://jmurga.github.io/MKtest.jl/dev/empirical/#Computational-pipeline-1) section

@@ -116,7 +116,7 @@ Please check the documentation to get more info https://jmurga.github.io/MKtest.
 
 	# Check if bins or genelist are defined
 	@eval if $gene_list != "false"
-		@eval g_list = CSV.read($gene_list,DataFrame,header=false) |> Array
+		@eval g_list = String.(Array(CSV.read($gene_list,DataFrame,header=false)))[:,2:end]
 	else
 		g_list = nothing
 	end

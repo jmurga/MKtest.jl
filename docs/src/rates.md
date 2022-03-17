@@ -79,7 +79,7 @@ Now the variable ```adap``` contains sample size, DAC and DFE information. The f
 ```julia
 @doc MKtest.rates
   Function to solve randomly N scenarios. The function will create N models, defined by
-  Analytical.parameters(), to estimate analytically fixation and polymorphic rates for each
+  MKtest.parameters(), to estimate analytically fixation and polymorphic rates for each
   model. The rates will be used to compute summary statistics required at ABC. The function
   output a HDF5 file containing the solved models, the selected DAC and the analytical
   rates.

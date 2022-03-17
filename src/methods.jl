@@ -40,7 +40,7 @@ Function to estimate the imputedMK
 # Returns
  - `Dict: Dictionary containing results
 """
-function impMK(;sfs::Matrix{Float64},divergence::Array,m::T,cutoff::Float64=0.15) where {T<:Union{Nothing,Array}}
+function imputedMK(;sfs::Matrix{Float64},divergence::Array,m::T,cutoff::Float64=0.15) where {T<:Union{Nothing,Array}}
 
 	output = OrderedDict{String,Float64}()
 

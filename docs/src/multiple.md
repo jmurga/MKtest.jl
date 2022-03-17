@@ -25,11 +25,10 @@ download("https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/vip_lis
 download("https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/nonvip_list.txt","analysis/nonvips/nonvip_list.txt")
 ```
 
- - Whole-Genome dataset
-
 Now we are going to parse our three dataset to output the SFS and divergence files into each analysis folder. We we follow the example provided at [Input Data](input.data) section. Once you have the data parsed, you can estimate the summary statistic following [Summary statistic](summstat.md) section. Load the rates and select a DAC before to continue the analysis. And finally you can perform the ABC inference using ABCreg or another ABC software using the files *alphas.txt* and *summaries.txt* deposited in each folder. We will perform the inference using ABCreg. Please compile ABCreg before to perform the execution as described in the [Installation](index.md)
 
  - Whole-Genome dataset
+ 
 ```julia
 alpha, sfs, divergence = MKtest.parse_sfs(sample_size = 661, data = "analysis/tgp.txt")
 

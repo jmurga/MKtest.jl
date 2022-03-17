@@ -40,7 +40,7 @@ function parse_sfs(;sample_size::Int64,data::Union{String,DataFrame},gene_list::
 		ids = @view df[:,1];
 
 		out = SubDataFrame[]
-		for c in eachcol(gene_list)
+		for c in eachrow(gene_list)
 			tmp = @view df[filter(!isnothing,indexin(c,ids)),:];
 			push!(out,tmp);
 		end
