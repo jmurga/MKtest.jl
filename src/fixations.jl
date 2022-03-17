@@ -9,7 +9,7 @@
 
  - fix_neut(param)
 
-Expected neutral fixations rate reduce by B-value.
+Expected neutral fixations rate reduce by B value.
 
 ```math
 \\mathbb{E}[D_{s}] = (1 - p_{-} - p_{+}) B \\frac{1}{2N}
