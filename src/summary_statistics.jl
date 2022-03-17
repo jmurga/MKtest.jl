@@ -22,6 +22,7 @@ Divergence sampling from Poisson distribution. The expected neutral and selected
 """
 function poisson_fixation(;observed_values::Vector{Int64}, λds::Vector{Float64}, λdn::Vector{Float64},λweak::Vector{Float64},λstrong::Vector{Float64})
 
+
 	ds = @. λds / (λds + λdn) * observed_values
 	dn = @. λdn / (λds + λdn) * observed_values
 	dweak = @. λweak / (λds + λdn) * observed_values
@@ -122,7 +123,6 @@ function sampled_from_rates(models::SubArray,fs::Vector{Float64},d::Vector{Int64
 	## Alpha from expected values. Used as summary statistics
 	α_summaries = @. round(1 - ((exp_ds/exp_dn) * (exp_pn/exp_ps)'),digits=5);
 
-
 	expected_values = hcat(round.(alphas,digits=5),gn,sh,α_summaries);
 	
 	expected_values = filter_expected(expected_values);
@@ -147,19 +147,16 @@ Estimate summary statistics using observed data and analytical rates. *analysis_
 # Output
  - Summary statistics to ABC inference
 """
-function summary_statistics(;param::parameters,h5_file::String,sfs::Vector,divergence::Vector,analysis_folder::String,summstat_size::Int64,bootstrap::Union{Bool,Int64}=false)
+function summary_statistics(;param::parameters,h5_file::String,sfs::Vector,divergence::Vector,analysis_folder::String,summstat_size::Int64,bootstrap::Union{Bool,Int64}=false,threads::Bool=false)
 
 	# # Opening files
-	# s_file   = filter(x -> occursin("sfs",x), readdir(analysis_folder,join=true));
-	# d_file   = filter(x -> occursin("div",x), readdir(analysis_folder,join=true));
-
 	if length(sfs) > 1 & bootstrap != false
 		throw(ArgumentError("You have more than one SFS and divergence file. Please be sure you have on set of files to bootstrap manually your data."))
 	end
 
 
 	# sfs,divergence,α = open_sfs_div(s_file,d_file,param.dac,bootstrap);
-	sfs,divergence,α = data_to_poisson(sfs,divergence,param.dac,bootstrap);
+	sfs,divergence,α = MKtest.data_to_poisson(sfs,divergence,param.dac,bootstrap);
 
 	if any(0 .∈ sfs) | any(0 .∈ divergence)
 		throw(ArgumentError("Your SFS contains 0 values at the selected DACs or the divergence is 0. Please consider to bin the SFS and re-estimate the rates using the selected bin as sample the new sample size."))
@@ -183,7 +180,12 @@ function summary_statistics(;param::parameters,h5_file::String,sfs::Vector,diver
 	
 	# Making summaries
 	summ_output = analysis_folder .* "/summstat_" .* string.(1:size(sfs,1)) .* ".txt"
-	progress_pmap((x,y,z) -> sampled_from_rates(models,x,y,neut,sel,dsdn,z),sfs,divergence,summ_output);
+
+	if threads
+		ThreadsX.map((x,y,z) -> sampled_from_rates(models,x,y,neut,sel,dsdn,z),sfs,divergence,summ_output);
+	else
+		progress_pmap((x,y,z) -> sampled_from_rates(models,x,y,neut,sel,dsdn,z),sfs,divergence,summ_output);
+	end
 
 	w(x,name) = CSV.write(name,DataFrame(x,:auto),delim='\t',header=false);
 	α_output = analysis_folder * "/alphas_" .* string.(1:size(sfs,1)) .* ".txt";

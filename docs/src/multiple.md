@@ -11,92 +11,66 @@ addprocs(7)
 @everywhere using MKtest
 using CSV, DataFrames, JLD2
 
-run(`mkdir -p analysis/wg/ analysis/vips/ analysis/nonvips/`)
+adap = MKtest.parameters(n=661,dac=[2,4,5,10,20,50,200,661,925])
+
+mkpath("analysis/wg/")
+mkpath("analysis/vips/")
+mkpath("analysis/nonvips/")
 ```
 
 Once you have the folder please download from our repository the files containing the VIPs and Non-VIPs ids.
 
 ```julia
-run(`curl -o analysis/vips/vipList.txt https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/vipList.txt`)
-run(`curl -o analysis/nonvips/nonvipList.txt https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/nonvipList.txt`)
+download("https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/vip_list.txt","analysis/vips/vip_list.txt")
+download("https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/nonvip_list.txt","analysis/nonvips/nonvip_list.txt")
 ```
 
-Now we are going to parse our three dataset to output the SFS and divergence files into each analysis folder. We we follow the example provided at [Input Data](input.data) section. 
+ - Whole-Genome dataset
+
+Now we are going to parse our three dataset to output the SFS and divergence files into each analysis folder. We we follow the example provided at [Input Data](input.data) section. Once you have the data parsed, you can estimate the summary statistic following [Summary statistic](summstat.md) section. Load the rates and select a DAC before to continue the analysis. And finally you can perform the ABC inference using ABCreg or another ABC software using the files *alphas.txt* and *summaries.txt* deposited in each folder. We will perform the inference using ABCreg. Please compile ABCreg before to perform the execution as described in the [Installation](index.md)
 
  - Whole-Genome dataset
 ```julia
-alpha, sfs, divergence = MKtest.parseSfs(sampleSize = 661, data = "analysis/tgp.txt")
-CSV.write("analysis/wg/sfsTgp.tsv",DataFrame(sfs,:auto),delim='\t',header=false)
-CSV.write("analysis/wg/divTgp.tsv",DataFrame(permutedims(divergence),:auto),delim='\t',header=false)
+alpha, sfs, divergence = MKtest.parse_sfs(sample_size = 661, data = "analysis/tgp.txt")
+
+@time summstat = MKtest.summary_statistics(param=adap,sfs=sfs,divergence=divergence,h5_file="analysis/rates.jld2",analysis_folder="analysis/wg/",summstat_size=10^5,bootstrap=100);
+
+MKtest.ABCreg(analysis_folder="analysis/wg/",P=5,S=size(adap.dac,1),tol=0.025,abcreg="/home/jmurga/ABCreg/src/reg");
 ```
 
  - VIPs dataset
 ```julia
-vipsList = CSV.read("analysis/vips/vipList.txt",DataFrame) |> Array
+vips = String.(CSV.read("analysis/vips/vip_list.txt",header=false,DataFrame) |> Array)
 
-alpha, sfs, divergence = MKtest.parseSfs(sampleSize = 661, data = "analysis/tgp.txt",geneList=vipsList)
-CSV.write("analysis/vips/sfsTgp.tsv",DataFrame(sfs,:auto),delim='\t',header=false)
-CSV.write("analysis/vips/divTgp.tsv",DataFrame(permutedims(divergence),:auto),delim='\t',header=false)
+alpha, sfs, divergence = MKtest.parse_sfs(sample_size = 661, data = "analysis/tgp.txt",gene_list=vips)
+
+@time summstat = MKtest.summary_statistics(param=adap,sfs=sfs,divergence=divergence,h5_file="analysis/rates.jld2",analysis_folder="analysis/vips/",summstat_size=10^5,bootstrap=100);
+
+MKtest.ABCreg(analysis_folder="analysis/vips/",P=5,S=size(adap.dac,1),tol=0.025,abcreg="/home/jmurga/ABCreg/src/reg");
 ```
 
  - Non-VIPs dataset
 ```julia
-nonvipsList = CSV.read("analysis/nonvips/nonvipList.txt",DataFrame) |> Array
+nonvips_list = String.(CSV.read("analysis/nonvips/nonvip_list.txt",DataFrame) |> Array)
 
-alpha, sfs, divergence = MKtest.parseSfs(sampleSize = 661, data = "analysis/tgp.txt",geneList=nonvipsList)
-CSV.write("analysis/nonvips/sfsTgp.tsv",DataFrame(sfs,:auto),delim='\t',header=false)
-CSV.write("analysis/nonvips/divTgp.tsv",DataFrame(permutedims(divergence),:auto),delim='\t',header=false)
-```
+alpha, sfs, divergence = MKtest.parse_sfs(sample_size = 661, data = "analysis/tgp.txt",gene_list=nonvips_list)
 
-Once you have the data parsed, you can estimate the summary statistic following [Summary statistic](summstat.md) section. Load the rates and select a DAC before to continue the analysis
+@time summstat = MKtest.summary_statistics(param=adap,sfs=sfs,divergence=divergence,h5_file="analysis/rates.jld2",analysis_folder="analysis/nonvips/",summstat_size=10^5,bootstrap=100);
 
-```julia
-h5file   = jldopen("analysis/rates.jld2")
-adap = MKtest.parameters(n=661,dac=[2,4,5,10,20,50,200,661,925])
-```
+MKtest.ABCreg(analysis_folder="analysis/nonvips/",P=5,S=size(adap.dac,1),tol=0.025,abcreg="/home/jmurga/ABCreg/src/reg");
 
- - Whole-Genome dataset
-```julia
-@time summstat = MKtest.summaryStatsFromRates(param=adap,rates=h5file,analysisFolder="analysis/wg/",summstatSize=10^6,replicas=100,bootstrap=true);
-```
-
- - VIPs dataset
-```julia
-@time summstat = MKtest.summaryStatsFromRates(param=adap,rates=h5file,analysisFolder="analysis/vips/",summstatSize=10^6,replicas=100,bootstrap=true);
-```
-
- - Non-VIPs dataset
-```julia
-@time summstat = MKtest.summaryStatsFromRates(param=adap,rates=h5file,analysisFolder="analysis/nonvips/",summstatSize=10^6,replicas=100,bootstrap=true);
-```
-
-Now you can perform the ABC inference using ABCreg or another ABC software using the files *alphas.txt* and *summaries.txt* deposited in each folder. We will perform the inference using ABCreg. Please compile ABCreg before to perform the execution as described in the [Installation](index.md)
-
- - Whole-Genome dataset
-```julia
-MKtest.ABCreg(analysisFolder="analysis/wg/",S=size(adap.dac,1),tol=0.001,abcreg="/home/jmurga/ABCreg/src/reg");
-```
-
- - VIPs dataset
-```julia
-MKtest.ABCreg(analysisFolder="analysis/vips/",S=size(adap.dac,1),tol=0.001,abcreg="/home/jmurga/ABCreg/src/reg");
-```
-
- - Non-VIPs dataset
-```julia
-MKtest.ABCreg(analysisFolder="analysis/nonvips/",S=size(adap.dac,1),tol=0.001,abcreg="/home/jmurga/ABCreg/src/reg");
 ```
 
 Once the posterior distributions are estimated you can perform the Maximum-A-Posterior (MAP) estimates. We performed the MAP estimates following ABCreg examples. Please be sure you have installed R and the packages(ggplot2, locfit and data.table). This packages are already installed in Docker and Singularity images. Load the R functions to estimate and plot MAP executing the following command
 
 ```julia
-MKtest.sourcePlotMapR(script="analysis/script.jl")
+MKtest.source_plot_map_r("analysis/script.jl")
 ```
 
  - Whole-Genome dataset
 ```julia
-tgpmap = MKtest.plotMap(analysisFolder="analysis/wg/")
-DataFrames.describe(tgpmap)
+tgpmap = MKtest.plot_map(analysis_folder="analysis/wg/");
+DataFrames.describe(tgpmap[2])
 
 5×7 DataFrame
  Row │ variable  mean          min          median        max          nmissing  eltype   
@@ -113,8 +87,8 @@ DataFrames.describe(tgpmap)
 
  - VIPs dataset
 ```julia
-vipsmap = MKtest.plotMap(analysisFolder="analysis/vips/")
-DataFrames.describe(vipsmap)
+vipsmap = MKtest.plot_map(analysis_folder="analysis/vips/");
+DataFrames.describe(vipsmap[2])
 
 5×7 DataFrame
  Row │ variable  mean        min          median      max          nmissing  eltype   
@@ -129,8 +103,8 @@ DataFrames.describe(vipsmap)
 
  - Non-VIPs dataset
 ```julia
-nonvipsmap = MKtest.plotMap(analysisFolder="analysis/nonvips/")
-DataFrames.describe(nonvipsmap)
+nonvipsmap = MKtest.plot_map(analysis_folder="analysis/nonvips/");
+DataFrames.describe(nonvipsmap[2])
 
 5×7 DataFrame
  Row │ variable  mean          min          median        max          nmissing  eltype   

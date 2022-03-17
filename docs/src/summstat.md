@@ -55,7 +55,7 @@ h5["1000/661/dac"]
 The function ```MKtest.summary_statistics``` use the SFS and divergence Matrix output from ```MKtest.parse_sfs```. We include the argument ```bootstrap``` to perform bootstrap analysis following [polyDFE](https://github.com/paula-tataru/polyDFE) manual. In the following example we boostrap the SFS and divegence file 100 times subseting 10^5 summary statistic for each dataset:
 
 ```julia
-@time summstat = MKtest.summary_statistics(param=adap,h5_file="analysis/rates.jld2",sfs,divergence,analysis_folder="analysis/",summstat_size=10^5,replicas=100,bootstrap=true);
+@time summstat = MKtest.summary_statistics(param=adap,h5_file="analysis/rates.jld2",sfs=sfs,divergence=divergence,analysis_folder="analysis/",summstat_size=10^5,bootstrap=100);
 ```
 
 Nonetheless, you can read your SFS and divergence files using the packages CSV and DataFrames to create the input Matrix. In such case, please be sure that sfs and divergence arguments are of type ```Vector``` using square braces (```[]```) comprehesion

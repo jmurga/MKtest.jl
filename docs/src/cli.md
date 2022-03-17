@@ -23,14 +23,13 @@ To perform the rate estimations you can use the function ```rates``` at the CLI.
 
 ```julia
 julia abcmk_cli.jl rates --help
-```
-
-```
-julia abcmk_cli.jl rates --samples 661 --gamNeg -1000,-200 --gL 1,10 --gH 400,1000 --rho 0.001 --theta 0.001 --solutions 1000000 --output rates.jld2 --dac 1,2,4,5,10,20,50,100,200,400,500,661,925,1000  --nthreads 7
-
 Function to solve fixation and polymorphic rates analitically. The function will create N random models from prior values. Use the arguments to defined the input range for each parameter.
 
-If rho and/or theta are set to nothing, the function will input random values given the range 0.0005:0.0005:0.01. Otherwise you can fix the values. If gL is set to nothing, the function will not account the role of the weakly selected alleles in the estimation.
+If rho and/or theta are set to nothing, the function will input random values given the range 0.0005:0.0005:0.01. Otherwise you can fix the values.
+
+If gL is set to nothing, the function will not account the role of the weakly selected alleles in the estimation.
+
+If scheduler is set to threads the software will be run using multi-threading, not distributed computing. Please be sure you start up Julia using the same number of threads as the argument nprocs using the option julia -J nprocs
 
 The function returns a HDF5 file containing models solved and rates. The rates will be used to compute summary statistics required at ABC.
 
@@ -38,19 +37,19 @@ Please check the documentation to get more info about models parameters or detai
 
 Optional Arguments:
   --ne: Int64 (default: 1000)
-  --samples: Int64 (default: 500)
-  --gamNeg: String (default: -1000,-200)
+  --samples: Int64 (default: 661)
+  --alpha: String (default: 0.1,0.9)
+  --gam-neg: String (default: -1000,-200)
   --gL: String (default: 5,10)
   --gH: String (default: 400,1000)
-  --dac: String (default: 2,4,5,10,20,50,200,500,700)
+  --dac: String (default: 1,2,4,5,10,20,50,100,200,400,500,661,925,1000)
   --shape: Float64 (default: 0.184)
   --rho: String (default: nothing)
   --theta: String (default: nothing)
-  --solutions: Int64 (default: 100000)
+  --iterations: Int64 (default: 100000)
   --output: String (default: /home/jmurga/rates.jld2)
   --scheduler: String (default: local)
-  --nthreads: Int64 (default: 1)
-
+  --nprocs: Int64 (default: 1)
 ```
 
 If you are going to perform the estimation in a HPC, please set the variable ```scheduler``` using the name of the HPC task manager. By default the value is set to ```local```
@@ -59,17 +58,23 @@ If you are going to perform the estimation in a HPC, please set the variable ```
 time julia abcmk_cli.jl rates --samples 661 --gamNeg -2000,-200 --gL 1,10 --gH 200,2000 --rho 0.001 --theta 0.001 --solutions 100000 --output analysis/rates.jld2 --dac 1,2,4,5,10,20,50,100,200,400,500,661,925,1000 --nthreads 7 --scheduler local
 ```
 
+If you are going to perform the estimation in an laptop, please set the variable ```scheduler``` to ```threads``` and start julia using the same number of threads as defined in the variable ```nprocs```
+
+```bash
+nprocs=7
+julia -t${nprocs} abcmk_cli.jl 
+
 ## Parse data into new folder
 To estimate summary statistics, you need to provide empirical SFS and divergence files. As explained in section [data](data.md), you can directly parse TGP or DGN data using our module. Nonetheless, you can input any other SFS and divergence file.
 
-The function ```parseData``` will create a folder containing TGP or DGN rawdata, parsed SFS and divergence files. Otherwise you can specify an exisiting folder.
+The function ```data``` will create a folder containing TGP or DGN raw data, parsed SFS and divergence files. Otherwise you can specify an exisiting folder.
 
 ```bash
-julia abcmk_cli.jl parseData --help
+julia abcmk_cli.jl data --help
 ```
 
 ```bash
-julia abcmk_cli.jl parseData --analysisFolder analysis/ --geneList analysis/dnaVipsList.txt
+julia abcmk_cli.jl data --analysis_folder analysis/ --gene_list analysis/dna_vips.txt
 
 Function to parse polymorphic and divergence data from Uricchio et. al (2019) and Murga-Moreno et al (2019). Please input a path to create a new analysis folder. You can filter the dataset using a file containing a list of Ensembl IDs. 
 
@@ -78,17 +83,17 @@ The function returns files containing raw polymorphic and divergence data, parse
 Please check the documentation to get more info https://jmurga.github.io/MKtest.jl/dev/cli/
 
 Optional Arguments:
-  --analysisFolder: String (default: <folder>)
+  --analysis_folder: String (default: <folder>)
   --dataset: String (default: tgp)
-  --geneList: String (default: false)
+  --gene_list: String (default: false)
   --bins: String (default: false)
 ```
 
 ```bash
-julia abcmk_cli.jl parseData --analysisFolder analysis/
+julia abcmk_cli.jl data --analysis_folder analysis/
 ```
 
-Remember you can use the argument ```geneList``` to subset genes from TGP or DGN data using a list of Ensembl or Flybase ID. Please check [Multiple dataset](https://jmurga.github.io/MKtest.jl/dev/multiple/) to get more info.
+Remember you can use the argument ```gene_list``` to subset genes from TGP or DGN data using a list of Ensembl or Flybase ID. Please check [Multiple dataset](https://jmurga.github.io/MKtest.jl/dev/multiple/) to get more info.
 
 ## Estimate summary statistics
 
@@ -100,7 +105,7 @@ julia abcmk_cli summaries --help
 ```
 
 ```bash
-julia abcmk_cli.jl summaries --analysisFolder analysis/ --rates analysis/rates.jld2 --samples 661 --dac 2,4,5,10,20,50,200,661,925 --summstatSize 1000000
+julia abcmk_cli.jl summaries --analysis_folder analysis/ --rates analysis/rates.jld2 --samples 661 --dac 2,4,5,10,20,50,200,661,925 --summstatSize 1000000
 
 
 Estimate summary statistics from analytical rates. You must provide a path containing the parsed SFS and divergence file.
@@ -110,7 +115,7 @@ The function returns files containing bootstrapped datasets (alphas.txt) and sum
 Check the documentation to get more info https://jmurga.github.io/MKtest.jl/dev/cli
 
 Optional Arguments:
-  --analysisFolder: String (default: <folder>)
+  --analysis_folder: String (default: <folder>)
   --rates: String (default: rates.jld2)
   --ne: Int64 (default: 1000)
   --samples: Int64 (default: 500)
@@ -122,10 +127,10 @@ Optional Arguments:
   --nthreads: Int64 (default: 1)
 ```
 
-The function will output observed data bootstraped (*alphas.txt*) and summary statistics (*summaries.txt*) in the analysisFolder. These file will be used at ABC inference to generate posterior distributions.
+The function will output observed data bootstraped (*alphas.txt*) and summary statistics (*summaries.txt*) in the analysis_folder. These file will be used at ABC inference to generate posterior distributions.
 
 ```bash
-julia abcmk_cli.jl summaries --analysisFolder analysis/ --rates  analysis/rates.jld2 --samples 661 --replicas 100 --summstatSize 100000 --dac 2,4,5,10,20,50,200,661,925
+julia abcmk_cli.jl summaries --analysis_folder analysis/ --rates  analysis/rates.jld2 --samples 661 --replicas 100 --summstatSize 100000 --dac 2,4,5,10,20,50,200,661,925
 ```
 
 ## Perform ABC inference
@@ -143,7 +148,7 @@ It is possible to perform the inference through Julia. The function will output 
 
 
 ```bash
-julia abcmk_cli.jl abcInference --analysisFolder analysis/ --S 9 --tol 0.01 --ABCreg /home/jmurga/ABCreg/src/reg
+julia abcmk_cli.jl abcInference --analysis_folder analysis/ --S 9 --tol 0.01 --ABCreg /home/jmurga/ABCreg/src/reg
 ```
 
 ## Estimate Maximum-A-Posteriori and plot using R. 
@@ -154,7 +159,6 @@ We used R to estimate the Maximum-A-Posteriori (MAP) from posterior distribution
 
 If you will perform MAP estimates and plot using our module, be sure you have installed R and the following packages: ggplot2 and data.table, locfit. 
 
-
 ```bash
-julia -e 'using MKtest, RCall, GZip, DataFrames, CSV;MKtest.sourcePlotMapR(script="analysis/script.jl"); MKtest.plotMap(analysisFolder="analysis/");'
+julia -e 'using MKtest, RCall, GZip, DataFrames, CSV;MKtest.sourcePlotMapR(script="analysis/script.jl"); MKtest.plotMap(analysis_folder="analysis/");'
 ``` 

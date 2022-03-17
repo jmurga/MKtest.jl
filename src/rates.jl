@@ -28,7 +28,7 @@ function rates(;param::parameters,
 				theta::Union{Float64,Nothing}=0.001,
 				rho::Union{Float64,Nothing}=0.001,
 				iterations::Int64,
-				output::String) where S <: Union{Array{Int64,1},UnitRange{Int64}}
+				output::String,threads::Bool=false) where S <: Union{Array{Int64,1},UnitRange{Int64}}
 
 
 
@@ -87,7 +87,11 @@ function rates(;param::parameters,
 	n_binom  = [binom for i in 1:iterations];
 	
 	# Estimations to distributed workers
-	out = progress_pmap(iter_rates,n_param, n_binom, n_tot, n_low, n_gh, n_gl, n_gam_neg, afac, θ, ρ);
+	if threads
+		out = ThreadsX.map(iter_rates,n_param, n_binom, n_tot, n_low, n_gh, n_gl, n_gam_neg, afac, θ, ρ);
+	else
+		out = progress_pmap(iter_rates,n_param, n_binom, n_tot, n_low, n_gh, n_gl, n_gam_neg, afac, θ, ρ);
+	end
 
 	# Remove the workers to free memory resources
 	#=for i in workers()

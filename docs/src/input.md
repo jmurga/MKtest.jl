@@ -11,14 +11,7 @@ download("https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/tgp.txt
 To standardize the estimation, the summary statitics ABC inference functions will search SFS, divergence files into a folder containing both file with prefix *sfs* and *div*. The function ```MKtest.parseSfs``` will parse the raw data, creating two variables of type: ```Matrix{Float64}``` and ```Vector{Int64}``` required to estimate summary statistics.
 
 ```julia
-alpha, sfs, divergence = MKtest.parseSfs(sampleSize = 661, data = "analysis/tgp.txt")
-```
-
-```julia
-using CSV, DataFrames
-
-CSV.write("analysis/sfsTgp.tsv",DataFrame(sfs,:auto),delim='\t',header=false)
-CSV.write("analysis/divTgp.tsv",DataFrame(permutedims(divergence),:auto),delim='\t',header=false)
+alpha, sfs, divergence = MKtest.parse_sfs(sample_size = 661, data = "analysis/tgp.txt")
 ```
 
 Once you have estimated (or download) the analytical rates and parsed the SFS and divergence information, you can estimate the summary statistics.

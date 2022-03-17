@@ -30,11 +30,23 @@ CSV.write("analysis/tpg_div.tsv",DataFrame(permutedims(divergence),:auto),delim=
 It is possible to directly subset genes IDs using Ensembl or Flybase id. Use a variable of type ```Matrix{String} or Vector{String}``` into the argument *gene_list*. The input ```Matrix{String}``` will be subset by columns creating *ncol* SFS and divergence Matrix.
 
 ```julia
-download('https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/ensembl_list.txt','analysis/ensembl_list.txt')
+download("https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/ensembl_list.txt","analysis/ensembl_list.txt")
 ensembl_list = CSV.read("analysis/ensembl_list.txt",header=false,DataFrame) |> Array
 
 alpha, sfs, divergence = MKtest.parse_sfs(sample_size = 661, data = "analysis/tgp.txt",gene_list = ensembl_list)
 ```
+
+If you are going to perform a bootstrap analysis you can input a ```Matrix{String}``` to subset the bootstraped gene ids and create the SFS and divergence files.
+
+```julia
+download("https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/example_bootstrap","analysis/example_bootstrap.txt")
+
+bootstrap_list = String.(Array(CSV.read("analysis/example_bootstrap.txt",DataFrame))[:,2:end])
+
+# In our case, eachrow is a bootstrapped set
+alpha, sfs, divergence = MKtest.parse_sfs(sample_size = 661, data = "analysis/tgp.txt",gene_list = bootstrap_list)
+```
+
 
 If you are going to parse DGN, you need to change the value of the argument *isoline* to *true*. Following the Murga-Moreno et al. (2019) sample size for each population is:
 

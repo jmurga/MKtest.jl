@@ -112,7 +112,7 @@ function ABCreg(;analysis_folder::String,S::Int64,P::Int64=5,tol::Float64,abcreg
 	out = analysis_folder .* "/out_" .* string.(1:size(a_file,1))
 
 	r(a,s,o,abcreg=abcreg,P=P,S=S,tol=tol) = run(`$abcreg -d $a -p $s -P $P -S $S -t $tol -b $o`)
-
+	
 	progress_pmap(r,a_file,sum_file,out);
 end
 
