@@ -105,7 +105,7 @@ Performing ABC inference using ABCreg. Please, be sure your analysis_folder cont
 Files containing posterior distributions from ABCreg
 
 """
-function ABCreg(;analysis_folder::String,S::Int64,P::Int64=5,tol::Float64,abcreg::String,gnu_parallel::Bool=false)
+function ABCreg(;analysis_folder::String,S::Int64,P::Int64=5,tol::Float64,abcreg::String)
 	
 	# List alphas and summstat files
 	a_file     = filter(x -> occursin("alphas",x), readdir(analysis_folder,join=true));
