@@ -48,11 +48,7 @@ function parse_sfs(;sample_size::Int64,data::String,gene_list::Union{Nothing,Abs
 			push!(out,tmp);
 		end
 
-		if threads
-			α, sfs, divergence = unzip(pmap(i-> get_pol_div(i,s_size,sfs_columns,div_columns,bins),out));
-		else
-			α, sfs, divergence = unzip(ThreadsX.map(i-> get_pol_div(i,s_size,sfs_columns,div_columns,bins),out));
-		end
+		α, sfs, divergence = unzip(map(i-> get_pol_div(i,s_size,sfs_columns,div_columns,bins),out));
 	else
 		α, sfs, divergence = get_pol_div(df,s_size,sfs_columns,div_columns,bins);
 		α = [α]; sfs = [sfs]; divergence = [divergence]
@@ -109,7 +105,7 @@ Performing ABC inference using ABCreg. Please, be sure your analysis_folder cont
 Files containing posterior distributions from ABCreg
 
 """
-function ABCreg(;analysis_folder::String,S::Int64,P::Int64=5,tol::Float64,abcreg::String)
+function ABCreg(;analysis_folder::String,S::Int64,P::Int64=5,tol::Float64,abcreg::String,gnu_parallel::Bool=false)
 	
 	# List alphas and summstat files
 	a_file     = filter(x -> occursin("alphas",x), readdir(analysis_folder,join=true));
@@ -122,6 +118,7 @@ function ABCreg(;analysis_folder::String,S::Int64,P::Int64=5,tol::Float64,abcreg
 	r(a,s,o,abcreg=abcreg,P=P,S=S,tol=tol) = run(`$abcreg -d $a -p $s -P $P -S $S -t $tol -b $o`)
 	
 	progress_pmap(r,a_file,sum_file,out);
+
 end
 
 """
