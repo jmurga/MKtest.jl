@@ -194,20 +194,20 @@ Binomial convolution to sample the allele frequencies probabilites depending giv
 """
 function binom_op!(NN::Int64,nn::Int64,B::Float64)
 
-	NN2          = convert(Int64,ceil(NN*B))
-	samples      = collect(1:(nn-1))
-	pSize        = collect(0:NN2)
-	samplesFreqs = permutedims(pSize/NN2)
-	neutralSfs   = @. 1/pSize
-	replace!(neutralSfs, Inf => 0.0)
+	NN2          = convert(Int64,ceil(NN*B));
+	samples      = collect(1:(nn-1));
+	pSize        = collect(0:NN2);
+	samplesFreqs = permutedims(pSize/NN2);
+	neutralSfs   = @. 1/pSize;
+	replace!(neutralSfs, Inf => 0.0);
 
+	f(x,y=nn) = Binomial(y,x);
+	z    = f.(samplesFreqs);
 
-	f(x,y=nn) = Binomial(y,x)
-	z    = f.(samplesFreqs)
-
-	out  = pdf.(z,samples)
-	out  = round.(out,digits=10)
-	outS = SparseArrays.dropzeros(SparseArrays.sparse(out))
+	out  = pdf.(z,samples);
+	out  = round.(out,digits=10);
+	outS = SparseArrays.dropzeros(SparseArrays.sparse(out));
+	
 	return outS
 end
 

@@ -11,8 +11,8 @@ Function to parse polymorphism and divergence by subset of genes. The input data
 
 # Arguments
  - `sample_size::Int64`: data sample size.
- - `data`: String or Array of strings containing files names with full path.
- - `gene_list`: String or Array of strings containing files names to subset data.
+ - `data`: File containing polymorphic and divergence data
+ - `gene_list`: File containing gene IDs to subset. You can perform multiple subset input a file where eachrow contain the gene IDs to subset.
  - `sfs_columns::Array{Int64,1}`: non-synonymous and synonymous daf columns. Please introduce first the non-synonymous number.
  - `div_columns::Array{Int64,1}`: non-synonymous and synonymous divergence columns. Please introduce first the non-synonymous number.
  - `bins::Array{Int64,1}`: bin to collapse the SFS from `sample_size` to new `bin` size
@@ -22,7 +22,7 @@ Function to parse polymorphism and divergence by subset of genes. The input data
  - `Array{Float64,2}`: Site Frequency Spectrum
  - `Array{Float64,1}`: Synonymous and non-synonymous divergence counts
 """
-function parse_sfs(;sample_size::Int64,data::Union{String,DataFrame},gene_list::Union{Nothing,Vector{String},Matrix{String}}=nothing,sfs_columns::Array{Int64,1}=[3,5],div_columns::Array{Int64,1}=[6,7],bins::Union{Nothing,Int64}=nothing,isolines::Bool=false)
+function parse_sfs(;sample_size::Int64,data::String,gene_list::Union{Nothing,AbstractString}=nothing,sfs_columns::Array{Int64,1}=[3,5],div_columns::Array{Int64,1}=[6,7],bins::Union{Nothing,Int64}=nothing,isolines::Bool=false)
 
 	if isolines
 		s_size = sample_size
@@ -30,21 +30,29 @@ function parse_sfs(;sample_size::Int64,data::Union{String,DataFrame},gene_list::
 		s_size = (sample_size*2)
 	end
 	
-	if typeof(data) == String
-		df   = CSV.read(data,header=false,delim='\t',DataFrame)
-	else
-		df = data
-	end
+	df = CSV.read(data,header=false,delim='\t',DataFrame)
 
 	if(!isnothing(gene_list))
 		ids = @view df[:,1];
 
+		gene_matrix = Array(CSV.read(gene_list,header=false,DataFrame))
+		m,n = size(gene_matrix)
+
+		if n == 1
+			gene_matrix = permutedims(gene_matrix)
+		end
+		
 		out = SubDataFrame[]
-		for c in eachrow(gene_list)
+		for c in eachrow(gene_matrix)
 			tmp = @view df[filter(!isnothing,indexin(c,ids)),:];
 			push!(out,tmp);
 		end
-		α, sfs, divergence = unzip(map(i-> get_pol_div(i,s_size,sfs_columns,div_columns,bins),out));
+
+		if threads
+			α, sfs, divergence = unzip(pmap(i-> get_pol_div(i,s_size,sfs_columns,div_columns,bins),out));
+		else
+			α, sfs, divergence = unzip(ThreadsX.map(i-> get_pol_div(i,s_size,sfs_columns,div_columns,bins),out));
+		end
 	else
 		α, sfs, divergence = get_pol_div(df,s_size,sfs_columns,div_columns,bins);
 		α = [α]; sfs = [sfs]; divergence = [divergence]
