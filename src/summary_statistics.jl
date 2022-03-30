@@ -156,7 +156,7 @@ function summary_statistics(;param::parameters,h5_file::String,sfs::Vector,diver
 
 
 	# sfs,divergence,α = open_sfs_div(s_file,d_file,param.dac,bootstrap);
-	sfs,divergence,α = MKtest.data_to_poisson(sfs,divergence,param.dac,bootstrap);
+	sfs,divergence,α = data_to_poisson(sfs,divergence,param.dac,bootstrap);
 
 	if any(0 .∈ sfs) | any(0 .∈ divergence)
 		throw(ArgumentError("Your SFS contains 0 values at the selected DACs or the divergence is 0. Please consider to bin the SFS and re-estimate the rates using the selected bin as sample the new sample size."))
@@ -192,6 +192,7 @@ function summary_statistics(;param::parameters,h5_file::String,sfs::Vector,diver
 	
 	w.(α, α_output);
 
+	return(summ_output);
 end
 
 function filter_expected(x::Matrix{Float64})
@@ -199,6 +200,7 @@ function filter_expected(x::Matrix{Float64})
 	replace!(x, -Inf=>NaN)
 	x = x[vec(.!any(isnan.(x),dims=2)),:]
 	x = x[(x[:,3] .< 1),:]
+	x = x[(x[:,1] .> 0),:]
 
 	return(x)
 end

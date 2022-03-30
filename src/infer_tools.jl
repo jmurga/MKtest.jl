@@ -69,18 +69,18 @@ function get_pol_div(df_subset::Union{DataFrame,SubDataFrame},s_size::Int64,sfs_
 	ps   = sort!(OrderedDict(countmap(round.(reduce(vcat,tmp[:,2] .|> g),digits=4))))
 
 	# Dn, Ds, Pn, Ps, sfs
-	Dn           = sum(df_subset[:,div_columns[1]])
-	Ds           = sum(df_subset[:,div_columns[2]])
-	Pn           = sum(values(pn))
-	Ps           = sum(values(ps))
-	sfs_pn        = reduce(vcat,values(merge(+,freq,pn)))
-	sfs_ps        = reduce(vcat,values(merge(+,freq,ps)))
+    Dn     = sum(df_subset[:,div_columns[1]])
+    Ds     = sum(df_subset[:,div_columns[2]])
+    Pn     = sum(values(pn))
+    Ps     = sum(values(ps))
+    sfs_pn = reduce(vcat,values(merge(+,freq,pn)))
+    sfs_ps = reduce(vcat,values(merge(+,freq,ps)))
 
 	if(!isnothing(bins))
-		sfs_pn = reduce_sfs(hcat(collect(1:(s-1)),sfs_pn),bins)[:,2]
-		sfs_ps = reduce_sfs(hcat(collect(1:(s-1)),sfs_ps),bins)[:,2]
+		sfs_pn = MKtest.reduce_sfs(hcat(collect(1:(s_size-1)),sfs_pn),bins)[:,2]
+		sfs_ps = MKtest.reduce_sfs(hcat(collect(1:(s_size-1)),sfs_ps),bins)[:,2]
 
-		sfs   = reduce_sfs(hcat(freq.keys,merge(+,freq,pn).vals,merge(+,freq,ps).vals),bins)
+		sfs   = MKtest.reduce_sfs(hcat(freq.keys,merge(+,freq,pn).vals,merge(+,freq,ps).vals),bins)
 	else
 		sfs   = hcat(freq.keys,merge(+,freq,pn).vals,merge(+,freq,ps).vals)
 	end
@@ -139,7 +139,7 @@ function data_to_poisson(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{
 
 	d             = [[sum(divergence[i][1:2])] for i in eachindex(divergence)]
 	al(a,b,c=dac) = @. round(1 - (b[2]/b[1] * a[:,2]/a[:,3])[c],digits=5)
-	α = permutedims.(al.(scumu,divergence))
+	α             = permutedims.(al.(scumu,divergence))
 
 	return(s,d,α)
 end

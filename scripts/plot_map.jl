@@ -30,7 +30,7 @@ function plot_map(;analysis_folder::String,weak::Bool=true,title::String="Poster
 	open(x)      = Array(CSV.read(x,DataFrame))
 
 	# Control outlier inference. 2Nes non negative values
-	flt(x)       = x[x[:,4] .> 0,:]
+	flt(x)       = x[(x[:,4] .> 0) .& (x[:,1] .> 0) .& (x[:,2] .> 0) .& (x[:,3] .> 0) ,:]
 	posteriors   = flt.(open.(out))
 
 	R"""getmap <- function(df){
