@@ -22,7 +22,7 @@ Function to parse polymorphism and divergence by subset of genes. The input data
  - `Array{Float64,2}`: Site Frequency Spectrum
  - `Array{Float64,1}`: Synonymous and non-synonymous divergence counts
 """
-function parse_sfs(;sample_size::Int64,data::String,gene_list::Union{Nothing,AbstractString}=nothing,sfs_columns::Array{Int64,1}=[3,5],div_columns::Array{Int64,1}=[6,7],bins::Union{Nothing,Int64}=nothing,isolines::Bool=false)
+function parse_sfs(;sample_size::Int64,data::String,gene_list::Union{Nothing,AbstractString}=nothing,sfs_columns::Array{Int64,1}=[3,5],div_columns::Array{Int64,1}=[6,7],bins::Union{Nothing,Int64}=nothing,isolines::Bool=false) where S <: AbstractString
 
 	if isolines
 		s_size = sample_size
@@ -89,6 +89,7 @@ function get_pol_div(df_subset::Union{DataFrame,SubDataFrame},s_size::Int64,sfs_
 	α     = round.(1 .- (Ds/Dn .*  scumu[:,2] ./scumu[:,3]),digits=5)
 	return (α,sfs,[Dn Ds])
 end
+
 """
 	ABCreg(analysis_folder, replicas, S, tol, abcreg)
 

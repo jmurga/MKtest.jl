@@ -25,19 +25,15 @@ Expected rate of neutral allele frequency reduce by backgrou	nd selection. The s
 function sfs_neut(param::parameters,binom::SparseMatrixCSC{Float64,Int64})
 
 	NN2 = convert(Int64,ceil(param.NN*param.B))
+	
 	# Allocating variables
-
-	neutralSfs(i::Int64) = 1.0/(i)
+	neutral_sfs(i::Int64) = 1.0/(i)
 
 	x = collect(0:NN2)
-	solvedNeutralSfs = neutralSfs.(x)
-	replace!(solvedNeutralSfs, Inf => 0.0)
+	solved_neutral_sfs = neutral_sfs.(x)
+	replace!(solved_neutral_sfs, Inf => 0.0)
 
-	# subsetDict = get(param.bn,param.B,1)
-	# subsetDict = binom
-	out::Array{Float64,1} = param.B*(param.θ_coding)*0.25*(binom*solvedNeutralSfs)
-	# out = @view out[2:end-1]
-	# out = out[2:end-1]
+	out::Array{Float64,1} = param.B*(param.θ_coding)*0.25*(binom*solved_neutral_sfs)
 
 	return out
 end
@@ -78,19 +74,16 @@ function sfs_pos(param::parameters,s::Int64,p::Float64,binom::SparseMatrixCSC{Fl
 		s_exp1 = exp(s_corrected*2)
 		s_exp2 = exp(s_corrected*-2)
 
-		positiveSfs(i::Float64,g1::Float64=s_exp1,g2::Float64=s_exp2,p::Float64=p) = Float64(p*0.5*(g1*(1- g2^(1.0-i))/((g1-1.0)*i*(1.0-i))))
+		positive_sfs(i::Float64,g1::Float64=s_exp1,g2::Float64=s_exp2,p::Float64=p) = Float64(p*0.5*(g1*(1- g2^(1.0-i))/((g1-1.0)*i*(1.0-i))))
 
 		# Original
 		# p*0.5*(ℯ^(2*s_corrected)*(1-ℯ^(-2.0*s_corrected*(1.0-i)))/((ℯ^(2*s_corrected)-1.0)*i*(1.0-i)))
 
 		# Allocating outputs
-		solvedPositiveSfs::Array{Float64,1} = (1.0/(NN2)) * (positiveSfs.(xa2))
-		replace!(solvedPositiveSfs, NaN => 0.0)
+		solved_positive_sfs::Array{Float64,1} = (1.0/(NN2)) * (positive_sfs.(xa2))
+		replace!(solved_positive_sfs, NaN => 0.0)
 
-		# subsetDict = get(param.bn,param.B,1)
-		# out               = (param.θ_coding)*red_plus*0.75*(subsetDict*solvedPositiveSfs)
-		out::Array{Float64,1} = (param.θ_coding)*red_plus*0.75*(binom*solvedPositiveSfs)
-		# out = out[2:end-1]
+		out::Array{Float64,1} = (param.θ_coding)*red_plus*0.75*(binom*solved_positive_sfs)
 
 	end
 
@@ -114,11 +107,11 @@ function sfs_pos_float(param::parameters,s::Int64,p::Float64,binom::SparseMatrix
 		s_exp1::Quadmath.Float128 = exp(Quadmath.Float128(s_corrected*2))
 		s_exp2::Quadmath.Float128 = exp(Quadmath.Float128(s_corrected*-2))
 
-		positiveSfs(i::Float64,g1::Quadmath.Float128=s_exp1,g2::Quadmath.Float128=s_exp2,p::Float64=p) = Float64(p*0.5*(g1*(1- g2^(1.0-i))/((g1-1.0)*i*(1.0-i))))
+		positive_sfs(i::Float64,g1::Quadmath.Float128=s_exp1,g2::Quadmath.Float128=s_exp2,p::Float64=p) = Float64(p*0.5*(g1*(1- g2^(1.0-i))/((g1-1.0)*i*(1.0-i))))
 		# Allocating outputs
-		solvedPositiveSfs::Array{Float64,1} = (1.0/(NN2)) * (positiveSfs.(xa2))
-		replace!(solvedPositiveSfs, NaN => 0.0)
-		out::Array{Float64,1} = (param.θ_coding)*red_plus*0.75*(binom*solvedPositiveSfs)
+		solved_positive_sfs::Array{Float64,1} = (1.0/(NN2)) * (positive_sfs.(xa2))
+		replace!(solved_positive_sfs, NaN => 0.0)
+		out::Array{Float64,1} = (param.θ_coding)*red_plus*0.75*(binom*solved_positive_sfs)
 		# out = out[2:end-1]
 
 	end
@@ -142,35 +135,29 @@ Expected rate of positive selected allele frequency reduce by background selecti
 """
 function sfs_neg(param::parameters,p::Float64,binom::SparseMatrixCSC{Float64,Int64})
 
-
 	beta     = param.be/(1.0*param.B)
 	NN2      = convert(Int64, ceil(param.NN*param.B))
 	xa       = collect(0:NN2)/NN2
 
-	solveZ   = similar(xa)
+	solve_z   = similar(xa);
 
 	z(x::Float64,p::Float64=p) = (1.0-p)*(2.0^-param.al)*(beta^param.al)*(-zeta(param.al,x+beta/2.0) + zeta(param.al,(2+beta)/2.0))/((-1.0+x)*x)
 
-	solveZ   = z.(xa)
+	solve_z   = z.(xa)
 
-	if (solveZ[1] == Inf || isnan(solveZ[1]))
-		solveZ[1] = 0.0
+	if (solve_z[1] == Inf || isnan(solve_z[1]))
+		solve_z[1] = 0.0
 	end
-	if (solveZ[lastindex(solveZ)] == Inf || isnan(solveZ[lastindex(solveZ)]))
-		solveZ[lastindex(solveZ)] = 0.0
+	if (solve_z[lastindex(solve_z)] == Inf || isnan(solve_z[lastindex(solve_z)]))
+		solve_z[lastindex(solve_z)] = 0.0
 	end
 
-	solved_negative =  1.0/(NN2+0.0).*solveZ
+	solved_negative =  1.0/(NN2+0.0).*solve_z
 
-	# out::Array = param.B*(param.θ_coding)*0.75*(subsetDict*solved_negative)
 	out = param.B*(param.θ_coding)*0.75*(binom*solved_negative)
-	# out = @view out[2:end-1]
 
-	# return out[2:end-1]
 	return out
 end
-
-
 
 """
 	cumulative_sfs(sfs_tmp)
@@ -197,7 +184,6 @@ function cumulative_sfs(sfs_tmp::Array,freqs::Bool=true)
 
 	@simd for i in 2:(size(sfs_tmp)[1])
 
-		#=app = view(out,i-1,:) .- view(sfs_tmp,i-1,:)=#
 		app = out[i-1,idx:end] .- sfs_tmp[i-1,idx:end]
 
 		if sum(app) > 0.0

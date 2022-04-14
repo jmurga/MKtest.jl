@@ -10,8 +10,8 @@ Mutable structure containing the variables required to solve the analytical appr
  - `gam_neg::Int64`: Selection coefficient for deleterious alleles
  - `gL::Int64`: Selection coefficient for weakly benefical alleles
  - `gH::Int64`: Selection coefficient for strongly benefical alleles
- - `al_low::Float64`: Proportion of α due to weak selection
- - `al_tot::Float64`: α
+ - `alLow::Float64`: Proportion of α due to weak selection
+ - `alTot::Float64`: α
  - `θ_noncoding::Float64`: Mutation rate defining BGS strength
  - `θ_coding::Float64`: Mutation rate on coding region
  - `al::Float64`: DFE shape parameter 
@@ -29,29 +29,42 @@ Mutable structure containing the variables required to solve the analytical appr
 """
 @with_kw mutable struct parameters
 	gam_neg::Int64              = -457
-	gL::Int64                   = 10
-	gH::Int64                   = 500
-	al_low::Float64             = 0.2
-	al_tot::Float64             = 0.4
-	θ_noncoding::Float64        = 1e-3
-	θ_coding::Float64           = 1e-3
-	al::Float64                 = 0.184
-	be::Float64                 = 0.000402
-	B::Float64                  = 0.999 
-	B_bins::Vector{Float64}     = push!(collect(0.1:0.025:0.975),0.999)
+	gL::Int64                  = 10
+	gH::Int64                  = 500
+	alLow::Float64             = 0.2
+	alTot::Float64             = 0.4
+	θ_noncoding::Float64            = 1e-3
+	θ_coding::Float64   = 1e-3
+	al::Float64                = 0.184
+	be::Float64                = 0.000402
+	B::Float64                 = 0.999 
+	B_bins::Array{Float64,1}   = push!(collect(0.1:0.025:0.975),0.999)
 	ppos_l::Float64             = 0
 	ppos_h::Float64             = 0.001
-	N::Int64                    = 1000
-	n::Int64                    = 500
-	Lf::Int64                   = 2*10^5
-	ρ::Float64                  = 0.001
-	TE::Float64                 = 5.0
+	N::Int64                   = 1000
+	n::Int64                   = 500
+	Lf::Int64                  = 2*10^5
+	ρ::Float64               = 0.001
+	TE::Float64                = 5.0
+	diploid::Bool              = false
 
 	NN::Int64 = 2*N
 	nn::Int64 = 2*n
+	θᵣ::Array{Float64,1} = fill(θ_coding,nn-1)
 	dac::Array{Int64,1} = [2,4,5,10,20,50,200,500,700]
-
 end
+
+"""
+Mutable structure containing the downsampled SFS. 
+
+# Returns
+ - `bn::Dict`: SparseMatrixCSC containing the binomial convolution
+
+"""
+# @with_kw mutable struct binomialDict
+# 	bn::Dict = Dict{Float64,SparseMatrixCSC{Float64,Int64}}()
+# end
+#=const binomialDict = Dict{Float64,SparseMatrixCSC{Float64,Int64}}()=#
 
 ################################
 ###### Solving parameters ######
@@ -66,7 +79,7 @@ Expected reduction in nucleotide diversity. Explored at [Charlesworth B., 1994](
 ```
 
 # Arguments
- - `param::parameters`: mutable structure containing the model
+ - `param::parameters`
  - `theta::Float64`
 # Returns
  - `Float64`: expected reduction in diversity given a non-coding length, mutation rate and defined recombination.
@@ -78,58 +91,53 @@ function Br(param::parameters,theta::Float64)
 	μ::Float64     = theta/(2.0*param.NN)
 	r::Float64     = ρ/(2.0*param.NN)
 
-	out::Float64   = ℯ^(-4*μ*param.Lf/(2*param.Lf*r+t))
-	
+	out::Float64  = ℯ^(-4*μ*param.Lf/(2*param.Lf*r+t))
 	return out
 end
 
+# Set mutation rate given the expected reduction in nucleotide diversity (B value ) in a locus.
 """
 	set_θ!(param)
 
-Find the optimum mutation rate given the expected reduction in nucleotide diversity (B value) in a locus.
+Find the optimum mutation given the expected reduction in nucleotide diversity (B value) in a locus.
 
-# Inputs
- - `param::parameters`: mutable structure containing the model
 # Returns
- - `parameters.θ_noncoding::Float64`: inplace change on parameters.θ_noncoding value.
+ - `adap.θ_noncoding::Float64`: changes adap.θ_noncoding value.
 """
 function set_θ!(param::parameters)
 
 	i(θ,p=param) = Br(p,θ)-p.B
 	θ_noncoding       = find_zero(i,0.0)
 	param.θ_noncoding = θ_noncoding
-
 end
 
 function alpha_exp_sim_low(param::parameters,ppos_l::Float64,ppos_h::Float64)
-	return fix_pos_sim(param,param.gL,0.5*ppos_l)/(fix_pos_sim(param,param.gL,0.5*ppos_l)+fix_pos_sim(param,param.gH,0.5*ppos_h) + fix_neg_b(param,0.5*ppos_l+0.5*ppos_h))
+	return fix_pos_sim(param,param.gL,0.5*ppos_l)/(fix_pos_sim(param,param.gL,0.5*ppos_l)+fix_pos_sim(param,param.gH,0.5*ppos_h) + fix_neg(param,0.5*ppos_l+0.5*ppos_h))
 end
 
 function alpha_exp_sim_tot(param::parameters,ppos_l::Float64,ppos_h::Float64)
-	return (fix_pos_sim(param,param.gL,0.5*ppos_l)+fix_pos_sim(param,param.gH,0.5*ppos_h))/(fix_pos_sim(param,param.gL,0.5*ppos_l)+fix_pos_sim(param,param.gH,0.5*ppos_h)+fix_neg_b(param,0.5*ppos_l+0.5*ppos_h))
+	return (fix_pos_sim(param,param.gL,0.5*ppos_l)+fix_pos_sim(param,param.gH,0.5*ppos_h))/(fix_pos_sim(param,param.gL,0.5*ppos_l)+fix_pos_sim(param,param.gH,0.5*ppos_h)+fix_neg(param,0.5*ppos_l+0.5*ppos_h))
 end
 
-function solve_eqns(param,config)
+function solv_eqns(param,config)
 
 	ppos_l,ppos_h = config
-	return (alpha_exp_sim_tot(param,ppos_l,ppos_h)-param.al_tot,alpha_exp_sim_low(param,ppos_l,ppos_h)-param.al_low)
+	return (alpha_exp_sim_tot(param,ppos_l,ppos_h)-param.alTot,alpha_exp_sim_low(param,ppos_l,ppos_h)-param.alLow)
 end
 
 """
 	set_ppos!(param)
 
-Find the probabilty of positive selected alleles given the model. It solves an equation system taking into account fixations probabilities of weakly and strong beneficial alleles.
+Find the probabilty of positive selected alleles given the model. It solves a equation system taking into account fixations probabilities of weakly and strong beneficial alleles.
 
-# Input
- - `param::parameters`: mutable structure containing the model
 # Returns
- - `Tuple{Float64,Float64}`: inplace change on weakly (parameters.ppos_l) and strong (parameters.ppos_l) beneficial alleles probabilites.
+ - `Tuple{Float64,Float64}`: weakly and strong beneficial alleles probabilites.
 """
 function set_ppos!(param::parameters)
 
 	function f!(F,x,param=param)
-		F[1] = alpha_exp_sim_tot(param,x[1],x[2])-param.al_tot
-		F[2] = alpha_exp_sim_low(param,x[1],x[2])-param.al_low
+		F[1] = alpha_exp_sim_tot(param,x[1],x[2])-param.alTot
+		F[2] = alpha_exp_sim_low(param,x[1],x[2])-param.alLow
 	end
 
 	ppos_l,ppos_h = nlsolve(f!,[0.0; 0.0]).zero
@@ -151,14 +159,15 @@ function set_ppos!(param::parameters)
 Binomial convolution to sample the allele frequencies probabilites depending on background selection values and sample size.
 
 # Arguments
- - `param::parameters`: mutable structure containing the model
+ - `param::parameters`
+ - `binom::binomialDict`
 
 # Returns
- - `Dict{Float64,SparseMatrixCSC{Float64,Int64}}`: convoluted SFS for each B value defined in the model (param.B_bins).
+ - `Array{Float64,2}`: convoluted SFS for each B value defined in the model (param.B_bins). The estimations are saved at *convolutedBn.bn*.
 """
 function binom_op!(param::parameters)
 
-	binom::Dict = Dict{Float64,SparseMatrixCSC{Float64,Int64}}()
+	bn = Dict(param.B_bins[i] => spzeros(param.nn+1,param.NN) for i in 1:length(param.B_bins))
 
 	for b in param.B_bins
 
@@ -166,8 +175,8 @@ function binom_op!(param::parameters)
 		samples      = collect(1:(param.nn-1))
 		pSize        = collect(0:NN2)
 		samplesFreqs = permutedims(pSize/NN2)
-		neutralSfs   = @. 1/pSize
-		replace!(neutralSfs, Inf => 0.0)
+		neutral_sfs   = @. 1/pSize
+		replace!(neutral_sfs, Inf => 0.0)
 
 
 		f(x,y=param.nn) = Binomial(y,x)
@@ -176,41 +185,30 @@ function binom_op!(param::parameters)
 		out  = pdf.(z,samples)
 		out  = round.(out,digits=10)
 		outS = SparseArrays.dropzeros(SparseArrays.sparse(out))
-		binom[b] = outS
+		bn[b] = outS
+		#=param.neut[b] = round.(param.B*(param.θ_coding)*0.25*(outS*neutral_sfs),digits=10)=#
 	end
-	return binom
+	return(bn)
 end
 
-"""
-	binom_op(NN,nn,B)
+function binom_op!(NN,nn,B)
 
-Binomial convolution to sample the allele frequencies probabilites depending given population size, sample size and background selection value.
+	NN2          = convert(Int64,ceil(NN*B))
+	samples      = collect(1:(nn-1))
+	pSize        = collect(0:NN2)
+	samplesFreqs = permutedims(pSize/NN2)
+	neutral_sfs   = @. 1/pSize
+	replace!(neutral_sfs, Inf => 0.0)
 
-# Arguments
- - `param::parameters`: mutable structure containing the model
 
-# Returns
- - `SparseMatrixCSC{Float64, Int64}`: convoluted SFS given the B value.
-"""
-function binom_op!(NN::Int64,nn::Int64,B::Float64)
+	f(x,y=param.nn) = Binomial(y,x)
+	z    = f.(samplesFreqs)
 
-	NN2          = convert(Int64,ceil(NN*B));
-	samples      = collect(1:(nn-1));
-	pSize        = collect(0:NN2);
-	samplesFreqs = permutedims(pSize/NN2);
-	neutralSfs   = @. 1/pSize;
-	replace!(neutralSfs, Inf => 0.0);
-
-	f(x,y=nn) = Binomial(y,x);
-	z    = f.(samplesFreqs);
-
-	out  = pdf.(z,samples);
-	out  = round.(out,digits=10);
-	outS = SparseArrays.dropzeros(SparseArrays.sparse(out));
-	
-	return outS
+	out  = pdf.(z,samples)
+	out  = round.(out,digits=10)
+	outS = SparseArrays.dropzeros(SparseArrays.sparse(out))
+	return(outS)
 end
-
 """
 
 	Φ(param,gamma,ppos)
@@ -235,8 +233,7 @@ Multiplying across all deleterious linkes sites, we find:
 ```
 
 # Arguments
- - `param::parameters`: mutable structure containing the model
- - `s::Int64`: selection coefficient.
+ - `gamma::Int64`: selection coefficient.
 
 # Returns
  - `Float64`: expected rate of positive fixations under background selection.
@@ -257,7 +254,7 @@ function Φ(param::parameters,s::Int64)
 end
 
 """
-	analytical_alpha(param)
+	analyticalAlpha(param, binom)
 
 Analytical α(x) estimation. Solve α(x) generally. We used the expected rates of divergence and polymorphism to approach the asympotic value accouting for background selection, weakly and strong positive selection. α(x) can be estimated taking into account the role of positive selected alleles or not. In this way we explore the role of linkage to deleterious alleles in the coding region.
 
@@ -266,13 +263,13 @@ Analytical α(x) estimation. Solve α(x) generally. We used the expected rates o
 ```
 
 # Arguments
- - `param::parameters`: mutable structure containing the model
+ - `param::parameters`
 # Returns
- - `Vector{Float64}`: α(x).
- - `Vector{Float64}`: α(x) without weakly beneficial alleles.
+ - `Array{Float64,1}` α(x).
 """
 function analytical_alpha(;param::parameters)
 
+	binom = binom_op!(param.NN,param.nn,param.B)
 	################################################################
 		# Solve the model similarly to original python mktest  #	
 	################################################################
@@ -291,14 +288,13 @@ function analytical_alpha(;param::parameters)
 	param.θ_noncoding = θ_noncoding
 	param.B = B
 
-	binom = binom_op!(param.NN,param.nn,param.B)
 	################################################################
 	 # Accounting for positive alleles segregating due to linkage # 
 	################################################################
 
 	# Fixation
 	fN     = param.B*fix_neut(param)
-	fNeg   = param.B*fix_neg_b(param,0.5*param.ppos_h+0.5*param.ppos_l)
+	fNeg   = param.B*fix_neg(param,0.5*param.ppos_h+0.5*param.ppos_l)
 	fPosL  = fix_pos_sim(param,param.gL,0.5*param.ppos_l)
 	fPosH  = fix_pos_sim(param,param.gH,0.5*param.ppos_h)
 
@@ -306,16 +302,16 @@ function analytical_alpha(;param::parameters)
 	dn = fNeg + fPosL + fPosH
 
 	## Polymorphism
-	neut = sfs_neut(param,binom)
+	neut = sfs_neut(param,binom.bn[param.B])
 
 	selH::Array{Float64,1} = if isinf(exp(param.gH * 2))
-		sfs_pos_float(param,param.gH,param.ppos_h,binom)
+		sfs_pos_float(param,param.gH,param.ppos_h,binom.bn[param.B])
 	else
-		sfs_pos(param,param.gH,param.ppos_h,binom)
+		sfs_pos(param,param.gH,param.ppos_h,binom.bn[param.B])
 	end
 
-	selL::Array{Float64,1} = sfs_pos(param,param.gL,param.ppos_l,binom)	
-	selN::Array{Float64,1} = sfs_neg(param,param.ppos_h+param.ppos_l,binom)
+	selL::Array{Float64,1} = sfs_pos(param,param.gL,param.ppos_l,binom.bn[param.B])	
+	selN::Array{Float64,1} = sfs_neg(param,param.ppos_h+param.ppos_l,binom.bn[param.B])
 
 	split_columns(matrix::Array{Float64,2}) = (view(matrix, :, i) for i in 1:size(matrix, 2));
 	tmp = cumulative_sfs(hcat(neut,selH,selL,selN),false)
@@ -333,20 +329,20 @@ function analytical_alpha(;param::parameters)
 	#############################################################
 	#		Accounting for neutral and deleterious alleles		#	#############################################################
 	## Fixation
-    fN_nopos    = fN*(param.θ_coding/2.)*param.TE*param.NN
-    fNeg_nopos  = fNeg*(param.θ_coding/2.)*param.TE*param.NN
-    fPosL_nopos = fPosL*(param.θ_coding/2.)*param.TE*param.NN
-    fPosH_nopos = fPosH*(param.θ_coding/2.)*param.TE*param.NN
+	fN_nopos     = fN*(param.θ_coding/2.)*param.TE*param.NN
+	fNeg_nopos   = fNeg*(param.θ_coding/2.)*param.TE*param.NN
+	fPosL_nopos  = fPosL*(param.θ_coding/2.)*param.TE*param.NN
+	fPosH_nopos  = fPosH*(param.θ_coding/2.)*param.TE*param.NN
 
-    ds_nopos    = fN_nopos
-    dn_nopos    = fNeg_nopos + fPosL_nopos + fPosH_nopos
+	ds_nopos = fN_nopos
+	dn_nopos = fNeg_nopos + fPosL_nopos + fPosH_nopos
 
 	## Polymorphism
-    sel_nopos = selN
-    ps_nopos  = @. neut / (sel_nopos + neut)
-    pn_nopos  = @. sel_nopos / (sel_nopos + neut)
+	sel_nopos = selN
+	ps_nopos = @. neut / (sel_nopos + neut)
+	pn_nopos = @. sel_nopos / (sel_nopos + neut)
 
-    α_nopos   = 1 .- (ds_nopos/dn_nopos) .* (sel_nopos./neut)
+	α_nopos = 1 .- (ds_nopos/dn_nopos) .* (sel_nopos./neut)
 
 	##########
 	# Output #
