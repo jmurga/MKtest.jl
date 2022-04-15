@@ -97,7 +97,7 @@ function rates(;param::parameters,
 	df = vcat(out...)
 	
 	# Saving models and rates
-	models = DataFrame(df[:,1:8],[:B,:alLow,:alTot,:gam_neg,:gL,:gH,:al,:ρ])
+	models = DataFrame(df[:,1:8],[:B,:al_low,:al_tot,:gam_neg,:gL,:gH,:al,:ρ])
 	neut   = df[:,9:(8+size(param.dac,1))]
 	sel    = df[:,(9+size(param.dac,1)):(8+size(param.dac,1)*2)]
 	dsdn   = Array(df[:,(end-3):end])
@@ -121,15 +121,15 @@ function rates(;param::parameters,
 end
 
 """
-	iter_rates(param::parameters,afac::Float64,bfac::Float64,alTot::Float64,alLow::Float64,divergence::Array,sfs::Array)
+	iter_rates(param::parameters,afac::Float64,bfac::Float64,al_tot::Float64,al_low::Float64,divergence::Array,sfs::Array)
 
 Estimating rates given a model for all B range.
 
 # Arguments
  - `param::parameters`
  - `binom::Dict`
- - `alTot::Float64`
- - `alLow::Float64`
+ - `al_tot::Float64`
+ - `al_low::Float64`
  - `gH::Int64`
  - `gL::Int64`
  - `gam_neg::Int64`
@@ -139,13 +139,13 @@ Estimating rates given a model for all B range.
 # Output
  - `Array{Float64,2}`
 """
-function iter_rates(param::parameters,binom::Dict{Float64, SparseMatrixCSC{Float64, Int64}},alTot::Float64,alLow::Float64,gH::Int64,gL::Int64,gam_neg::Int64,afac::Float64,θ::Float64,ρ::Float64)
+function iter_rates(param::parameters,binom::Dict{Float64, SparseMatrixCSC{Float64, Int64}},al_tot::Float64,al_low::Float64,gH::Int64,gL::Int64,gam_neg::Int64,afac::Float64,θ::Float64,ρ::Float64)
 
 	# Creating model to solve
 	# Γ distribution
 	param.al    = afac; param.be = abs(afac/gam_neg); param.gam_neg = gam_neg
 	# α, αW
-	param.alLow = alLow; param.alTot = alTot;
+	param.al_low = al_low; param.al_tot = al_tot;
 	# Positive selection coefficients
 	param.gH    = gH;param.gL = gL
 	# Mutation rate and recomb
@@ -219,7 +219,7 @@ function getting_rates(param::parameters,binom::SparseMatrixCSC{Float64,Int64})
 	##########
 	# Output #
 	##########
-	analytical_values::Array{Float64,2} = vcat(param.B,param.alLow,param.alTot,param.gam_neg,param.gL,param.gH,param.al,param.θ_coding,neut[param.dac],sel[param.dac],ds,dn,fPosL,fPosH)'
+	analytical_values::Array{Float64,2} = vcat(param.B,param.al_low,param.al_tot,param.gam_neg,param.gL,param.gH,param.al,param.θ_coding,neut[param.dac],sel[param.dac],ds,dn,fPosL,fPosH)'
 
 	return (analytical_values)
 end

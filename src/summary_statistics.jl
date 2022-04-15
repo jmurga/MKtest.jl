@@ -28,14 +28,14 @@ function poisson_fixation(;observed_values::Vector{Int64}, λds::Vector{Float64}
 	dweak = @. λweak / (λds + λdn) * observed_values
 	dstrong = @. λstrong / (λds + λdn) * observed_values
 
-	sampledDs     = pois_rand.(ds)
-	sampledDn     = pois_rand.(dn)
-	sampledWeak   = pois_rand.(dweak)
-	sampledStrong = pois_rand.(dstrong)
+	sampled_ds     = pois_rand.(ds)
+	sampled_dn     = pois_rand.(dn)
+	sampled_weak   = pois_rand.(dweak)
+	sampled_strong = pois_rand.(dstrong)
 
-	alphas = @. [sampledWeak/sampledDn sampledStrong/sampledDn (sampledWeak+sampledStrong)/sampledDn]
+	alphas = @. [sampled_weak/sampled_dn sampled_strong/sampled_dn (sampled_weak+sampled_strong)/sampled_dn]
 
-	out = alphas,sampledDn, sampledDs
+	out = alphas,sampled_dn, sampled_ds
 	return out
 end
 
@@ -75,10 +75,10 @@ function poisson_polymorphism(;observed_values::Vector{Float64}, λps::Matrix{Fl
 	replace!(λ1,NaN=>1)	
 	replace!(λ2,NaN=>1)
 
-	sampledPs = pois_rand.(λ1)
-	sampledPn = pois_rand.(λ2)
+	sampled_ps = pois_rand.(λ1)
+	sampled_pn = pois_rand.(λ2)
 
-	return (sampledPn, sampledPs)
+	return (sampled_pn, sampled_ps)
 end
 
 """
@@ -154,8 +154,6 @@ function summary_statistics(;param::parameters,h5_file::String,sfs::Vector,diver
 		throw(ArgumentError("You have more than one SFS and divergence file. Please be sure you have on set of files to bootstrap manually your data."))
 	end
 
-
-	# sfs,divergence,α = open_sfs_div(s_file,d_file,param.dac,bootstrap);
 	sfs,divergence,α = data_to_poisson(sfs,divergence,param.dac,bootstrap);
 
 	if any(0 .∈ sfs) | any(0 .∈ divergence)

@@ -10,8 +10,8 @@ Mutable structure containing the variables required to solve the analytical appr
  - `gam_neg::Int64`: Selection coefficient for deleterious alleles
  - `gL::Int64`: Selection coefficient for weakly benefical alleles
  - `gH::Int64`: Selection coefficient for strongly benefical alleles
- - `alLow::Float64`: Proportion of α due to weak selection
- - `alTot::Float64`: α
+ - `al_low::Float64`: Proportion of α due to weak selection
+ - `al_tot::Float64`: α
  - `θ_noncoding::Float64`: Mutation rate defining BGS strength
  - `θ_coding::Float64`: Mutation rate on coding region
  - `al::Float64`: DFE shape parameter 
@@ -28,30 +28,29 @@ Mutable structure containing the variables required to solve the analytical appr
 
 """
 @with_kw mutable struct parameters
-	gam_neg::Int64              = -457
+	gam_neg::Int64             = -457
 	gL::Int64                  = 10
 	gH::Int64                  = 500
-	alLow::Float64             = 0.2
-	alTot::Float64             = 0.4
-	θ_noncoding::Float64            = 1e-3
-	θ_coding::Float64   = 1e-3
+	al_low::Float64            = 0.2
+	al_tot::Float64            = 0.4
+	θ_noncoding::Float64       = 1e-3
+	θ_coding::Float64          = 1e-3
 	al::Float64                = 0.184
 	be::Float64                = 0.000402
 	B::Float64                 = 0.999 
 	B_bins::Array{Float64,1}   = push!(collect(0.1:0.025:0.975),0.999)
-	ppos_l::Float64             = 0
-	ppos_h::Float64             = 0.001
+	ppos_l::Float64            = 0
+	ppos_h::Float64            = 0.001
 	N::Int64                   = 1000
 	n::Int64                   = 500
 	Lf::Int64                  = 2*10^5
-	ρ::Float64               = 0.001
+	ρ::Float64                 = 0.001
 	TE::Float64                = 5.0
 	diploid::Bool              = false
 
 	NN::Int64 = 2*N
 	nn::Int64 = 2*n
-	θᵣ::Array{Float64,1} = fill(θ_coding,nn-1)
-	dac::Array{Int64,1} = [2,4,5,10,20,50,200,500,700]
+	dac::Array{Int64,1}  = [2,4,5,10,20,50,200,500,700]
 end
 
 """
@@ -122,7 +121,7 @@ end
 function solv_eqns(param,config)
 
 	ppos_l,ppos_h = config
-	return (alpha_exp_sim_tot(param,ppos_l,ppos_h)-param.alTot,alpha_exp_sim_low(param,ppos_l,ppos_h)-param.alLow)
+	return (alpha_exp_sim_tot(param,ppos_l,ppos_h)-param.al_tot,alpha_exp_sim_low(param,ppos_l,ppos_h)-param.al_low)
 end
 
 """
@@ -136,8 +135,8 @@ Find the probabilty of positive selected alleles given the model. It solves a eq
 function set_ppos!(param::parameters)
 
 	function f!(F,x,param=param)
-		F[1] = alpha_exp_sim_tot(param,x[1],x[2])-param.alTot
-		F[2] = alpha_exp_sim_low(param,x[1],x[2])-param.alLow
+		F[1] = alpha_exp_sim_tot(param,x[1],x[2])-param.al_tot
+		F[2] = alpha_exp_sim_low(param,x[1],x[2])-param.al_low
 	end
 
 	ppos_l,ppos_h = nlsolve(f!,[0.0; 0.0]).zero
