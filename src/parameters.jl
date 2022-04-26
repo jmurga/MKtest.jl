@@ -172,14 +172,14 @@ function binom_op!(param::parameters)
 
 		NN2          = convert(Int64,ceil(param.NN*b))
 		samples      = collect(1:(param.nn-1))
-		pSize        = collect(0:NN2)
-		samplesFreqs = permutedims(pSize/NN2)
-		neutral_sfs   = @. 1/pSize
+		p_size        = collect(0:NN2)
+		samples_freqs = permutedims(p_size/NN2)
+		neutral_sfs   = @. 1/p_size
 		replace!(neutral_sfs, Inf => 0.0)
 
 
 		f(x,y=param.nn) = Binomial(y,x)
-		z    = f.(samplesFreqs)
+		z    = f.(samples_freqs)
 
 		out  = pdf.(z,samples)
 		out  = round.(out,digits=10)
@@ -194,14 +194,11 @@ function binom_op!(NN,nn,B)
 
 	NN2          = convert(Int64,ceil(NN*B))
 	samples      = collect(1:(nn-1))
-	pSize        = collect(0:NN2)
-	samplesFreqs = permutedims(pSize/NN2)
-	neutral_sfs   = @. 1/pSize
-	replace!(neutral_sfs, Inf => 0.0)
+	p_size        = collect(0:NN2)
+	samples_freqs = permutedims(p_size/NN2)
 
-
-	f(x,y=param.nn) = Binomial(y,x)
-	z    = f.(samplesFreqs)
+	f(x,y=nn) = Binomial(y,x)
+	z    = f.(samples_freqs)
 
 	out  = pdf.(z,samples)
 	out  = round.(out,digits=10)
@@ -266,7 +263,7 @@ Analytical α(x) estimation. Solve α(x) generally. We used the expected rates o
 # Returns
  - `Array{Float64,1}` α(x).
 """
-function analytical_alpha(;param::parameters)
+function analytical_alpha(param::parameters)
 
 	binom = binom_op!(param.NN,param.nn,param.B)
 	################################################################
@@ -301,16 +298,16 @@ function analytical_alpha(;param::parameters)
 	dn = fNeg + fPosL + fPosH
 
 	## Polymorphism
-	neut = sfs_neut(param,binom.bn[param.B])
+	neut = sfs_neut(param,binom)
 
 	selH::Array{Float64,1} = if isinf(exp(param.gH * 2))
-		sfs_pos_float(param,param.gH,param.ppos_h,binom.bn[param.B])
+		sfs_pos_float(param,param.gH,param.ppos_h,binom)
 	else
-		sfs_pos(param,param.gH,param.ppos_h,binom.bn[param.B])
+		sfs_pos(param,param.gH,param.ppos_h,binom)
 	end
 
-	selL::Array{Float64,1} = sfs_pos(param,param.gL,param.ppos_l,binom.bn[param.B])	
-	selN::Array{Float64,1} = sfs_neg(param,param.ppos_h+param.ppos_l,binom.bn[param.B])
+	selL::Array{Float64,1} = sfs_pos(param,param.gL,param.ppos_l,binom)	
+	selN::Array{Float64,1} = sfs_neg(param,param.ppos_h+param.ppos_l,binom)
 
 	split_columns(matrix::Array{Float64,2}) = (view(matrix, :, i) for i in 1:size(matrix, 2));
 	tmp = cumulative_sfs(hcat(neut,selH,selL,selN),false)

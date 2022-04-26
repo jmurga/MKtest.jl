@@ -39,7 +39,7 @@ function plot_map(;analysis_folder::String,weak::Bool=true,title::String="Poster
 			map<-temp[,1][which.max(predict(d,newdata=temp))]
 		}"""
 
-	getmap(x)    = rcopy(R"""suppressWarnings(matrix(apply($x,2,getmap),nrow=1))""")
+	@everywhere  getmap(x)    = rcopy(R"""suppressWarnings(matrix(apply($x,2,getmap),nrow=1))""")
 	
 	if !weak
 		posteriors = [posteriors[i][:,3:end] for i in eachindex(posteriors)]
@@ -48,7 +48,7 @@ function plot_map(;analysis_folder::String,weak::Bool=true,title::String="Poster
 		al           = maxp[:,1:1]
 		gam          = maxp[:,2:end]
 	else
-		tmp          = getmap.(posteriors)
+		tmp          = pmap(getmap,posteriors)
 		maxp         = DataFrame(vcat(tmp...),[:aw,:as,:a,:gam_neg,:shape])
 		al           = maxp[:,1:3]
 		gam          = maxp[:,4:end]
