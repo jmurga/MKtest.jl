@@ -1,6 +1,6 @@
 try
-	using RCall
-	RCall.eval("library(locfit);library(ggplot2)")
+	@everywhere using RCall
+	@everywhere RCall.eval("library(locfit);library(ggplot2)")
 catch
 	using Pkg
 	ENV["R_HOME"]="*"
@@ -22,7 +22,7 @@ end
 """
 function plot_map(;analysis_folder::String,weak::Bool=true,title::String="Posteriors")
 
-	R"""library(locfit);library(ggplot2);library(data.table)""";
+	@everywhere R"""library(locfit);library(ggplot2);library(data.table)""";
 
 	out = filter(x -> occursin("post",x), readdir(analysis_folder,join=true))
 	out          = filter(x -> !occursin(".1.",x),out)
@@ -39,11 +39,11 @@ function plot_map(;analysis_folder::String,weak::Bool=true,title::String="Poster
 			map<-temp[,1][which.max(predict(d,newdata=temp))]
 		}"""
 
-	@everywhere  getmap(x)    = rcopy(R"""suppressWarnings(matrix(apply($x,2,getmap),nrow=1))""")
+	@everywhere getmap(x)    = rcopy(R"""suppressWarnings(matrix(apply($x,2,getmap),nrow=1))""")
 	
 	if !weak
 		posteriors = [posteriors[i][:,3:end] for i in eachindex(posteriors)]
-		tmp          = getmap.(posteriors)
+		tmp          = pmap(getmap,posteriors)
 		maxp         = DataFrame(vcat(tmp...),[:a,:gam_neg,:shape])
 		al           = maxp[:,1:1]
 		gam          = maxp[:,2:end]
