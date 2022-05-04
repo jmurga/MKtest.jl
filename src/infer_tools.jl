@@ -22,7 +22,7 @@ Function to parse polymorphism and divergence by subset of genes. The input data
  - `Array{Float64,2}`: Site Frequency Spectrum
  - `Array{Float64,1}`: Synonymous and non-synonymous divergence counts
 """
-function parse_sfs(;sample_size::Int64,data::String,gene_list::Union{Nothing,AbstractString}=nothing,sfs_columns::Array{Int64,1}=[3,5],div_columns::Array{Int64,1}=[6,7],bins::Union{Nothing,Int64}=nothing,isolines::Bool=false) where S <: AbstractString
+function parse_sfs(;sample_size::Int64,data::S,gene_list::Union{Nothing,S}=nothing,sfs_columns::Array{Int64,1}=[3,5],div_columns::Array{Int64,1}=[6,7],bins::Union{Nothing,Int64}=nothing,isolines::Bool=false) where S <: AbstractString
 
 	if isolines
 		s_size = sample_size
@@ -30,7 +30,7 @@ function parse_sfs(;sample_size::Int64,data::String,gene_list::Union{Nothing,Abs
 		s_size = (sample_size*2)
 	end
 	
-	df = CSV.read(data,header=false,delim='\t',DataFrame)
+	df = CSV.read(data,header=false,delim='\t',DataFrame)	
 
 	if(!isnothing(gene_list))
 		ids = @view df[:,1];
@@ -77,10 +77,10 @@ function get_pol_div(df_subset::Union{DataFrame,SubDataFrame},s_size::Int64,sfs_
     sfs_ps = reduce(vcat,values(merge(+,freq,ps)))
 
 	if(!isnothing(bins))
-		sfs_pn = MKtest.reduce_sfs(hcat(collect(1:(s_size-1)),sfs_pn),bins)[:,2]
-		sfs_ps = MKtest.reduce_sfs(hcat(collect(1:(s_size-1)),sfs_ps),bins)[:,2]
+		sfs_pn = reduce_sfs(hcat(collect(1:(s_size-1)),sfs_pn),bins)[:,2]
+		sfs_ps = reduce_sfs(hcat(collect(1:(s_size-1)),sfs_ps),bins)[:,2]
 
-		sfs   = MKtest.reduce_sfs(hcat(freq.keys,merge(+,freq,pn).vals,merge(+,freq,ps).vals),bins)
+		sfs   = reduce_sfs(hcat(freq.keys,merge(+,freq,pn).vals,merge(+,freq,ps).vals),bins)
 	else
 		sfs   = hcat(freq.keys,merge(+,freq,pn).vals,merge(+,freq,ps).vals)
 	end

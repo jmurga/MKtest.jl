@@ -105,7 +105,7 @@ Find the optimum mutation given the expected reduction in nucleotide diversity (
 """
 function set_θ!(param::parameters)
 
-	i(θ,p=param) = Br(p,θ)-p.B
+	i(θ,p=param)      = Br(p,θ)-p.B
 	θ_noncoding       = find_zero(i,0.0)
 	param.θ_noncoding = θ_noncoding
 end

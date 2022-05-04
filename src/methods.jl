@@ -18,13 +18,13 @@ function aMK(alpha_values::Array{Float64,1})
 	fitted2    = curve_fit(model,collect(1:size(alpha_values,1)),alpha_values,fitted1.param)
 	asymp      = model(size(alpha_values,1),fitted2.param)
 
-	ci_low, ci_high   = try
-		confidence_interval(fitted2)[1][1],LsqFit.confidence_interval(fitted2)[1][2]
-	catch err
-		(0.0,0.0)
+	ci   = try
+		[confidence_interval(fitted2)[1][1],confidence_interval(fitted2)[1][2]]
+	catch
+		[0.0,0.0]
 	end
 
-	return(asymp,[ci_low,ci_high],fitted2.param)
+	return(asymp,ci,fitted2.param)
 end
 
 """
