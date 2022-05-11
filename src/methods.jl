@@ -4,19 +4,22 @@
 Function to estimate the asymptotic value of α(x).
 
 # Arguments
- - `alpha_values::Array{Float64,1}`: α(x) array.
+ - `sfs::Matrix{Float64}`: SFS array.
+ - `divergence::Matrix{Float64}`: SFS array.
 # Returns
  - `Array{Float64,2}`: Array of array containing asymptotic values, lower confidence interval, higher confidence interval
 """
-function aMK(alpha_values::Array{Float64,1})
+function aMK(sfs::Matrix{Float64},divergence::Vector{Int64})
+
+	α = @. 1 - (sfs[:,2]/sfs[:,3] * divergence[2]/divergence[1])
 
 	# Model
 	model(x,p) = @. p[1] + p[2]*exp(-x*p[3])
 
 	# Fit values
-	fitted1    = curve_fit(model,collect(1:size(alpha_values,1)),alpha_values,[-1.0,-1.0,1.0];lower=[-1.0,-1.0,1.0],upper=[1.0, 1.0, 10.0])
-	fitted2    = curve_fit(model,collect(1:size(alpha_values,1)),alpha_values,fitted1.param)
-	asymp      = model(size(alpha_values,1),fitted2.param)
+	fitted1    = curve_fit(model,collect(1:size(α,1)),α,[-1.0,-1.0,1.0];lower=[-1.0,-1.0,1.0],upper=[1.0, 1.0, 10.0])
+	fitted2    = curve_fit(model,collect(1:size(α,1)),α,fitted1.param)
+	asymp      = model(size(α,1),fitted2.param)
 
 	ci   = try
 		[confidence_interval(fitted2)[1][1],confidence_interval(fitted2)[1][2]]
@@ -40,7 +43,7 @@ Function to estimate the imputedMK
 # Returns
  - `Dict: Dictionary containing results
 """
-function imputedMK(;sfs::Matrix{Float64},divergence::Array,m::T,cutoff::Float64=0.15) where {T<:Union{Nothing,Array}}
+function imputedMK(sfs::Matrix{Float64},divergence::Vector{Int64},cutoff::Float64=0.15;m::T=nothing) where {T<:Union{Nothing,Array}}
 
 	output = OrderedDict{String,Float64}()
 

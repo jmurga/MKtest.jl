@@ -26,6 +26,7 @@ function rates(;param::parameters,
 				gH::S,
 				gL::S,
 				gam_neg::S,
+				alpha::Vector{Float64}=nothing,
 				theta::Union{Float64,Nothing}=0.001,
 				ρ::Union{Float64,Nothing}=0.001,
 				shape::Float64=0.184,
@@ -49,7 +50,11 @@ function rates(;param::parameters,
 	end
 
 	# Random α values
-	nTot    = rand(0.1:0.01:0.9,iterations)
+	if isnothing(alpha)
+		nTot    = rand(0.1:0.01:0.9,iterations)
+	else
+		nTot    = rand(alpha[1]:0.01:alpha[end],iterations)
+	end
 	
 	# Defining αW. It is possible to solve non-accounting for weak fixations
 	if isnothing(gL)
