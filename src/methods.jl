@@ -9,9 +9,7 @@ Function to estimate the asymptotic value of α(x).
 # Returns
  - `Array{Float64,2}`: Array of array containing asymptotic values, lower confidence interval, higher confidence interval
 """
-function aMK(sfs::Matrix{Float64},divergence::Vector{Int64})
-
-	α = @. 1 - (sfs[:,2]/sfs[:,3] * divergence[2]/divergence[1])
+function aMK(α::Vector{Float64})
 
 	# Model
 	model(x,p) = @. p[1] + p[2]*exp(-x*p[3])
@@ -43,7 +41,7 @@ Function to estimate the imputedMK
 # Returns
  - `Dict: Dictionary containing results
 """
-function imputedMK(sfs::Matrix{Float64},divergence::Vector{Int64},cutoff::Float64=0.15;m::T=nothing) where {T<:Union{Nothing,Array}}
+function imputedMK(sfs::Matrix{Float64},divergence::Matrix{Int64},cutoff::Float64=0.15;m::T=nothing) where {T<:Union{Nothing,Array}}
 
 	output = OrderedDict{String,Float64}()
 
