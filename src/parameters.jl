@@ -47,6 +47,7 @@ Mutable structure containing the variables required to solve the analytical appr
 	ρ::Float64                 = 0.001
 	TE::Float64                = 5.0
 	diploid::Bool              = false
+	cutoff::Vector{Float64}    = [0.0,1.0]
 
 	NN::Int64 = 2*N
 	nn::Int64 = 2*n

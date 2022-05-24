@@ -154,7 +154,11 @@ function summary_statistics(;param::parameters,h5_file::String,sfs::Vector,diver
 		throw(ArgumentError("You have more than one SFS and divergence file. Please be sure you have on set of files to bootstrap manually your data."))
 	end
 
-	sfs,divergence,α = data_to_poisson(sfs,divergence,param.dac,bootstrap);
+	if  !all(in(sfs[1][:,1]).(dac))
+		throw(ArgumentError("You filter the SFS using the following cutoff. Please be sure you input a DAC according to the filtered frequencies"))
+	end
+
+	sfs,divergence = data_to_poisson(sfs,divergence,param.dac,bootstrap);
 
 	if any(0 .∈ sfs) | any(0 .∈ divergence)
 		throw(ArgumentError("Your SFS contains 0 values at the selected DACs or the divergence is 0. Please consider to bin the SFS and re-estimate the rates using the selected bin as sample the new sample size."))

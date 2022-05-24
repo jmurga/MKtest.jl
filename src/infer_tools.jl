@@ -22,12 +22,14 @@ Function to parse polymorphism and divergence by subset of genes. The input data
  - `Array{Float64,2}`: Site Frequency Spectrum
  - `Array{Float64,1}`: Synonymous and non-synonymous divergence counts
 """
-function parse_sfs(;sample_size::Int64,data::S,gene_list::Union{Nothing,S}=nothing,sfs_columns::Array{Int64,1}=[3,5],div_columns::Array{Int64,1}=[6,7],bins::Union{Nothing,Int64}=nothing,isolines::Bool=false) where S <: AbstractString
+function parse_sfs(;param::parameters,data::S,gene_list::Union{Nothing,S}=nothing,sfs_columns::Array{Int64,1}=[3,5],div_columns::Array{Int64,1}=[6,7],bins::Union{Nothing,Int64}=nothing,isolines::Bool=false) where S <: AbstractString
+
+	@unpack n, cutoff = param
 
 	if isolines
-		s_size = sample_size
+		s_size = n
 	else
-		s_size = (sample_size*2)
+		s_size = (n*2)
 	end
 	
 	df = CSV.read(data,header=false,delim='\t',DataFrame)	
@@ -48,20 +50,21 @@ function parse_sfs(;sample_size::Int64,data::S,gene_list::Union{Nothing,S}=nothi
 			push!(out,tmp);
 		end
 
-		α, sfs, divergence = unzip(map(i-> get_pol_div(i,s_size,sfs_columns,div_columns,bins),out));
+		α, sfs, divergence = unzip(map(i-> get_pol_div(i,s_size,cutoff,sfs_columns,div_columns,bins),out));
 	else
-		α, sfs, divergence = get_pol_div(df,s_size,sfs_columns,div_columns,bins);
+		α, sfs, divergence = get_pol_div(df,s_size,cutoff,sfs_columns,div_columns,bins);
 		α = [α]; sfs = [sfs]; divergence = [divergence]
 	end
 
 	return α, sfs, divergence
 end
 
-function get_pol_div(df_subset::Union{DataFrame,SubDataFrame},s_size::Int64,sfs_columns::Vector{Int64},div_columns::Vector{Int64},bins::Union{Nothing,Int64})
+function get_pol_div(df_subset::Union{DataFrame,SubDataFrame},s_size::Int64,cutoff::Vector{Float64},sfs_columns::Vector{Int64},div_columns::Vector{Int64},bins::Union{Nothing,Int64})
 	
 	g(x) = parse.(Float64,x[2:end-1])
 	
 	freq = OrderedDict(round.(collect(1:(s_size-1))/s_size,digits=4) .=> 0)
+	# freq = OrderedDict(collect(1:(s_size-1)) .=> 0)
 
 	tmp  = split.(df_subset[:,sfs_columns], ",")
 
@@ -80,11 +83,14 @@ function get_pol_div(df_subset::Union{DataFrame,SubDataFrame},s_size::Int64,sfs_
 		sfs_pn = reduce_sfs(hcat(collect(1:(s_size-1)),sfs_pn),bins)[:,2]
 		sfs_ps = reduce_sfs(hcat(collect(1:(s_size-1)),sfs_ps),bins)[:,2]
 
-		sfs   = reduce_sfs(hcat(freq.keys,merge(+,freq,pn).vals,merge(+,freq,ps).vals),bins)
+		sfs   = hcat(collect(1:(bins-1))./bins,sfs_pn,sfs_ps,1:(bins-1))
 	else
-		sfs   = hcat(freq.keys,merge(+,freq,pn).vals,merge(+,freq,ps).vals)
+		sfs   = hcat(freq.keys,sfs_pn,sfs_ps,(1:s_size-1))
 	end
 	
+	# Filtering SFS and changing frequency to DAC
+	sfs = sfs[sfs[:,1] .>= cutoff[1].&& sfs[:,1] .<= cutoff[2],[4,2,3]]
+ 
 	scumu = cumulative_sfs(sfs)
 	α     = round.(1 .- (Ds/Dn .*  scumu[:,2] ./scumu[:,3]),digits=5)
 	return (α,sfs,[Dn Ds])
@@ -135,14 +141,13 @@ function data_to_poisson(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{
 	end
 
 	scumu         = cumulative_sfs.(sfs)
-	f(x,d=dac)    = sum(x[:,2:3],dims=2)[d]
+	# f(x,d=dac)    = sum(x[:,2:3],dims=2)[d]
+	f(x,d=dac)    = map(z->sum(x[x[:,1].==z,2:3]),dac)
 	s             = f.(scumu)
 
 	d             = [[sum(divergence[i][1:2])] for i in eachindex(divergence)]
-	al(a,b,c=dac) = @. round(1 - (b[2]/b[1] * a[:,2]/a[:,3])[c],digits=5)
-	α             = permutedims.(al.(scumu,divergence))
 
-	return(s,d,α)
+	return(s,d)
 end
 
 function open_sfs_div(x::Array{String,1},y::Array{String,1},dac::Vector{Int64},bootstrap::Union{Bool,Int64})
