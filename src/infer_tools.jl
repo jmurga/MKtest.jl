@@ -142,12 +142,14 @@ function data_to_poisson(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{
 
 	scumu         = cumulative_sfs.(sfs)
 	# f(x,d=dac)    = sum(x[:,2:3],dims=2)[d]
-	f(x,d=dac)    = map(z->sum(x[x[:,1].==z,2:3]),dac)
+	f(x,d=dac)    = map(z->sum(x[x[:,1].==z,2:3]),d)
 	s             = f.(scumu)
-
 	d             = [[sum(divergence[i][1:2])] for i in eachindex(divergence)]
 
-	return(s,d)
+	al(a,b) = @. round(1 - (b[2]/b[1] * a[:,2]/a[:,3])[c],digits=5)
+	α             = permutedims.(al.(scumu,divergence))
+	
+	return(α,s,d)
 end
 
 function open_sfs_div(x::Array{String,1},y::Array{String,1},dac::Vector{Int64},bootstrap::Union{Bool,Int64})
