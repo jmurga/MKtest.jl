@@ -164,7 +164,7 @@ function summary_statistics(;param::parameters,h5_file::String,sfs::Vector,diver
 
 	# Open rates
 	h         = jldopen(h5_file);
-	tmp       = h[string(param.N) * "/" * string(param.n)]
+	tmp       = h[string(param.N)* "/" * string(param.n) * "/" * string_cutoff]
 
 	# Subset index
 	idx    = sample(1:size(tmp["models"],1),summstat_size,replace=false);
