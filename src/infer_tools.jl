@@ -140,16 +140,16 @@ function data_to_poisson(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{
 		sfs[2:end] .= pr.(sfs[2:end])
 	end
 
-	scumu         = cumulative_sfs.(sfs)
+    scumu      = cumulative_sfs.(sfs)
 
-	f(x,d=dac)    = map(z->sum(x[x[:,1].==z,2:3]),d)
-	s             = f.(scumu)
-	d             = [[sum(divergence[i][1:2])] for i in eachindex(divergence)]
+    f(x,d=dac) = map(z->sum(x[x[:,1].==z,2:3]),d)
+    al(a,b)    = hcat(a[:,1],@. round(1 - (b[2]/b[1] * a[:,2]/a[:,3]),digits=5))
 
-	al(a,b) = hcat(a[:,1],@. round(1 - (b[2]/b[1] * a[:,2]/a[:,3]),digits=5))
+    s          = f.(scumu)
+    d          = [[sum(divergence[i][1:2])] for i in eachindex(divergence)]
 
-	α_x = al.(scumu,divergence)
-	α = map(x -> permutedims(x[in(dac).(x[:,1]),2]),α_x)
+    α_x        = al.(scumu,divergence)
+    α          = map(x -> permutedims(x[in(dac).(x[:,1]),2]),α_x)
 
 	return(α,s,d)
 end
