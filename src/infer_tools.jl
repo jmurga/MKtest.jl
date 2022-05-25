@@ -146,9 +146,9 @@ function data_to_poisson(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{
 	s             = f.(scumu)
 	d             = [[sum(divergence[i][1:2])] for i in eachindex(divergence)]
 
-	al(a,b) = @. round(1 - (b[2]/b[1] * a[:,2]/a[:,3])[c],digits=5)
+	al(a,b) = @. round(1 - (b[2]/b[1] * a[:,2]/a[:,3]),digits=5)
 	α             = permutedims.(al.(scumu,divergence))
-	
+
 	return(α,s,d)
 end
 
