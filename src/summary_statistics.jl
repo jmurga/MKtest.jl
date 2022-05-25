@@ -155,9 +155,6 @@ function summary_statistics(;param::parameters,h5_file::String,sfs::Vector,diver
 	end
 
 	assertion_params(param);
-	# if  !all(in(sfs[1][:,1]).(param.dac))
-	# 	throw(ArgumentError("Please be sure you input a DAC according to the filtered frequencies"))
-	# end
 
 	sfs,divergence = data_to_poisson(sfs,divergence,param.dac,bootstrap);
 
