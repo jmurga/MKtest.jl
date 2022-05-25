@@ -109,7 +109,7 @@ function rates(;param::parameters,
 	# Saving models and rates
 	models = DataFrame(df,[:B,:al_low,:al_tot,:gam_neg,:gL,:gH,:al,:ρ]);
 	neut   = vcat(r_ps...);
-	sel    = vcat(r_ps...);
+	sel    = vcat(r_pn...);
 	dsdn   = vcat(r_f...);
 
 	# Saving multiple summary statistics
