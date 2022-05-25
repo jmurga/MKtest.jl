@@ -154,9 +154,10 @@ function summary_statistics(;param::parameters,h5_file::String,sfs::Vector,diver
 		throw(ArgumentError("You have more than one SFS and divergence file. Please be sure you have on set of files to bootstrap manually your data."))
 	end
 
-	if  !all(in(sfs[1][:,1]).(dac))
-		throw(ArgumentError("You filter the SFS using the following cutoff. Please be sure you input a DAC according to the filtered frequencies"))
-	end
+	assertion_params(param);
+	# if  !all(in(sfs[1][:,1]).(param.dac))
+	# 	throw(ArgumentError("Please be sure you input a DAC according to the filtered frequencies"))
+	# end
 
 	sfs,divergence = data_to_poisson(sfs,divergence,param.dac,bootstrap);
 
@@ -205,4 +206,15 @@ function filter_expected(x::Matrix{Float64})
 	x = x[(x[:,1] .> 0),:]
 
 	return(x)
+end
+
+function pol_correction!(sfs_all::Vector{Matrix{Float64}},sfs_in::Vector{Matrix{Float64}};column::Vector{Int}=[2])
+
+	pn_all = map(x->sum(x[:,column]),sfs_all)
+	
+	sfs_pn = map(x -> sum(x[:,column]),sfs_in)
+	
+	ratio_all_sub = map( (x,y) -> x/y,pn_all,sfs_pn)
+
+	map( (x,y) -> y[:,column] .= x * y[:,column],ratio_all_sub,sfs_in)
 end

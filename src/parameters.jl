@@ -40,7 +40,7 @@ Mutable structure containing the variables required to solve the analytical appr
 	B::Float64                 = 0.999 
 	B_bins::Array{Float64,1}   = push!(collect(0.1:0.025:0.975),0.999)
 	ppos_l::Float64            = 0
-	ppos_h::Float64            = 0.001
+	ppos_h::Float64            = 0
 	N::Int64                   = 1000
 	n::Int64                   = 500
 	Lf::Int64                  = 2*10^5
@@ -52,8 +52,17 @@ Mutable structure containing the variables required to solve the analytical appr
 	NN::Int64 = 2*N
 	nn::Int64 = 2*n
 	dac::Array{Int64,1}  = [2,4,5,10,20,50,200,500,700]
+
 end
 
+function assertion_params(param::parameters)
+	@assert (param.cutoff[1] >= 0.0) & (param.cutoff[end] <= 1.0) "Frequency cutoff must be at the interval [0,1]"
+	@assert all(param.dac .< param.nn) "Selected DAC is larger than sample size"
+	freq_dac = hcat(round.(collect(1:(param.nn-1))./param.nn,digits=4),1:(param.nn-1))
+	freq_dac = freq_dac[(freq_dac[:,1] .>= param.cutoff[1]) .& (freq_dac[:,1] .<= param.cutoff[end]),:]
+
+	@assert all(in(freq_dac[:,2]).(param.dac)) "Please select a DAC according to your frequency cutoff"
+end
 """
 Mutable structure containing the downsampled SFS. 
 

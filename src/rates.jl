@@ -28,13 +28,15 @@ function rates(;param::parameters,
 				gam_neg::S,
 				alpha::Vector{Float64}=[0.1,0.9],
 				theta::Union{Float64,Nothing}=0.001,
-				ρ::Union{Float64,Nothing}=0.001,
-				shape::Float64=0.184,
+				rho::Union{Float64,Nothing}=0.001,
 				iterations::Int64,
 				output::String,
 				threads::Bool=false) where S <: Union{Array{Int64,1},UnitRange{Int64},Nothing}
 	
+	@assert (alpha[1] >= 0) & (alpha[end] <= 1) "α values must be at the interval [0,1]"
 
+	assertion_params(param)
+	
 	# temp = mktempdir(homedir());
 	# temp = temp .* "/tmp_" .* string.(1:iterations) .* ".txt"
 	# Iterations = models to solve
@@ -77,31 +79,38 @@ function rates(;param::parameters,
 		θ = rand(0.0005:0.0005:0.01,iterations)
 	end
 
-	# Random ρ on coding regions
-	if !isnothing(ρ)
-		ρ = fill(ρ,iterations)
+	# Random rho on coding regions
+	if !isnothing(rho)
+		ρ = fill(rho,iterations)
 	else
 		ρ = rand(0.0005:0.0005:0.05,iterations)
 	end
 	
 	# Creating N models to iter in threads. Set N models (paramerters) and sampling probabilites (binomialDict)
-	binom = binom_op!(param)
-
+	binom  = binom_op!(param)
 	# Estimations to distributed workers
 	if threads
 		@time out = ThreadsX.mapi( (α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,θ_n,ρ_n) -> iter_rates(param, binom, α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,θ_n,ρ_n),nTot, nLow, ngh, ngl, ngam_neg, afac, θ, ρ);
 	else
-		@time out = ParallelUtilities.pmapbatch( (α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,θ_n,ρ_n) -> iter_rates(param, binom, α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,θ_n,ρ_n),nTot, nLow, ngh, ngl, ngam_neg, afac, θ, ρ);
+		@time m,r_ps,r_pn,r_f = unzip(ParallelUtilities.pmapbatch( (α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,θ_n,ρ_n) -> iter_rates(param, binom, α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,θ_n,ρ_n),nTot, nLow, ngh, ngl, ngam_neg, afac, θ, ρ));
 	end
 
 	# Reducing output array
-	df = vcat(out...)
+	# df = vcat(out...)
+	
+	# # Saving models and rates
+	# models = DataFrame(df[:,1:8],[:B,:al_low,:al_tot,:gam_neg,:gL,:gH,:al,:ρ])
+	# neut   = df[:,9:(8+size(param.dac,1))]
+	# sel    = df[:,(9+size(param.dac,1)):(8+size(param.dac,1)*2)]
+	# dsdn   = Array(df[:,(end-3):end])
+
+	df = vcat(m...)
 	
 	# Saving models and rates
-	models = DataFrame(df[:,1:8],[:B,:al_low,:al_tot,:gam_neg,:gL,:gH,:al,:ρ])
-	neut   = df[:,9:(8+size(param.dac,1))]
-	sel    = df[:,(9+size(param.dac,1)):(8+size(param.dac,1)*2)]
-	dsdn   = Array(df[:,(end-3):end])
+	models = DataFrame(df,[:B,:al_low,:al_tot,:gam_neg,:gL,:gH,:al,:ρ]);
+	neut   = vcat(r_ps...);
+	sel    = vcat(r_ps...);
+	dsdn   = vcat(r_f...);
 
 	# Saving multiple summary statistics
 	n = OrderedDict{Int,Array}()
@@ -112,12 +121,13 @@ function rates(;param::parameters,
 	end
 
 	# Writting HDF5 file
+	string_cutoff = "cutoff=[" * string(param.cutoff[1]) * "," * string(param.cutoff[end]) * "]"
 	JLD2.jldopen(output, "a+") do file
-		file[string(param.N)* "/" * string(param.n) * "/models"] = models;
-		file[string(param.N)* "/" * string(param.n) * "/neut"]   = n;
-		file[string(param.N)* "/" * string(param.n) * "/sel"]    = s;
-		file[string(param.N)* "/" * string(param.n) * "/dsdn"]   = dsdn;
-		file[string(param.N)* "/" * string(param.n) * "/dac"]    = param.dac;
+		file[string(param.N)* "/" * string(param.n) * "/" * string_cutoff *  "/models"] = models;
+		file[string(param.N)* "/" * string(param.n) * "/" * string_cutoff *  "/neut"]   = n;
+		file[string(param.N)* "/" * string(param.n) * "/" * string_cutoff *  "/sel"]    = s;
+		file[string(param.N)* "/" * string(param.n) * "/" * string_cutoff *  "/dsdn"]   = dsdn;
+		file[string(param.N)* "/" * string(param.n) * "/" * string_cutoff *  "/dac"]    = param.dac;
 	end;
 end
 
@@ -158,22 +168,29 @@ function iter_rates(param::parameters,binom::Dict{Float64, SparseMatrixCSC{Float
 	set_ppos!(param)
 
 	# Allocate array to solve the model for all B values
-	r = zeros(size(param.B_bins,1),(size(param.dac,1) * 2) + 12)
+	m = zeros(size(param.B_bins,1),8)
+	r_ps = zeros(size(param.B_bins,1),size(param.dac,1))
+	r_pn = zeros(size(param.B_bins,1),size(param.dac,1))
+	r_f = zeros(size(param.B_bins,1),4)
+	# r = zeros(size(param.B_bins,1),(size(param.dac,1) * 2) + 12)
 	for j in eachindex(param.B_bins)
 		# Set B value
 		param.B = param.B_bins[j]
 		# Solve θ non-coding for the B value.
 		set_θ!(param)
 		# Solve model for the B value
-		tmp = try
+		x,y,z,w = try
 			getting_rates(param,binom[param.B])
 		catch e
 			zeros(size(param.dac,1) *2+ 12)'
 		end
-		@inbounds r[j,:] = tmp
+		@inbounds m[j,:] = x
+		@inbounds r_ps[j,:] = y
+		@inbounds r_pn[j,:] = z
+		@inbounds r_f[j,:] = w
 	end
 
-	return r
+	return (m,r_ps,r_pn,r_f)
 end
 
 """
@@ -212,7 +229,17 @@ function getting_rates(param::parameters,binom::SparseMatrixCSC{Float64,Int64})
 	selL::Array{Float64,1} = sfs_pos(param,param.gL,param.ppos_l,binom)
 	selN::Array{Float64,1} = sfs_neg(param,param.ppos_h+param.ppos_l,binom)
 	# Cumulative rates
-	tmp = cumulative_sfs(hcat(neut,selH,selL,selN),false)
+	if(sum(param.cutoff)!=1)
+		freq = round.(collect(1:(param.nn-1))./param.nn,digits=4)
+
+		tmp = hcat(freq,neut,selH,selL,selN)
+		tmp = @view tmp[(tmp[:,1] .>= param.cutoff[1]) .& (tmp[:,1] .<= param.cutoff[end]),2:end]
+
+		tmp = cumulative_sfs(tmp,false)
+	else
+		tmp = cumulative_sfs(hcat(neut,selH,selL,selN),false)
+	end
+
 	split_columns(matrix::Array{Float64,2}) = (view(matrix, :, i) for i in 1:size(matrix, 2));
 	neut, selH, selL, selN = split_columns(tmp)
 	sel = (selH+selL)+selN
@@ -220,7 +247,11 @@ function getting_rates(param::parameters,binom::SparseMatrixCSC{Float64,Int64})
 	##########
 	# Output #
 	##########
-	analytical_values::Array{Float64,2} = vcat(param.B,param.al_low,param.al_tot,param.gam_neg,param.gL,param.gH,param.al,param.θ_coding,neut[param.dac],sel[param.dac],ds,dn,fPosL,fPosH)'
+	analytical_m::Matrix{Float64} = vcat(param.B,param.al_low,param.al_tot,param.gam_neg,param.gL,param.gH,param.al,param.θ_coding)'
+	analytical_ps::Matrix{Float64} = neut[param.dac]'
+	analytical_pn::Matrix{Float64} = sel[param.dac]'
+	analytical_f::Matrix{Float64} = hcat(ds,dn,fPosL,fPosH)
+	# analytical_values::Array{Float64,2} = vcat(param.B,param.al_low,param.al_tot,param.gam_neg,param.gL,param.gH,param.al,param.θ_coding,neut[param.dac],sel[param.dac],ds,dn,fPosL,fPosH)'
 
-	return (analytical_values)
+	return (analytical_m,analytical_ps,analytical_pn,analytical_f)
 end

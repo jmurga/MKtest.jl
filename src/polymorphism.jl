@@ -170,7 +170,7 @@ Changing SFS considering all values above a frequency *x*. The original asymptot
 # Output 
  - `sfs_tmp::Vector{Float64}`: SFS array
 """
-function cumulative_sfs(sfs_tmp::Array,freqs::Bool=true)
+function cumulative_sfs(sfs_tmp::Union{Array,SubArray},freqs::Bool=true)
 
 	out      = Array{Float64}(undef, size(sfs_tmp,1),size(sfs_tmp,2))
 
