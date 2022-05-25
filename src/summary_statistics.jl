@@ -163,6 +163,7 @@ function summary_statistics(;param::parameters,h5_file::String,sfs::Vector,diver
 	end
 
 	# Open rates
+	string_cutoff = "cutoff=[" * string(param.cutoff[1]) * "," * string(param.cutoff[end]) * "]";
 	h         = jldopen(h5_file);
 	tmp       = h[string(param.N)* "/" * string(param.n) * "/" * string_cutoff]
 
