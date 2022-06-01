@@ -194,6 +194,7 @@ end
 
 
 function abcmk_to_grapes(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{Int64}},m::Vector{Matrix{Int64}},model::String,output::String,grapes::String) 
+	
 	sfs = reduce_sfs.(sfs,20);
 	
 	pn = map(x-> permutedims(x[:,2]),sfs);
@@ -206,6 +207,7 @@ function abcmk_to_grapes(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{
 	ms = map(x->x[2],m);
 
 	idx = string.(collect(1:length(sfs)));
+
 	f(pn,ps,dn,ds,mn,ms,w) = DataFrame(hcat("dofe_"*string(w),20,mn,pn,ms,ps,mn,dn,ms,ds...),:auto)
 
 	dofe = f.(pn,ps,dn,ds,mn,ms,idx);
@@ -220,9 +222,12 @@ function abcmk_to_grapes(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{
 
 	r(d,o,model=model,grapes=grapes) = run(`$grapes -in $d -out $o -model $model`)
 	
-	progress_pmap(r,output_dofe,output_grapes);
+	@suppress_out begin
+		progress_pmap(r,output_dofe,output_grapes);   
+	end
+
 
 	df = CSV.read.(output_grapes,DataFrame,footerskip=1,skipto=3);
-	
+
 	return(vcat(df...))
 end
