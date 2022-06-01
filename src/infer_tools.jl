@@ -234,8 +234,8 @@ function grapes(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{Int64}},m
 		progress_pmap(r,output_dofe,output_grapes);   
 	end
 
-	@suppress begin
-		df = CSV.read.(output_grapes,DataFrame,footerskip=1,skipto=3);
+	df = @suppress begin
+		CSV.read.(output_grapes,DataFrame,footerskip=1,skipto=3);
 	end
 
 	return(vcat(df...))
