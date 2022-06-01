@@ -89,7 +89,7 @@ function freq_inbreed(sel::Float64,freq::Float64,h::Float64,F::Float64)
 	return (((1.0 - s) * (freq * freq + F * freq * (1.0 - freq))) + ((1.0 - h * s) * freq * (1.0 - freq) * (1.0 - F))) / (((1.0 - freq) * (1.0 - freq) + (1.0 - freq) * F * freq) + ((1.0 - h * s) * 2.0 * freq * (1.0 - freq) * (1.0 - F)) + ((1.0 - s) * (freq * freq + F * freq * (1.0 - freq))))
 end
 
-function add_mutation!(mutation_list::LinkedList{mutation},r::Ptr{gsl_rng},N::Float64,h::Float64,s::Float64,θ::Float64,freq::Float64,dfe::String,param_one::Float64,param_two::Float64,s_mult::Float64,n_anc::Int64,age::Int64,trajectories::Array{Int64,1},relax::Bool=false) 
+function add_mutation!(mutation_list::LinkedList{mutation},r::Ptr{gsl_rng},N::Float64,h::Float64,s::Float64,θ::Float64,freq::Float64,dfe::String,param_one::Float64,param_two::Float64,s_mult::Float64,n_anc::I.nt64,age::Int64,trajectories::Array{Int64,1},relax::Bool=false) 
 
 	num_mut::Float64 = ran_poisson(r,θ/2.0)
 	count_mut::Int64 = length(mutation_list)

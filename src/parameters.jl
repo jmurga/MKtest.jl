@@ -52,7 +52,6 @@ Mutable structure containing the variables required to solve the analytical appr
 	NN::Int64 = 2*N
 	nn::Int64 = 2*n
 	dac::Array{Int64,1}  = [2,4,5,10,20,50,200,500,700]
-
 end
 
 function assertion_params(param::parameters)
@@ -160,7 +159,7 @@ function set_ppos!(param::parameters)
 
 	param.ppos_l,param.ppos_h = ppos_l, ppos_h
 
- end
+end
 
 """
 	binom_op(param)

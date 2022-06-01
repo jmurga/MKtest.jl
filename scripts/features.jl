@@ -104,3 +104,47 @@ function plotMap(;analysis::String,output::String)
 		println("Please install R, ggplot2 and abc in your system before execute this function")
 	end
 end
+
+function set_ppos!(param::parameters)
+
+	function f!(F,x,param=param)
+		F[1] = alpha_exp_sim_tot(param,x[1],x[2])-param.al_tot
+		F[2] = alpha_exp_sim_low(param,x[1],x[2])-param.al_low
+	end
+
+	ppos_l,ppos_h = nlsolve(f!,[0.0; 0.0]).zero
+
+	param.ppos_l,param.ppos_h = ppos_l, ppos_h
+
+end
+
+function poisson_fixation(;observed_values::Vector{S}, λds::Vector{Float64}, λdn::Vector{Float64},λweak::Vector{Float64},λstrong::Vector{Float64}) where S <: Union{Int64,Float64}
+
+
+		ds = @. λds / (λds + λdn) * observed_values
+		dn = @. λdn / (λds + λdn) * observed_values
+		dweak = @. λweak / (λds + λdn) * observed_values
+		dstrong = @. λstrong / (λds + λdn) * observed_values
+
+		sampled_ds     = pois_rand.(ds)
+		sampled_dn     = pois_rand.(dn)
+		sampled_weak   = pois_rand.(dweak)
+
+		if all(dstrong .> 0)
+			sampled_strong = pois_rand.(dstrong)
+		else
+			sampled_strong = .-pois_rand.(.-dstrong)
+		end
+
+		if all(sampled_weak .≈ 0)
+			sampled_weak .= 0
+		elseif all(sampled_strong .≈ 0) 
+			sampled_strong .= 0
+		end
+
+		alphas = @. [sampled_weak/sampled_dn sampled_strong/sampled_dn (sampled_weak+sampled_strong)/sampled_dn]
+
+		out = alphas,sampled_dn, sampled_ds
+		return out
+end
+

@@ -24,16 +24,16 @@ If gL is set to ```nothing```, the function will not account the role of the wea
 """
 function rates(;param::parameters,
 				gH::S,
-				gL::S,
+				gL::Union{S,Nothing},
 				gam_neg::S,
 				alpha::Vector{Float64}=[0.1,0.9],
 				theta::Union{Float64,Nothing}=0.001,
 				rho::Union{Float64,Nothing}=0.001,
 				iterations::Int64,
 				output::String,
-				threads::Bool=false) where S <: Union{Array{Int64,1},UnitRange{Int64},Nothing}
+				threads::Bool=false) where S <: Union{Vector{Int64},UnitRange{Int64}}
 	
-	@assert (alpha[1] >= 0) & (alpha[end] <= 1) "α values must be at the interval [0,1]"
+	# @assert (alpha[1] >= 0) & (alpha[end] <= 1) "α values must be at the interval [0,1]"
 
 	assertion_params(param)
 	

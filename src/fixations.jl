@@ -50,7 +50,7 @@ end
 
 # Positive fixations
 """
-	pFix()
+	p_fix()
 
 Expected positive fixation rate.
 
@@ -65,13 +65,13 @@ Expected positive fixation rate.
  - `Float64`: expected rate of positive fixation.
 
 """
-function pFix(param::parameters,gam::Int64)
+function p_fix(param::parameters,gam::Int64)
 
 	# Fixation probability
 	s::Float64    = gam/(param.NN)
 	pfix::Float64 = (1.0-ℯ^(-2.0*s))/(1.0-ℯ^(-2.0*gam))
 
-	# Correcting pFix for large s following Uricchio et al. 2014
+	# Correcting p_fix for large s following Uricchio et al. 2014
 	if s >= 0.1
 		pfix = ℯ^(-(1.0+s))
 		lim = 0
@@ -107,8 +107,7 @@ function fix_pos_sim(param::parameters,gamma::Int64,ppos::Float64)
 
 
 	red_plus = Φ(param,gamma)
-
 	# Non-synonymous * positive alleles probability * B reduction * fixation probility
-	out::Float64 = 0.75*ppos*red_plus*pFix(param,gamma)
+	out::Float64 = 0.75*ppos*red_plus*p_fix(param,gamma)
 	return out
 end

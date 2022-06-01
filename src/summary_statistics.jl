@@ -149,7 +149,7 @@ Estimate summary statistics using observed data and analytical rates. *analysis_
 """
 function summary_statistics(;param::parameters,h5_file::String,sfs::Vector,divergence::Vector,analysis_folder::String,summstat_size::Int64,bootstrap::Union{Bool,Int64}=false,threads::Bool=false)
 
-	# # Opening files
+	## Opening files
 	if length(sfs) > 1 & bootstrap != false
 		throw(ArgumentError("You have more than one SFS and divergence file. Please be sure you have on set of files to bootstrap manually your data."))
 	end

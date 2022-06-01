@@ -191,3 +191,38 @@ function source_plot_map_r(script_path::String)
 		println("\nPlease be sure you have R and the pacakges data.table, ggplot2 and locfit installed in your system. You can install them using Conda inside julia with the following commands:\n\n\tusing Pkg\n\tPkg.add(\"conda\")\n\tENV[\"R_HOME\"]=\"*\"\n\tPkg.add(\"Conda\")\n\tusing Conda\n\tConda.add(\"r-base\",channel=\"conda-forge\")\n\tConda.add([\"r-locfit\",\"r-ggplot2\",\"r-data.table\",\"r-r.utils\"],channel=\"conda-forge\")\n\tPkg.add(\"RCall\")\n")
 	end
 end
+
+
+function abcmk_to_grapes(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{Int64}},m::Vector{Matrix{Int64}},model::String,output::String,grapes::String) 
+	sfs = reduce_sfs.(sfs,20);
+	
+	pn = map(x-> permutedims(x[:,2]),sfs);
+	ps = map(x-> permutedims(x[:,3]),sfs);
+	
+	dn = map(x->x[1],divergence);
+	ds = map(x->x[2],divergence);
+
+	mn = map(x->x[1],m);
+	ms = map(x->x[2],m);
+
+	idx = string.(collect(1:length(sfs)));
+	f(pn,ps,dn,ds,mn,ms,w) = DataFrame(hcat("dofe_"*string(w),20,mn,pn,ms,ps,mn,dn,ms,ds...),:auto)
+
+	dofe = f.(pn,ps,dn,ds,mn,ms,idx);
+ 	h = fill(DataFrame(["" ""; "#unfolded" ""],:auto),length(sfs))
+ 	output_dofe = output .* "_" .* idx .* ".txt"
+	output_grapes = output .* "_" .* idx .* "." .* model
+
+	w(x,name,a=false) = CSV.write(name,x,delim='\t',header=false,append=a);
+
+	w.(h,output_dofe)
+	w.(dofe,output_dofe,fill(true,length(sfs)))
+
+	r(d,o,model=model,grapes=grapes) = run(`$grapes -in $d -out $o -model $model`)
+	
+	progress_pmap(r,output_dofe,output_grapes);
+
+	df = CSV.read.(output_grapes,DataFrame,footerskip=1,skipto=3);
+	
+	return(vcat(df...))
+end

@@ -15,6 +15,7 @@ module MKtest
 	import OrderedCollections: OrderedDict
 	import FastaIO: readfasta
 	import Random: randstring
+	import Suppressor: @suppress_out
 
 	# MK-approaches
 	import LsqFit: curve_fit, confidence_interval
