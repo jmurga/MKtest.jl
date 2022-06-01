@@ -1,6 +1,6 @@
 module MKtest
 
-	using Parameters, SparseArrays, Distributed, CSV, JLD2, DataFrames, ProgressMeter, Quadmath, GZip, StatsBase, Unzip, ThreadsX, ParallelUtilities
+	using Parameters, SparseArrays, Distributed, CSV, JLD2, DataFrames, ProgressMeter, Quadmath, GZip, StatsBase, Unzip, ThreadsX, ParallelUtilities, Suppressor
 
 	# Analytical solutions
 	import Roots: find_zero
@@ -15,7 +15,6 @@ module MKtest
 	import OrderedCollections: OrderedDict
 	import FastaIO: readfasta
 	import Random: randstring
-	import Suppressor: @suppress_out
 
 	# MK-approaches
 	import LsqFit: curve_fit, confidence_interval

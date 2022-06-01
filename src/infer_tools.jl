@@ -22,7 +22,7 @@ Function to parse polymorphism and divergence by subset of genes. The input data
  - `Array{Float64,2}`: Site Frequency Spectrum
  - `Array{Float64,1}`: Synonymous and non-synonymous divergence counts
 """
-function parse_sfs(;param::parameters,data::S,gene_list::Union{Nothing,S}=nothing,sfs_columns::Array{Int64,1}=[3,5],div_columns::Array{Int64,1}=[6,7],bins::Union{Nothing,Int64}=nothing,isolines::Bool=false) where S <: AbstractString
+function parse_sfs(;param::parameters,data::S,gene_list::Union{Nothing,S}=nothing,sfs_columns::Vector{Int64}=[3,5],div_columns::Vector{Int64}=[6,7],m_columns::Vector{Int64}=[8,9],bins::Union{Nothing,Int64}=nothing,isolines::Bool=false) where S <: AbstractString
 
 	@unpack n, cutoff = param
 
@@ -50,16 +50,17 @@ function parse_sfs(;param::parameters,data::S,gene_list::Union{Nothing,S}=nothin
 			push!(out,tmp);
 		end
 
-		α, sfs, divergence = unzip(map(i-> get_pol_div(i,s_size,cutoff,sfs_columns,div_columns,bins),out));
+		α, sfs, divergence, m = unzip(map(i-> get_pol_div(i,s_size,cutoff,sfs_columns,div_columns,m_columns,bins),out));
+
 	else
-		α, sfs, divergence = get_pol_div(df,s_size,cutoff,sfs_columns,div_columns,bins);
-		α = [α]; sfs = [sfs]; divergence = [divergence]
+		α, sfs, divergence,m = get_pol_div(df,s_size,cutoff,sfs_columns,div_columns,m_columns,bins);
+		α = [α]; sfs = [sfs]; divergence = [divergence]; m = [m]
 	end
 
-	return α, sfs, divergence
+	return α, sfs, divergence, m
 end
 
-function get_pol_div(df_subset::Union{DataFrame,SubDataFrame},s_size::Int64,cutoff::Vector{Float64},sfs_columns::Vector{Int64},div_columns::Vector{Int64},bins::Union{Nothing,Int64})
+function get_pol_div(df_subset::Union{DataFrame,SubDataFrame},s_size::Int64,cutoff::Vector{Float64},sfs_columns::Vector{Int64},div_columns::Vector{Int64},m_columns::Vector{Int64},bins::Union{Nothing,Int64})
 	
 	g(x) = parse.(Float64,x[2:end-1])
 	
@@ -93,7 +94,14 @@ function get_pol_div(df_subset::Union{DataFrame,SubDataFrame},s_size::Int64,cuto
  
 	scumu = cumulative_sfs(sfs)
 	α     = round.(1 .- (Ds/Dn .*  scumu[:,2] ./scumu[:,3]),digits=5)
-	return (α,sfs,[Dn Ds])
+
+	m = try
+		[sum(df_subset[:,m_columns[1]]) sum(df_subset[:,m_columns[2]])]
+	catch
+		m = [0 0]
+	end
+
+	return (α,sfs,[Dn Ds],m)
 end
 
 """
@@ -193,27 +201,27 @@ function source_plot_map_r(script_path::String)
 end
 
 
-function abcmk_to_grapes(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{Int64}},m::Vector{Matrix{Int64}},model::String,output::String,grapes::String) 
+function grapes(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{Int64}},m::Vector{Matrix{Int64}},model::String,output::String,grapes::String) 
 	
-	sfs = reduce_sfs.(sfs,20);
+    sfs = reduce_sfs.(sfs,20);
 	
-	pn = map(x-> permutedims(x[:,2]),sfs);
-	ps = map(x-> permutedims(x[:,3]),sfs);
+    pn  = map(x-> permutedims(x[:,2]),sfs);
+    ps  = map(x-> permutedims(x[:,3]),sfs);
 	
-	dn = map(x->x[1],divergence);
-	ds = map(x->x[2],divergence);
+    dn  = map(x->x[1],divergence);
+    ds  = map(x->x[2],divergence);
 
-	mn = map(x->x[1],m);
-	ms = map(x->x[2],m);
+    mn  = map(x->x[1],m);
+    ms  = map(x->x[2],m);
 
-	idx = string.(collect(1:length(sfs)));
+    idx = string.(collect(1:length(sfs)));
 
 	f(pn,ps,dn,ds,mn,ms,w) = DataFrame(hcat("dofe_"*string(w),20,mn,pn,ms,ps,mn,dn,ms,ds...),:auto)
 
-	dofe = f.(pn,ps,dn,ds,mn,ms,idx);
- 	h = fill(DataFrame(["" ""; "#unfolded" ""],:auto),length(sfs))
- 	output_dofe = output .* "_" .* idx .* ".txt"
-	output_grapes = output .* "_" .* idx .* "." .* model
+    dofe          = f.(pn,ps,dn,ds,mn,ms,idx);
+    h            = fill(DataFrame(["" ""; "#unfolded" ""],:auto),length(sfs))
+    output_dofe  = output .* "_" .* idx .* ".txt"
+    output_grapes = output .* "_" .* idx .* "." .* model
 
 	w(x,name,a=false) = CSV.write(name,x,delim='\t',header=false,append=a);
 
@@ -226,8 +234,9 @@ function abcmk_to_grapes(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{
 		progress_pmap(r,output_dofe,output_grapes);   
 	end
 
-
-	df = CSV.read.(output_grapes,DataFrame,footerskip=1,skipto=3);
+	@suppress begin
+		df = CSV.read.(output_grapes,DataFrame,footerskip=1,skipto=3);
+	end
 
 	return(vcat(df...))
 end
