@@ -95,7 +95,7 @@ function get_pol_div(df_subset::Union{DataFrame,SubDataFrame},s_size::Int64,cuto
 	scumu = cumulative_sfs(sfs)
 	α     = round.(1 .- (Ds/Dn .*  scumu[:,2] ./scumu[:,3]),digits=5)
 
-	m = try
+	m::Matrix{Int64} = try
 		[sum(df_subset[:,m_columns[1]]) sum(df_subset[:,m_columns[2]])]
 	catch
 		m = [0 0]
@@ -201,7 +201,7 @@ function source_plot_map_r(script_path::String)
 end
 
 
-function grapes(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{Int64}},m::Vector{Matrix{Int64}},model::String,output::String,grapes::String) 
+function grapes(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{Int64}},m::Vector{Matrix{Int64}},model::String,folder::String,grapes::String) 
 	
     sfs = reduce_sfs.(sfs,20);
 	
@@ -219,9 +219,9 @@ function grapes(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{Int64}},m
 	f(pn,ps,dn,ds,mn,ms,w) = DataFrame(hcat("dofe_"*string(w),20,mn,pn,ms,ps,mn,dn,ms,ds...),:auto)
 
     dofe          = f.(pn,ps,dn,ds,mn,ms,idx);
-    h            = fill(DataFrame(["" ""; "#unfolded" ""],:auto),length(sfs))
-    output_dofe  = output .* "_" .* idx .* ".txt"
-    output_grapes = output .* "_" .* idx .* "." .* model
+    h             = fill(DataFrame(["" ""; "#unfolded" ""],:auto),length(sfs))
+    output_dofe   = folder .* "/dofe_" .* idx .* ".txt"
+    output_grapes = folder .* "/dofe_" .* idx .* "." .* model
 
 	w(x,name,a=false) = CSV.write(name,x,delim='\t',header=false,append=a);
 
