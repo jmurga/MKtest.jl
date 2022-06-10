@@ -45,7 +45,7 @@ function parse_sfs(;param::parameters,data::S,gene_list::Union{Nothing,S}=nothin
 		end
 		
 		out = SubDataFrame[]
-		for c in eachrow(gene_matrix)
+		for c ∈ eachrow(gene_matrix)
 			tmp = @view df[filter(!isnothing,indexin(c,ids)),:];
 			push!(out,tmp);
 		end
@@ -154,7 +154,7 @@ function data_to_poisson(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{
     al(a,b)    = hcat(a[:,1],@. round(1 - (b[2]/b[1] * a[:,2]/a[:,3]),digits=5))
 
     s          = f.(scumu)
-    d          = [[sum(divergence[i][1:2])] for i in eachindex(divergence)]
+    d          = [[sum(divergence[i][1:2])] for i ∈ eachindex(divergence)]
 
     α_x        = al.(scumu,divergence)
     α          = map(x -> permutedims(x[in(dac).(x[:,1]),2]),α_x)
@@ -178,7 +178,7 @@ function open_sfs_div(x::Array{String,1},y::Array{String,1},dac::Vector{Int64},b
 	f(x,d=dac) = sum(x[:,2:3],dims=2)[d]
 	s = f.(scumu)
 
-	d = [[sum(divergence[i][1:2])] for i in eachindex(divergence)]
+	d = [[sum(divergence[i][1:2])] for i ∈ eachindex(divergence)]
 	al(a,b,c=dac) = @. round(1 - (b[2]/b[1] * a[:,2]/a[:,3])[c],digits=5)
 	α = permutedims.(al.(scumu,divergence))
 	return(s,d,α)
@@ -201,9 +201,15 @@ function source_plot_map_r(script_path::String)
 end
 
 
-function grapes(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{Int64}},m::Vector{Matrix{Int64}},model::String,folder::String,grapes::String) 
+function grapes(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{Int64}},m::Vector{Matrix{Int64}},model::String,folder::String,bins::Int64) 
 	
-    sfs = reduce_sfs.(sfs,20);
+	if(isnothing(CondaPkg.which("grapes")))
+		CondaPkg.add("grapes-static",channel="genomedk")
+	end
+
+	grapes = CondaPkg.which("grapes")
+
+    sfs = reduce_sfs.(sfs,bins);
 	
     pn  = map(x-> permutedims(x[:,2]),sfs);
     ps  = map(x-> permutedims(x[:,3]),sfs);
@@ -216,7 +222,7 @@ function grapes(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{Int64}},m
 
     idx = string.(collect(1:length(sfs)));
 
-	f(pn,ps,dn,ds,mn,ms,w) = DataFrame(hcat("dofe_"*string(w),20,mn,pn,ms,ps,mn,dn,ms,ds...),:auto)
+	f(pn,ps,dn,ds,mn,ms,w) = DataFrame(hcat("dofe_"*string(w),bins,mn,pn,ms,ps,mn,dn,ms,ds...),:auto)
 
     dofe          = f.(pn,ps,dn,ds,mn,ms,idx);
     h             = fill(DataFrame(["" ""; "#unfolded" ""],:auto),length(sfs))
@@ -228,7 +234,7 @@ function grapes(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{Int64}},m
 	w.(h,output_dofe)
 	w.(dofe,output_dofe,fill(true,length(sfs)))
 
-	r(d,o,model=model,grapes=grapes) = run(`$grapes -in $d -out $o -model $model`)
+	r(d,o,m=model,gr=grapes) = run(`$gr -in $d -out $o -model $m`)
 	
 	@suppress_out begin
 		progress_pmap(r,output_dofe,output_grapes);   

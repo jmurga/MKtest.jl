@@ -63,7 +63,7 @@ function imputedMK(sfs::Matrix{Float64},divergence::Matrix{Int64},cutoff::Float6
 	ratio_ps       = ps_low / ps_inter
 	deleterious   = pn_low - (pn_inter * ratio_ps)
 
-	if deleterious > pn
+	if (deleterious > pn) || (deleterious < 0)
 		deleterious = 0
 		pn_neutral = round(pn - deleterious,digits=3)
 	else

@@ -1,3 +1,5 @@
+using GSL, LinkedLists, Parameters, StaticArrays, Printf, QuadGK, ProgressMeter
+
 @with_kw struct recipe
 	epochs::Array{Int64,1} = [1000]
 	N::Array{Int64,1} = [8000]
@@ -89,7 +91,7 @@ function freq_inbreed(sel::Float64,freq::Float64,h::Float64,F::Float64)
 	return (((1.0 - s) * (freq * freq + F * freq * (1.0 - freq))) + ((1.0 - h * s) * freq * (1.0 - freq) * (1.0 - F))) / (((1.0 - freq) * (1.0 - freq) + (1.0 - freq) * F * freq) + ((1.0 - h * s) * 2.0 * freq * (1.0 - freq) * (1.0 - F)) + ((1.0 - s) * (freq * freq + F * freq * (1.0 - freq))))
 end
 
-function add_mutation!(mutation_list::LinkedList{mutation},r::Ptr{gsl_rng},N::Float64,h::Float64,s::Float64,θ::Float64,freq::Float64,dfe::String,param_one::Float64,param_two::Float64,s_mult::Float64,n_anc::I.nt64,age::Int64,trajectories::Array{Int64,1},relax::Bool=false) 
+function add_mutation!(mutation_list::LinkedList{mutation},r::Ptr{gsl_rng},N::Float64,h::Float64,s::Float64,θ::Float64,freq::Float64,dfe::String,param_one::Float64,param_two::Float64,s_mult::Float64,n_anc::Int64,age::Int64,trajectories::Array{Int64,1},relax::Bool=false) 
 
 	num_mut::Float64 = ran_poisson(r,θ/2.0)
 	count_mut::Int64 = length(mutation_list)
@@ -257,7 +259,7 @@ function sfs(mutation_list::LinkedList{mutation},r::Ptr{gsl_rng},sample_size::In
 		out      = zeros((sample_size-1,2))
 		out[:,1] = collect(1:(sample_size-1))
 
-		@inbounds for i::Int64 in out[:,1]
+		@inbounds for i::Int64 ∈ out[:,1]
 			out[i,2] = length(n[n .== i])
 		end
 
@@ -273,9 +275,8 @@ end
 
 function simulate(param::recipe, sample_size::Int64)
 	
-
 	@unpack epochs,N,θ,h,s₋,s₊,dfe,param_one,param_two,s,s_mult,prob,n_anc,burnin_period,relax,epoch_relaxation,s_relaxation,s_relaxation_threshold,F,trajectories,trajectories_output,seed = param;
-
+	seed = rand(1:10^8)
 	if !isempty(trajectories)
 		@assert length(unique(trajectories .> 0)) == 1  "ID index must be greater than 0";
 		io = open(trajectories_output,"w+")
@@ -302,10 +303,11 @@ function simulate(param::recipe, sample_size::Int64)
 		s_mult = s_mult;
 	end
 	
-
-	@printf "Demographic History (%i epochs)\n\n" events;
-	for e=1:events
-		@printf "Ne = %i\tgenerations = %i\tF = %lf\n" N[e] epochs[e] param.F[e];
+	if nprocs() == 1
+		@printf "Demographic History (%i epochs)\n\n" events;
+		for e=1:events
+			@printf "Ne = %i\tgenerations = %i\tF = %lf\n" N[e] epochs[e] param.F[e];
+		end
 	end
 
 	mutation_list = LinkedList{mutation}();
@@ -325,10 +327,16 @@ function simulate(param::recipe, sample_size::Int64)
 		# Inbreeding Ne
 
 		N_F = N[e] / (1.0 + F[e]); 
-		@printf "Currently in epoch = %i ; Mutations before epoch's beginning = %i\n"  e length(mutation_list);
+		if nprocs() == 0
+			@printf "Currently in epoch = %i ; Mutations before epoch's beginning = %i\n"  e length(mutation_list);
+		end
 
 		if epoch_relaxation[e]
-			printf("Relaxation in Epoch %i\n", e);
+			if nprocs() == 0
+				printf("Relaxation in Epoch %i\n"
+					, e);
+			end
+
 			relax_selection!(mutation_list, s_relaxation, s_relaxation_threshold, relaxation_type);
 		end
 
@@ -361,7 +369,7 @@ function simulate(param::recipe, sample_size::Int64)
 	return(out,hcat(l,f))
 end
 
-function simulate_batch(param::recipe,sample_size::Int64,replicas::Int64)
+function simulate_batch(param::recipe,sample_size::Int64,replicas::Int64;pool::Bool=true)
 
 	mutation_list = LinkedList{mutation}();
 
@@ -370,12 +378,17 @@ function simulate_batch(param::recipe,sample_size::Int64,replicas::Int64)
 	n_sample_size = [sample_size for i::Int64=1:replicas]
 
 
-	mut = pmapbatch(simulate,n_params,n_sample_size);
-	s = sum(x->x[1][:,2],mut);
-	f = sum(x->x[2],mut);
+	mut = progress_pmap(simulate,n_params,n_sample_size);
 
-	s = hcat(round.(collect(1:(sample_size-1))/sample_size,digits=3),s);
+	if pool
+		s = sum(x->x[1][:,2],mut);
+		f = sum(x->x[2],mut);
 
+		s = hcat(round.(collect(1:(sample_size-1))/sample_size,digits=3),s);
+	else
+		s = map(x-> x[1],mut)
+		f = map(x-> x[2],mut)
+	end
 	return s,f
 end
 

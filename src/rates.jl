@@ -95,27 +95,21 @@ function rates(;param::parameters,
 		@time m,r_ps,r_pn,r_f = unzip(ParallelUtilities.pmapbatch( (α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,θ_n,ρ_n) -> iter_rates(param, binom, α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,θ_n,ρ_n),nTot, nLow, ngh, ngl, ngam_neg, afac, θ, ρ));
 	end
 
-	# Reducing output array
-	# df = vcat(out...)
-	
-	# # Saving models and rates
-	# models = DataFrame(df[:,1:8],[:B,:al_low,:al_tot,:gam_neg,:gL,:gH,:al,:ρ])
-	# neut   = df[:,9:(8+size(param.dac,1))]
-	# sel    = df[:,(9+size(param.dac,1)):(8+size(param.dac,1)*2)]
-	# dsdn   = Array(df[:,(end-3):end])
+	# Reducing models array
+	df  = vcat(m...);
+	# Filtering cases where deleterious DFE cannot be solved.
+	idx = sum.(eachrow(df)).!=0
 
-	df = vcat(m...)
-	
 	# Saving models and rates
-	models = DataFrame(df,[:B,:al_low,:al_tot,:gam_neg,:gL,:gH,:al,:ρ]);
-	neut   = vcat(r_ps...);
-	sel    = vcat(r_pn...);
-	dsdn   = vcat(r_f...);
+	models = @view DataFrame(df,[:B,:al_low,:al_tot,:gam_neg,:gL,:gH,:al,:ρ])[idx,:];
+	neut   = @view vcat(r_ps...)[idx,:];
+	sel    = @view vcat(r_pn...)[idx,:];
+	dsdn   = @view vcat(r_f...)[idx,:];
 
 	# Saving multiple summary statistics
 	n = OrderedDict{Int,Array}()
 	s = OrderedDict{Int,Array}()
-	for i in eachindex(param.dac)
+	for i ∈ eachindex(param.dac)
 		n[param.dac[i]] = neut[:,i]
 		s[param.dac[i]] = sel[:,i]
 	end
@@ -162,35 +156,40 @@ function iter_rates(param::parameters,binom::Dict{Float64, SparseMatrixCSC{Float
 	# Mutation rate and recomb
 	param.θ_coding = θ; param.ρ = ρ
 	#=param.θ_coding = θ; param.θᵣ .= θᵣ; param.ρ = ρ=#
+
+	# Allocate array to solve the model for all B values
+	m    = zeros(size(param.B_bins,1),8)
+	r_ps = zeros(size(param.B_bins,1),size(param.dac,1))
+	r_pn = zeros(size(param.B_bins,1),size(param.dac,1))
+	r_f  = zeros(size(param.B_bins,1),4)
+	# r  = zeros(size(param.B_bins,1),(size(param.dac,1) * 2) + 12)
+
 	# Solving θ on non-coding region and probabilites to get α value without BGS
 	param.B = 0.999
 	set_θ!(param)
-	set_ppos!(param)
-
-	# Allocate array to solve the model for all B values
-	m = zeros(size(param.B_bins,1),8)
-	r_ps = zeros(size(param.B_bins,1),size(param.dac,1))
-	r_pn = zeros(size(param.B_bins,1),size(param.dac,1))
-	r_f = zeros(size(param.B_bins,1),4)
-	# r = zeros(size(param.B_bins,1),(size(param.dac,1) * 2) + 12)
-	for j in eachindex(param.B_bins)
-		# Set B value
-		param.B = param.B_bins[j]
-		# Solve θ non-coding for the B value.
-		set_θ!(param)
-		# Solve model for the B value
-		x,y,z,w = try
-			getting_rates(param,binom[param.B])
-		catch e
-			zeros(size(param.dac,1) *2+ 12)'
+	try
+		set_ppos!(param)
+		for j ∈ eachindex(param.B_bins)
+			# Set B value
+			param.B = param.B_bins[j]
+			# Solve θ non-coding for the B value.
+			set_θ!(param)
+			# Solve model for the B value
+			x,y,z,w = try
+				getting_rates(param,binom[param.B])
+			catch e
+				zeros(size(m,2)),zeros(size(r_ps,2)),zeros(size(r_pn,2)),zeros(size(r_pf,2))
+			end
+			@inbounds m[j,:] = x
+			@inbounds r_ps[j,:] = y
+			@inbounds r_pn[j,:] = z
+			@inbounds r_f[j,:] = w
 		end
-		@inbounds m[j,:] = x
-		@inbounds r_ps[j,:] = y
-		@inbounds r_pn[j,:] = z
-		@inbounds r_f[j,:] = w
+		return (m,r_ps,r_pn,r_f)
+	catch
+		return (m,r_ps,r_pn,r_f)
 	end
 
-	return (m,r_ps,r_pn,r_f)
 end
 
 """
@@ -240,17 +239,17 @@ function getting_rates(param::parameters,binom::SparseMatrixCSC{Float64,Int64})
 		tmp = cumulative_sfs(hcat(neut,selH,selL,selN),false)
 	end
 
-	split_columns(matrix::Array{Float64,2}) = (view(matrix, :, i) for i in 1:size(matrix, 2));
+	split_columns(matrix::Array{Float64,2}) = (view(matrix, :, i) for i ∈ 1:size(matrix, 2));
 	neut, selH, selL, selN = split_columns(tmp)
 	sel = (selH+selL)+selN
 
 	##########
 	# Output #
 	##########
-	analytical_m::Matrix{Float64} = vcat(param.B,param.al_low,param.al_tot,param.gam_neg,param.gL,param.gH,param.al,param.θ_coding)'
+	analytical_m::Matrix{Float64}  = vcat(param.B,param.al_low,param.al_tot,param.gam_neg,param.gL,param.gH,param.al,param.θ_coding)'
 	analytical_ps::Matrix{Float64} = neut[param.dac]'
 	analytical_pn::Matrix{Float64} = sel[param.dac]'
-	analytical_f::Matrix{Float64} = hcat(ds,dn,fPosL,fPosH)
+	analytical_f::Matrix{Float64}  = hcat(ds,dn,fPosL,fPosH)
 	# analytical_values::Array{Float64,2} = vcat(param.B,param.al_low,param.al_tot,param.gam_neg,param.gL,param.gH,param.al,param.θ_coding,neut[param.dac],sel[param.dac],ds,dn,fPosL,fPosH)'
 
 	return (analytical_m,analytical_ps,analytical_pn,analytical_f)
