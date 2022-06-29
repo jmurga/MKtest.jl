@@ -135,13 +135,13 @@ Expected rate of positive selected allele frequency reduce by background selecti
 """
 function sfs_neg(param::parameters,p::Float64,binom::SparseMatrixCSC{Float64,Int64})
 
-	beta     = param.be/(1.0*param.B)
+	beta     = param.scale/(1.0*param.B)
 	NN2      = convert(Int64, ceil(param.NN*param.B))
 	xa       = collect(0:NN2)/NN2
 
 	solve_z   = similar(xa);
 
-	z(x::Float64,p::Float64=p) = (1.0-p)*(2.0^-param.al)*(beta^param.al)*(-zeta(param.al,x+beta/2.0) + zeta(param.al,(2+beta)/2.0))/((-1.0+x)*x)
+	z(x::Float64,p::Float64=p) = (1.0-p)*(2.0^-param.shape)*(beta^param.shape)*(-zeta(param.shape,x+beta/2.0) + zeta(param.shape,(2+beta)/2.0))/((-1.0+x)*x)
 
 	solve_z   = z.(xa)
 

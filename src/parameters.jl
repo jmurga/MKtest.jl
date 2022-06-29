@@ -7,12 +7,12 @@ import Parameters: @with_kw
 Mutable structure containing the variables required to solve the analytical approach. All the functions are solve using the internal values of the structure. You should declare a mutable structure to the perform the analytical estimations.
 
 # Parameters
- - `gam_neg::Int64`: Selection coefficient for deleterious alleles
+ - `gam_flanking::Int64`: Selection coefficient for deleterious alleles
  - `gL::Int64`: Selection coefficient for weakly benefical alleles
  - `gH::Int64`: Selection coefficient for strongly benefical alleles
  - `al_low::Float64`: Proportion of α due to weak selection
  - `al_tot::Float64`: α
- - `θ_noncoding::Float64`: Mutation rate defining BGS strength
+ - `θ_flanking::Float64`: Mutation rate defining BGS strength
  - `θ_coding::Float64`: Mutation rate on coding region
  - `al::Float64`: DFE shape parameter 
  - `be::Float64`: DFE scale parameter
@@ -28,15 +28,16 @@ Mutable structure containing the variables required to solve the analytical appr
 
 """
 @with_kw mutable struct parameters
-	gam_neg::Int64             = -457
 	gL::Int64                  = 10
 	gH::Int64                  = 500
 	al_low::Float64            = 0.2
 	al_tot::Float64            = 0.4
-	θ_noncoding::Float64       = 1e-3
+	θ_flanking::Float64        = 1e-3
+	gam_flanking::Int64        = -457
 	θ_coding::Float64          = 1e-3
-	al::Float64                = 0.184
-	be::Float64                = 0.000402
+	shape::Float64             = 0.184
+	gam_dfe::Int64             = -457
+	scale::Float64             = shape/abs(gam_dfe)
 	B::Float64                 = 0.999 
 	B_bins::Array{Float64,1}   = push!(collect(0.1:0.025:0.975),0.999)
 	ppos_l::Float64            = 0
@@ -95,7 +96,7 @@ Expected reduction in nucleotide diversity. Explored at [Charlesworth B., 1994](
 function Br(param::parameters,theta::Float64)
 
 	ρ::Float64     = param.ρ
-	t::Float64     = -1.0*param.gam_neg/(param.NN+0.0)
+	t::Float64     = -1.0*param.gam_flanking/(param.NN+0.0)
 	μ::Float64     = theta/(2.0*param.NN)
 	r::Float64     = ρ/(2.0*param.NN)
 
@@ -110,13 +111,13 @@ end
 Find the optimum mutation given the expected reduction in nucleotide diversity (B value) in a locus.
 
 # Returns
- - `adap.θ_noncoding::Float64`: changes adap.θ_noncoding value.
+ - `adap.θ_flanking::Float64`: changes adap.θ_flanking value.
 """
 function set_θ!(param::parameters)
 
 	i(θ,p=param)      = Br(p,θ)-p.B
-	θ_noncoding       = find_zero(i,0.0)
-	param.θ_noncoding = θ_noncoding
+	θ_flanking       = find_zero(i,0.0)
+	param.θ_flanking = θ_flanking
 end
 
 function alpha_exp_sim_low(param::parameters,ppos_l::Float64,ppos_h::Float64)
@@ -245,9 +246,9 @@ Multiplying across all deleterious linkes sites, we find:
 
 """
 function Φ(param::parameters,s::Int64)
-	S::Float64 = abs(param.gam_neg/(1.0*param.NN))
+	S::Float64 = abs(param.gam_flanking/(1.0*param.NN))
 	r::Float64 = param.ρ/(2.0*param.NN)
-	μ::Float64 = param.θ_noncoding/(2.0*param.NN)
+	μ::Float64 = param.θ_flanking/(2.0*param.NN)
 	s::Float64 = s/(param.NN*1.0)
 
 	Ψ0::Float64 = polygamma(1,(s+S)/r)
@@ -281,7 +282,7 @@ function analytical_alpha(param::parameters)
 	B = param.B
 
 	set_θ!(param)
-	θ_noncoding = param.θ_noncoding
+	θ_flanking = param.θ_flanking
 	# Solve the probabilities of fixations without BGS
 	## Set non-bgs
 	param.B = 0.999
@@ -290,7 +291,7 @@ function analytical_alpha(param::parameters)
 	## Solve the probabilities
 	set_ppos!(param)
 	# Return to the original values
-	param.θ_noncoding = θ_noncoding
+	param.θ_flanking = θ_flanking
 	param.B = B
 
 	################################################################

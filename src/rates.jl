@@ -12,7 +12,7 @@ If gL is set to ```nothing```, the function will not account the role of the wea
  - `binom::binomialDict` : structure containing the binomial convolution
  - `gH::Array{Int64,1}` : Range of strong selection coefficients
  - `gL::Union{Array{Int64,1},Nothing}`: Range of weak selection coefficients
- - `gam_neg::Array{Int64,1}` : Range of deleterious selection coefficients
+ - `gam_flanking::Array{Int64,1}` : Range of deleterious selection coefficients
  - `theta::Union{Float64,Nothing}` : Population-scaled mutation rate on coding region
  - `ρ::Union{Float64,Nothing}` : Population-scaled recombination rate
  - `shape::Float64=0.184` : DFE shape parameter
@@ -25,7 +25,8 @@ If gL is set to ```nothing```, the function will not account the role of the wea
 function rates(;param::parameters,
 				gH::S,
 				gL::Union{S,Nothing},
-				gam_neg::S,
+				gam_flanking::S,
+				gam_dfe::S,
 				alpha::Vector{Float64}=[0.1,0.9],
 				theta::Union{Float64,Nothing}=0.001,
 				rho::Union{Float64,Nothing}=0.001,
@@ -43,35 +44,36 @@ function rates(;param::parameters,
 
 	# Factor to modify input Γ(shape) parameter. Flexible Γ distribution over negative alleles
 	fac     = rand(-2:0.05:2,iterations)
-	afac    = @. param.al*(2^fac)
+	afac    = @. param.shape*(2^fac)
+	bfac    = afac./abs.(rand(gam_dfe,iterations))
 	
 	# Deleting shape > 1. Negative alpha_x values
-	idx = findall(afac .> 1)
-	if !isempty(idx)
-		afac[idx] = rand(afac[afac .< 1],size(idx,1))
-	end
+	# idx = findall(afac .> 1)
+	# if !isempty(idx)
+	# 	afac[idx] = rand(afac[afac .< 1],size(idx,1))
+	# end
 
 	# Random α values
-	nTot    = rand(alpha[1]:0.01:alpha[end],iterations)
+	n_tot    = rand(alpha[1]:0.01:alpha[end],iterations)
 	
 	# Defining αW. It is possible to solve non-accounting for weak fixations
 	if isnothing(gL)
 		# Setting αW to 0 for all estimations
-		nLow    = fill(0.0,iterations)
+		n_low    = fill(0.0,iterations)
 		# Random strong selection coefficients
-		ngl     = rand(repeat([1],iterations),iterations);
+		n_gl     = rand(repeat([1],iterations),iterations);
 	else
 		# Setting αW as proportion of α
 		lfac    = rand(0.0:0.05:0.9,iterations)
-		nLow    = @. nTot * lfac
+		n_low    = @. n_tot * lfac
 		# Random weak selection coefficients
-		ngl     = rand(repeat(gL,iterations),iterations);
+		n_gl     = rand(repeat(gL,iterations),iterations);
 	end
 
 	# Random strong selection coefficients
-	ngh     = rand(repeat(gH,iterations),iterations);
+	n_gh     = rand(repeat(gH,iterations),iterations);
 	# Random negative selection coefficients
-	ngam_neg = rand(repeat(gam_neg,iterations),iterations);
+	n_gam_flanking = rand(repeat(gam_flanking,iterations),iterations);
 
 	if !isnothing(theta)
 		θ = fill(theta,iterations)
@@ -90,9 +92,9 @@ function rates(;param::parameters,
 	binom  = binom_op!(param)
 	# Estimations to distributed workers
 	if threads
-		@time out = ThreadsX.mapi( (α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,θ_n,ρ_n) -> iter_rates(param, binom, α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,θ_n,ρ_n),nTot, nLow, ngh, ngl, ngam_neg, afac, θ, ρ);
+		@time m,r_ps,r_pn,r_f  = unzip(ThreadsX.mapi( (α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,scale,θ_n,ρ_n) -> iter_rates(param, binom, α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,scale,θ_n,ρ_n),n_tot, n_low, n_gh, n_gl, n_gam_flanking, afac, bfac,θ, ρ));
 	else
-		@time m,r_ps,r_pn,r_f = unzip(ParallelUtilities.pmapbatch( (α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,θ_n,ρ_n) -> iter_rates(param, binom, α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,θ_n,ρ_n),nTot, nLow, ngh, ngl, ngam_neg, afac, θ, ρ));
+		@time m,r_ps,r_pn,r_f = unzip(ParallelUtilities.pmapbatch( (α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,scale,θ_n,ρ_n) -> iter_rates(param, binom, α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,scale,θ_n,ρ_n),n_tot, n_low, n_gh, n_gl, n_gam_flanking, afac, bfac,θ, ρ));
 	end
 
 	# Reducing models array
@@ -101,7 +103,7 @@ function rates(;param::parameters,
 	idx = sum.(eachrow(df)).!=0
 
 	# Saving models and rates
-	models = @view DataFrame(df,[:B,:al_low,:al_tot,:gam_neg,:gL,:gH,:al,:ρ])[idx,:];
+	models = @view DataFrame(df,[:B,:al_low,:al_tot,:gam_flanking,:gL,:gH,:shape,:gam_dfe])[idx,:];
 	neut   = @view vcat(r_ps...)[idx,:];
 	sel    = @view vcat(r_pn...)[idx,:];
 	dsdn   = @view vcat(r_f...)[idx,:];
@@ -137,18 +139,18 @@ Estimating rates given a model for all B range.
  - `al_low::Float64`
  - `gH::Int64`
  - `gL::Int64`
- - `gam_neg::Int64`
+ - `gam_flanking::Int64`
  - `afac::Float64`
  - `ρ::Float64`
  - `θ::Float64`
 # Output
  - `Array{Float64,2}`
 """
-function iter_rates(param::parameters,binom::Dict{Float64, SparseMatrixCSC{Float64, Int64}},al_tot::Float64,al_low::Float64,gH::Int64,gL::Int64,gam_neg::Int64,afac::Float64,θ::Float64,ρ::Float64)
+function iter_rates(param::parameters,binom::Dict{Float64, SparseMatrixCSC{Float64, Int64}},al_tot::Float64,al_low::Float64,gH::Int64,gL::Int64,gam_flanking::Int64,afac::Float64,bfac::Float64,θ::Float64,ρ::Float64)
 
 	# Creating model to solve
 	# Γ distribution
-	param.al    = afac; param.be = abs(afac/gam_neg); param.gam_neg = gam_neg
+	param.shape    = afac; param.scale = bfac; param.gam_flanking = gam_flanking
 	# α, αW
 	param.al_low = al_low; param.al_tot = al_tot;
 	# Positive selection coefficients
@@ -246,11 +248,11 @@ function getting_rates(param::parameters,binom::SparseMatrixCSC{Float64,Int64})
 	##########
 	# Output #
 	##########
-	analytical_m::Matrix{Float64}  = vcat(param.B,param.al_low,param.al_tot,param.gam_neg,param.gL,param.gH,param.al,param.θ_coding)'
+	analytical_m::Matrix{Float64}  = vcat(param.B,param.al_low,param.al_tot,param.gam_flanking,param.gL,param.gH,param.shape,param.θ_coding)'
 	analytical_ps::Matrix{Float64} = neut[param.dac]'
 	analytical_pn::Matrix{Float64} = sel[param.dac]'
 	analytical_f::Matrix{Float64}  = hcat(ds,dn,fPosL,fPosH)
-	# analytical_values::Array{Float64,2} = vcat(param.B,param.al_low,param.al_tot,param.gam_neg,param.gL,param.gH,param.al,param.θ_coding,neut[param.dac],sel[param.dac],ds,dn,fPosL,fPosH)'
+	# analytical_values::Array{Float64,2} = vcat(param.B,param.al_low,param.al_tot,param.gam_flanking,param.gL,param.gH,param.shape,param.θ_coding,neut[param.dac],sel[param.dac],ds,dn,fPosL,fPosH)'
 
 	return (analytical_m,analytical_ps,analytical_pn,analytical_f)
 end

@@ -101,8 +101,13 @@ function add_mutation!(mutation_list::LinkedList{mutation},r::Ptr{gsl_rng},N::Fl
 		if dfe == "point"
 			s = s;
 		elseif dfe == "gamma"
-			##/Use this for gamma distribution in Boyko 2008:
+			##Use this for gamma distribution in Boyko 2008:
 			gamma = ran_gamma(r, param_one, param_two * s_mult);
+			# note, this is scale for a Nanc=1000, using the boyko params
+			s = - gamma / (n_anc * 2);
+		elseif dfe == "beta"
+			##Use this for gamma distribution in Boyko 2008:
+			gamma = ran_beta(r, param_one, param_two * s_mult);
 			# note, this is scale for a Nanc=1000, using the boyko params
 			s = - gamma / (n_anc * 2);
 		end
@@ -276,6 +281,7 @@ end
 function simulate(param::recipe, sample_size::Int64)
 	
 	@unpack epochs,N,θ,h,s₋,s₊,dfe,param_one,param_two,s,s_mult,prob,n_anc,burnin_period,relax,epoch_relaxation,s_relaxation,s_relaxation_threshold,F,trajectories,trajectories_output,seed = param;
+	
 	seed = rand(1:10^8)
 	if !isempty(trajectories)
 		@assert length(unique(trajectories .> 0)) == 1  "ID index must be greater than 0";
