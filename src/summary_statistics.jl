@@ -112,7 +112,7 @@ function sampled_from_rates(models::SubArray,fs::Vector{Float64},d::Vector{Int64
 	dn             = dsdn[:,2]
 	dweak          = dsdn[:,3]
 	dstrong        = dsdn[:,4]
-	gn             = abs.(models[:,4])
+	gn             = abs.(models[:,end])
 	sh             = round.(models[:,end-1],digits=5)
 
 	## Outputs
