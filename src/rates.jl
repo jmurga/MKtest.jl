@@ -32,26 +32,27 @@ function rates(;param::parameters,
 				rho::Union{Float64,Nothing}=0.001,
 				iterations::Int64,
 				output::String,
+				seed::Bool=false,
 				threads::Bool=false) where S <: Union{Vector{Int64},UnitRange{Int64}}
 	
-	# @assert (alpha[1] >= 0) & (alpha[end] <= 1) "α values must be at the interval [0,1]"
+	gH=200:2000;gL=1:10;gam_flanking=-1000:-100;gam_dfe=-1000:-100;iterations = 10;alpha=[0.1,0.9];theta=rho=1e-3
 
 	assertion_params(param)
 	
-	# temp = mktempdir(homedir());
-	# temp = temp .* "/tmp_" .* string.(1:iterations) .* ".txt"
-	# Iterations = models to solve
-
 	# Factor to modify input Γ(shape) parameter. Flexible Γ distribution over negative alleles
 	fac     = rand(-2:0.05:2,iterations)
 	afac    = @. param.shape*(2^fac)
-	bfac    = afac./abs.(rand(gam_dfe,iterations))
 	
-	# Deleting shape > 1. Negative alpha_x values
-	# idx = findall(afac .> 1)
-	# if !isempty(idx)
-	# 	afac[idx] = rand(afac[afac .< 1],size(idx,1))
-	# end
+	if seed
+		s    = rand(1:10^8);
+		Random.seed!(s);
+		n_gam_flanking = rand(gam_flanking,iterations);
+		Random.seed!(s);
+		bfac = afac./abs.(rand(gam_dfe,iterations));
+	else
+		n_gam_flanking = rand(gam_flanking,iterations);
+		bfac = afac./abs.(rand(gam_dfe,iterations));
+	end
 
 	# Random α values
 	n_tot    = rand(alpha[1]:0.01:alpha[end],iterations)
@@ -72,8 +73,6 @@ function rates(;param::parameters,
 
 	# Random strong selection coefficients
 	n_gh     = rand(repeat(gH,iterations),iterations);
-	# Random negative selection coefficients
-	n_gam_flanking = rand(repeat(gam_flanking,iterations),iterations);
 
 	if !isnothing(theta)
 		θ = fill(theta,iterations)
@@ -88,13 +87,13 @@ function rates(;param::parameters,
 		ρ = rand(0.0005:0.0005:0.05,iterations)
 	end
 	
-	# Creating N models to iter in threads. Set N models (paramerters) and sampling probabilites (binomialDict)
+	# Creating N models to iter in threads.
 	binom  = binom_op!(param)
 	# Estimations to distributed workers
 	if threads
 		@time m,r_ps,r_pn,r_f  = unzip(ThreadsX.mapi( (α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,scale,θ_n,ρ_n) -> iter_rates(param, binom, α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,scale,θ_n,ρ_n),n_tot, n_low, n_gh, n_gl, n_gam_flanking, afac, bfac,θ, ρ));
 	else
-		@time m,r_ps,r_pn,r_f = unzip(ParallelUtilities.pmapbatch( (α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,scale,θ_n,ρ_n) -> iter_rates(param, binom, α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,scale,θ_n,ρ_n),n_tot, n_low, n_gh, n_gl, n_gam_flanking, afac, bfac,θ, ρ));
+		@time m,r_ps,r_pn,r_f = unzip(ParallelUtilities.pmapbatch( (α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,scale,θ_n,ρ_n) -> iter_rates(param, binom, α_strong,α_weak,γ_strong,γ_weak,γ_neg,shape,scale,θ_n,ρ_n),n_tot, n_low, n_gh, n_gl, n_gam_flanking, afac, bfac, θ, ρ));
 	end
 
 	# Reducing models array
@@ -248,7 +247,7 @@ function getting_rates(param::parameters,binom::SparseMatrixCSC{Float64,Int64})
 	##########
 	# Output #
 	##########
-	analytical_m::Matrix{Float64}  = vcat(param.B,param.al_low,param.al_tot,param.gam_flanking,param.gL,param.gH,param.shape,param.θ_coding)'
+	analytical_m::Matrix{Float64}  = vcat(param.B,param.al_low,param.al_tot,param.gam_flanking,param.gL,param.gH,param.shape,-(param.shape/param.scale))'
 	analytical_ps::Matrix{Float64} = neut[param.dac]'
 	analytical_pn::Matrix{Float64} = sel[param.dac]'
 	analytical_f::Matrix{Float64}  = hcat(ds,dn,fPosL,fPosH)
