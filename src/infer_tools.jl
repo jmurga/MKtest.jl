@@ -201,7 +201,7 @@ function source_plot_map_r(script_path::String)
 end
 
 
-function grapes(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{Int64}},m::Vector{Matrix{Int64}},model::String,folder::String,bins::Int64) 
+function grapes(sfs::Vector{Matrix{Float64}},divergence::Vector{Matrix{Int64}},m::Vector{Matrix{Int64}},model::String,folder::String,bins::Int64)
 	
 	if(isnothing(CondaPkg.which("grapes")))
 		CondaPkg.add("grapes-static",channel="genomedk")

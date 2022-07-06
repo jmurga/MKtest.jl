@@ -35,7 +35,7 @@ function rates(;param::parameters,
 				seed::Bool=false,
 				threads::Bool=false) where S <: Union{Vector{Int64},UnitRange{Int64}}
 	
-	gH=200:2000;gL=1:10;gam_flanking=-1000:-100;gam_dfe=-1000:-100;iterations = 10;alpha=[0.1,0.9];theta=rho=1e-3
+	# gH=200:2000;gL=1:10;gam_flanking=-1000:-100;gam_dfe=-1000:-100;iterations = 10;alpha=[0.1,0.9];theta=rho=1e-3
 
 	assertion_params(param)
 	
