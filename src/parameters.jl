@@ -1,7 +1,7 @@
 ################################
 ####### Define parameters ######
 ################################
-import Parameters: @with_kw
+
 
 """
 Mutable structure containing the variables required to solve the analytical approach. All the functions are solve using the internal values of the structure. You should declare a mutable structure to the perform the analytical estimations.
@@ -25,7 +25,6 @@ Mutable structure containing the variables required to solve the analytical appr
  - `Lf::Int64`: Flanking region length
  - `ρ::Float64`: Recombination rate
  - `TE::Float64`
-
 """
 @with_kw mutable struct parameters
 	gL::Int64                  = 10
@@ -63,17 +62,6 @@ function assertion_params(param::parameters)
 
 	@assert all(in(freq_dac[:,2]).(param.dac)) "Please select a DAC according to your frequency cutoff"
 end
-"""
-Mutable structure containing the downsampled SFS. 
-
-# Returns
- - `bn::Dict`: SparseMatrixCSC containing the binomial convolution
-
-"""
-# @with_kw mutable struct binomialDict
-# 	bn::Dict = Dict{Float64,SparseMatrixCSC{Float64,Int64}}()
-# end
-#=const binomialDict = Dict{Float64,SparseMatrixCSC{Float64,Int64}}()=#
 
 ################################
 ###### Solving parameters ######
@@ -159,7 +147,6 @@ function set_ppos!(param::parameters)
 	end
 
 	param.ppos_l,param.ppos_h = ppos_l, ppos_h
-
 end
 
 """
@@ -174,7 +161,7 @@ Binomial convolution to sample the allele frequencies probabilites depending on 
 # Returns
  - `Array{Float64,2}`: convoluted SFS for each B value defined in the model (param.B_bins). The estimations are saved at *convolutedBn.bn*.
 """
-function binom_op!(param::parameters)
+function binom_op(param::parameters)
 
 	bn = Dict(param.B_bins[i] => spzeros(param.nn+1,param.NN) for i in 1:length(param.B_bins))
 
@@ -193,14 +180,13 @@ function binom_op!(param::parameters)
 
 		out  = pdf.(z,samples)
 		out  = round.(out,digits=10)
-		outS = SparseArrays.dropzeros(SparseArrays.sparse(out))
-		bn[b] = outS
-		#=param.neut[b] = round.(param.B*(param.θ_coding)*0.25*(outS*neutral_sfs),digits=10)=#
+		out_sparse = SparseArrays.dropzeros(SparseArrays.sparse(out))
+		bn[b] = out_sparse
 	end
 	return(bn)
 end
 
-function binom_op!(NN,nn,B)
+function binom_op(NN,nn,B)
 
 	NN2          = convert(Int64,ceil(NN*B))
 	samples      = collect(1:(nn-1))
@@ -212,8 +198,8 @@ function binom_op!(NN,nn,B)
 
 	out  = pdf.(z,samples)
 	out  = round.(out,digits=10)
-	outS = SparseArrays.dropzeros(SparseArrays.sparse(out))
-	return(outS)
+	out_sparse = SparseArrays.dropzeros(SparseArrays.sparse(out))
+	return(out_sparse)
 end
 """
 
@@ -246,6 +232,7 @@ Multiplying across all deleterious linkes sites, we find:
 
 """
 function Φ(param::parameters,s::Int64)
+
 	S::Float64 = abs(param.gam_flanking/(1.0*param.NN))
 	r::Float64 = param.ρ/(2.0*param.NN)
 	μ::Float64 = param.θ_flanking/(2.0*param.NN)
@@ -275,7 +262,7 @@ Analytical α(x) estimation. Solve α(x) generally. We used the expected rates o
 """
 function analytical_alpha(param::parameters)
 
-	binom = binom_op!(param.NN,param.nn,param.B)
+	binom = binom_op(param.NN,param.nn,param.B)
 	################################################################
 		# Solve the model similarly to original python mktest  #	
 	################################################################

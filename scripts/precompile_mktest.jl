@@ -1,1 +1,1 @@
-using MKtest, CSV, DataFrames, RCall, Plots, StatsBase
+using MKtest, CSV, DataFrames, StatsBase

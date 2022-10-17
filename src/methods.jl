@@ -1,4 +1,18 @@
 """
+	α_x(sfs,divergence)
+Function to estimate alpha_x
+"""
+function α_x(sfs::Matrix{Float64},divergence::Matrix{Float64};cumulative::Bool=true)
+
+	if cumulative
+		sfs = cumulative_sfs(sfs)
+	end
+
+	alpha_x = @. 1 - (sfs[:,2]/sfs[:,3] * divergence[2]/divergence[1])
+
+	return(alpha_x)
+end
+"""
 	aMK(x,columns)
 
 Function to estimate the asymptotic value of α(x).
@@ -9,25 +23,52 @@ Function to estimate the asymptotic value of α(x).
 # Returns
  - `Array{Float64,2}`: Array of array containing asymptotic values, lower confidence interval, higher confidence interval
 """
-function aMK(α::Vector{Float64})
+function aMK(
+    param::parameters,
+    α::Vector{Float64};
+    dac_rm::Bool = false,
+    na_rm::Bool = false)
 
-	# Model
-	model(x,p) = @. p[1] + p[2]*exp(-x*p[3])
+    @unpack nn, dac = param
 
-	# Fit values
-	fitted1    = curve_fit(model,collect(1:size(α,1)),α,[-1.0,-1.0,1.0];lower=[-1.0,-1.0,1.0],upper=[1.0, 1.0, 10.0])
-	fitted2    = curve_fit(model,collect(1:size(α,1)),α,fitted1.param)
-	asymp      = model(size(α,1),fitted2.param)
+    f = collect(1:length(α)) / nn
 
-	ci   = try
-		[confidence_interval(fitted2)[1][1],confidence_interval(fitted2)[1][2]]
-	catch
-		[0.0,0.0]
-	end
 
-	return(asymp,ci,fitted2.param)
+    if dac_rm
+        f = dac / nn
+        α = α[dac]
+    end
+
+    if na_rm
+        flt = .!isnan.(α) .&& .!isinf.(α) .&& α .!= 1
+        α = α[flt]
+        f = f[flt]
+    end
+
+    # Model
+    model(x, p) = @. p[1] + p[2] * exp(-x * p[3])
+
+    # Fit values
+
+    fitted1 = curve_fit(
+        model,
+        f,
+        α,
+        [-1.0, -1.0, 1.0];
+        lower = [-1.0, -1.0, 1.0],
+        upper = [1.0, 1.0, 10.0],
+    )
+    fitted2 = curve_fit(model, f, α, fitted1.param)
+    asymp = model(1, fitted2.param)
+
+    ci = try
+        [confidence_interval(fitted2)[1][1], confidence_interval(fitted2)[1][2]]
+    catch
+        [0.0, 0.0]
+    end
+
+    return (asymp, ci, fitted2.param)
 end
-
 """
 	imputedMK(sfs,divergence,m,cutoff)
 

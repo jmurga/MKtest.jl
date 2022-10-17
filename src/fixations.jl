@@ -7,7 +7,7 @@
 # Neutral fixation corrected by background selection
 """
 
- - fix_neut()
+ - fix_neut(parameters)
 
 Expected neutral fixations rate reduce by B value.
 
@@ -27,7 +27,7 @@ end
 # Negative fixations corrected by background selection
 """
 
-	fix_neg(ppos)
+	fix_neg(parameters,ppos)
 
 Expected fixation rate from negative DFE.
 
@@ -50,7 +50,7 @@ end
 
 # Positive fixations
 """
-	p_fix()
+	p_fix(parameters,gam)
 
 Expected positive fixation rate.
 
@@ -88,7 +88,7 @@ end
 # Positive fixations after apply Φ. reduction of positive fixations due deleterious linkage given a value B of background selection
 """
 
-	fix_pos_sim(gamma,ppos)
+	fix_pos_sim(parameters,gamma,ppos)
 
 Expected positive fixations rate reduced due to the impact of background selection and linkage. The probabilty of fixation of positively selected alleles is reduced by a factor Φ across all deleterious linked sites [`Analytical.Φ`](@ref).
 
