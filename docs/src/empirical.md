@@ -19,7 +19,8 @@ where $\frac{LT}{LT}$ with a constant mutation rate tend to $1$.
 
 Here, we extended their analytical calculations to generate the summary statistics required at ABC approaches. Thereby we avoided expensive forward simulations. 
 
-Considering fixed values of $T$, $L$, $\mu$, and fixation rates it is possible to solve analytical $\alpha_{(x)}$ performing the multiplication. However, this requires not only branch length estimations but also explicitly locus length selection which highly increases the order of estimations to solve. To avoid branch length estimations and locus length selection, we follow the previously described assumptions: (1) empirically observed fixations should be proportional to $T$, $L$ and $\mu$; (2) the mutational process follows a Poisson distribution . Based on that premises, we used a Poisson-sampling process to estimate the expected number of fixations. We corrected the analytical expected rates by the empirical observations as the rate of success $\lambda$ on the Poisson distribution
+Considering fixed values of $T$, $L$, $\mu$, and fixation rates it is possible to solve analytical $\alpha_{(x)}$ performing the multiplication. However, this requires not only branch length estimations but also explicitly locus length selection which highly increases the order of estimations to solve. To avoid performing branch length estimations in our computation, we assumed that the empirically observed number of fixations should be proportional to the length of the evolutionary branch of interest, $T$, the locus length $L$ and mutation ration $\mu$. We take the observed total number of fixations (including both nonsynonymous and synonymous sites) as a proxy for the expected number, and then sample weakly deleterious, neutral, and beneficial substitutions proportional to their relative rates for a fixed set of model parameters. The expected number of substitutions for positively selected substitutions is then
+
 
 $\mathbb{E}[D] = X \in Poisson\left(\lambda = D_{observed} \times (\mathbb{E}[d_+]+\mathbb{E}[d_-]+\mathbb{E}[d_0])\right)$
 
@@ -29,13 +30,16 @@ $\mathbb{E}[D_S] = X \in Poisson\left(\lambda = D_{observed} \times \left[\frac{
 
 $\mathbb{E}[D_N] = X \in Poisson\left(\lambda = D_{observed} \times \left[\frac{\mathbb{E}[d_+] + \mathbb{E}[d_-]}{\mathbb{E}[d_+] + \mathbb{E}[d_-] + \mathbb{E}[d_0]}\right]\right)$
 
-Our model takes into account that both sampling variance and process variance should affect the number of variable alleles that we sample at any particular allele frequency. The process variance arises from the random mutation-fixation process along the branch. To incorporate that variance we made one sample per frequency-bin given the SFS. Considering the random process at each frequency we made credible intervals for future ABC estimations. Otherwise, we would falsely find higher confidence in our parameter estimates. We draw the expected polymorphic values similarly to fixations, considering the SFS and the expected rates.
+
+It should be noted that both sampling variance and process variance affect the number of variable alleles at any particular allele frequency in a sequencing sample. 
+
+To incorporate that variance we made one sample per frequency-bin given the SFS, we sampled a Poisson distributed number of polymorphic alleles at frequency $x$ relative to their rate given the expected frequency spectra. The expected frequency spectra were downsampled using a binomial (with probability of success given by the frequency $\begin{pmatrix} x \\ 2n \end{pmatrix}$ in a sample of $2n$ chromosomes) to account for the sampling variance. Considering the random process at each frequency we made credible intervals for future ABC estimations. Otherwise, we would falsely find higher confidence in our parameter estimates. We draw the expected polymorphic values similarly to fixations, considering the SFS and the expected rates.
 
 $\mathbb{E}[P] = \sum_{x=0}^{x=1} X \in Poisson\left(\lambda = SFS_{(x)\ observed} \times (\mathbb{E}[p_{+(x)}]+\mathbb{E}[p_{-(x)}]+\mathbb{E}[p_{0(x)}])\right)$
 
-We modified the expected polymorphic rates and the observed SFS considering each frequency $x$ as the cumulative sum above $x$. This quantities have the same asymptote but are less affected by changing sample size. Therefore, we scaled better the analysis to sample size since most common alleles at frequencies $x$ have very few polymorphic sites in large samples. This way, we finally transformed $\alpha_{(x)}$ to be depending on the previous frequency bin value, which reflects each frequency category over the expected asymptotic shape. Because of that, $\alpha_{(x)}$ analysis is more robust even in low polymorphic populations.
+We modified the expected SFS and the observed SFS considering each frequency $x$ as the cumulative sum above $x$. This quantities have the same asymptote but are less affected by changing sample size. Therefore, we scaled better the analysis to sample size since most common alleles at frequencies $x$ have very few polymorphic sites in large samples. This way, we finally transformed $\alpha_{(x)}$ to be depending on the previous frequency bin value, which reflects each frequency category over the expected asymptotic shape. Because of that, $\alpha_{(x)}$ analysis is more robust even in low polymorphic populations.
 
-Consequently, for each analytical combination, it is possible to sample the expected number of fixations and polymorphism to perform the $\alpha_{(x)}$ estimations. Like in \cite{uricchio_exploiting_2019} we input $\alpha_{(x)}$ as summary statistic at generic ABC algorithm. We exploited summary statistics selection that are informative for estimating $\alpha_{(x)}$ values.
+Consequently, for each model combination, it is possible to sample the expected number of fixations and polymorphism to perform the $\alpha_{(x)}$ estimations. Like in [Uricchio et al.(2019)](https://doi.org/10.1038/s41559-019-0890-6) we input $\alpha_{(x)}$ as summary statistic at generic ABC algorithm. We exploited summary statistics selection that are informative for estimating $\alpha_{(x)}$ values.
 
 ## Parameters inference
 We used the expected proportion of weakly and strong fixations to estimate $\alpha_W$, $\alpha_S$ and $\alpha$. We followed the same procedure as the above section to subset the expected number of fixation taking into account weakly, strong and deleterious fixation rates categories. Therefore, we modified \hyperref[eqn 19]{eqn 19} according to their relative fixation rates.
@@ -58,6 +62,6 @@ Please note that we use a relative path called *analysis/* to execute the whole 
 
 The software is prepared to parallelize each pipeline step using Julia [Distributed](https://docs.julialang.org/en/v1/manual/distributed-computing/) computing. Distributing the process into threads has a cost in RAM. Please make some tests in your machine before executing expensive models. Nonetheless, distributing the estimation into threads decreases the pipeline execution time. It is almost mandatory to parallelize at least the rate estimations.
 
-The following examples, as well as the analysis described at REF, were tested using a laptop with the following hardware:
+The following examples were tested using a laptop with the following hardware:
 - Intel i7-7700HQ (8) @ 3.800GHz 
 - 16GB RAM DDR4 2400MHz

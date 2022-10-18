@@ -153,13 +153,8 @@ Estimate summary statistics from analytical rates. You must provide a path conta
 The function returns files containing bootstrapped datasets (alphas.txt) and summary statistics (summstat.txt)
 
 Check the documentation to get more info https://jmurga.github.io/MKtest.jl/dev/cli"
-@main function summaries(;analysis_folder::String="<folder>",h5_file::String="rates.jld2",ne::Int64=1000, samples::Int64=661,dac::String="2,4,5,10,20,50,200,661,925",summstat_size::Int64=100000,bootstrap::Int64=0)
+@main function summary_stat(;analysis_folder::String="<folder>",h5_file::String="rates.jld2",N::Int64=1000, samples::Int64=661,dac::String="2,4,5,10,20,50,200,661,925",cutoff::String="0.0,1.0",summstat_size::Int64=100000,bootstrap::Int64=0)
 	
-	@eval  using JLD2, DataFrames, CSV
-	
-	sfs     = CSV.read.(filter(x -> occursin("sfs",x), readdir(analysis_folder,join=true)),DataFrame,header=false) .|> Array;
-	divergence     = CSV.read.(filter(x -> occursin("div",x), readdir(analysis_folder,join=true)),DataFrame,header=false) .|> Array;
-
 	@eval adap      = MKtest.parameters(N=$ne,n=$samples,dac =parse.(Int,split($dac,",")))
 
 	@eval if $bootstrap != 0

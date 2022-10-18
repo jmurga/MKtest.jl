@@ -25,8 +25,7 @@ makedocs(;
                         "Rates" => "rates.md",
                         "Input data" => "input.md",
                         "Summary statistics" => "summstat.md",
-                        "ABC inference" => "abc.md",
-                        "Multiple dataset" => "multiple.md",
+                        "ABC inference" => "abc.md"
                 ],
                 "Command-Line interface" => "cli.md",
                 "Reference" => "reference.md"

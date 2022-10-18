@@ -1,12 +1,12 @@
 @with_kw mutable struct bootstrap_data
-	data::String = "vip_list.txt"
-	annotation::String = "ensembl_gene_coords_v69.bed"
-	dist::Int64 = 1
-	rep::Int64 = 3
-	tol::Float64 = 0.05
-	iter::Int64 = 10
-	factors::String = "confounding_factors.txt"
-	output::String = "test"
+    data::String = "vip_list.txt"
+    annotation::String = "ensembl_gene_coords_v69.bed"
+    dist::Int64 = 1
+    rep::Int64 = 3
+    tol::Float64 = 0.05
+    iter::Int64 = 10
+    factors::String = "confounding_factors.txt"
+    output::String = "test"
 end
 
 """
@@ -15,310 +15,302 @@ end
 """
 function filter_case_control(x::Vector{String}, y::Vector{String}, distance::Vector{String})
 
-	# setdiff!(x, hla_hist)
-	x_case::Vector{String}    = intersect(x, y[:, 1])
-	y_control::Vector{String} = setdiff(y[:, 1], x)
+    # setdiff!(x, hla_hist)
+    x_case::Vector{String} = intersect(x, y[:, 1])
+    y_control::Vector{String} = setdiff(y[:, 1], x)
 
-	intersect!(y_control, distance)
+    intersect!(y_control, distance)
 
-	return (x_case, string.(y_control))
+    return (x_case, string.(y_control))
 end
 
 # Get factors
-function get_factors(case_set::Vector{String}, control_set::Vector{String},factors_raw::Matrix)
+function get_factors(case_set::Vector{String}, control_set::Vector{String},
+                     factors_raw::Matrix)
+    control_values = factors_raw[(@view factors_raw[:, 1]) .∈ [control_set], 1:end]
+    control_dict = Dict{String, Vector{Float64}}()
 
-	control_values = factors_raw[(@view factors_raw[:, 1]).∈[control_set], 1:end]
-	control_dict   = Dict{String,Vector{Float64}}()
+    for row in eachrow(control_values)
+        control_dict[row[1]] = row[2:end]
+    end
 
-	for row ∈ eachrow(control_values)
-		control_dict[row[1]] = row[2:end]
-	end
+    control_number::Dict{String, Int64} = Dict(control_set .=> 0)
 
-	control_number::Dict{String,Int64} = Dict(control_set .=> 0)
+    case_avg::Vector{Float64} = vec(mean(factors_raw[(@view factors_raw[:, 1]) .∈ [case_set],
+                                                     2:end], dims = 1))
 
-	case_avg::Vector{Float64} =
-		vec(mean(factors_raw[(@view factors_raw[:, 1]).∈[case_set], 2:end], dims = 1))
-
-	return (
-		case_avg,
-		convert(Matrix{Float64}, @view control_values[:, 2:end]),
-		control_dict,
-		control_number
-	)
+    return (case_avg,
+            convert(Matrix{Float64}, @view control_values[:, 2:end]),
+            control_dict,
+            control_number)
 end
 
 # check limits
-function check_limits(control_avg::Vector{Float64},tol::Float64)
+function check_limits(control_avg::Vector{Float64}, tol::Float64)
+    l_u::Matrix{Float64} = hcat(control_avg, control_avg)
+    lims::Vector{String} = fill("start", length(control_avg))
 
-	l_u::Matrix{Float64} = hcat(control_avg, control_avg)
-	lims::Vector{String} = fill("start", length(control_avg))
+    for i::Int64 in eachindex(control_avg)
+        if lims[i] == "higher"
+            l_u[i, 1] = (1 - tol) * control_avg[i]
+            l_u[i, 2] = (1 + 1 * tol) * control_avg[i]
+        else
+            l_u[i, 1] = (1 - 1 * tol) * control_avg[i]
+            l_u[i, 2] = (1 + tol) * control_avg[i]
+        end
+    end
 
-	for i::Int64 ∈ eachindex(control_avg)
-		if lims[i] == "higher"
-			l_u[i, 1] = (1 - tol) * control_avg[i]
-			l_u[i, 2] = (1 + 1 * tol) * control_avg[i]
-		else
-			l_u[i, 1] = (1 - 1 * tol) * control_avg[i]
-			l_u[i, 2] = (1 + tol) * control_avg[i]
-		end
-	end
-
-	return (lims, l_u)
+    return (lims, l_u)
 end
 
 function get_samples(case_set::Vector{String}, control_boot::Vector{String})
+    sc_t = length(control_boot)
+    case_number = length(case_set)
 
-	sc_t        = length(control_boot)
-	case_number = length(case_set)
+    out = String[]
+    for p::Int64 in 0:99
+        sup_ind = sc_t - 1 - p * case_number
+        inf_ind = sc_t - 1 - p * case_number - case_number + 1
+        iter = control_boot[inf_ind:sup_ind]
 
-	out         = String[]
-	for p::Int64=0:99
+        z = p + 1
+        s = "sample_" * string(z) * " " * join(iter, " ")
+        push!(out, s)
+    end
 
-		sup_ind = sc_t - 1 - p * case_number
-		inf_ind = sc_t - 1 - p * case_number - case_number + 1
-		iter    = control_boot[inf_ind:sup_ind]
-
-		z       = p + 1
-		s       = "sample_" * string(z) * " " * join(iter, " ")
-		push!(out, s)
-	end
-
-	return (out)
+    return (out)
 end
 
 function get_distance(data::String, annotation::String)
+    if (isnothing(CondaPkg.which("bedtools")))
+        CondaPkg.add("bedtools", channel = "bioconda")
+    end
 
-	if (isnothing(CondaPkg.which("bedtools")))
-		CondaPkg.add("bedtools", channel = "bioconda")
-	end
+    bedtools = CondaPkg.which("bedtools")
 
-	bedtools = CondaPkg.which("bedtools")
+    tmp = tempname()
+    out = IOBuffer()
 
-	tmp      = tempname()
-	out      = IOBuffer()
+    run(pipeline(`fgrep -f $data $annotation`,
+                 `awk  -F'\t' 'BEGIN {OFS = FS} {print $1,int(($2+$3)/2),int(($2+$3)/2+1),$4,$5}'`,
+                 `sort -k1,2V`, tmp))
 
+    run(pipeline(`cut -f1 $annotation`, stdout = out))
 
-	run(pipeline(`fgrep -f $data $annotation`,`awk  -F'\t' 'BEGIN {OFS = FS} {print $1,int(($2+$3)/2),int(($2+$3)/2+1),$4,$5}'`,`sort -k1,2V`,tmp))
+    nchr = unique(split(String(take!(out)), "\n")[1:(end - 1)])
+    distance = tempname()
+    gene_1 = tempname()
+    gene_2 = tempname()
 
-	run(pipeline(`cut -f1 $annotation`, stdout = out))
-	
-	nchr     = unique(split(String(take!(out)), "\n")[1:end-1])
-	distance = tempname()
-	gene_1   = tempname()
-	gene_2   = tempname()
+    for i in nchr
+        try
+            run(pipeline(`grep -P "^$i\t" $tmp`, stdout = gene_1))
+            run(pipeline(`grep -P "^$i\t" $annotation`,
+                         `awk -F'\t' 'BEGIN {OFS = FS} {print $1,int(($2+$3)/2),int(($2+$3)/2+1),$4,$5}'`,
+                         `sort -k2,3n`, gene_2))
+            run(pipeline(pipeline(`$bedtools closest -d -a $gene_2 -b $gene_1`,
+                                  `cut -f4,11`, `sort`), stdout = distance, append = true))
+        catch e
+            continue
+        end
+    end
 
-	for i ∈ nchr
-		try
-			run(pipeline(`grep -P "^$i\t" $tmp`, stdout = gene_1))
-			run(pipeline(`grep -P "^$i\t" $annotation`,`awk -F'\t' 'BEGIN {OFS = FS} {print $1,int(($2+$3)/2),int(($2+$3)/2+1),$4,$5}'`,`sort -k2,3n`,gene_2))
-			run(pipeline(pipeline(`$bedtools closest -d -a $gene_2 -b $gene_1`,`cut -f4,11`,`sort`),stdout = distance,					append = true))
-		catch e
-			continue
-		end
-	end
+    df = Array(CSV.read(distance, DataFrame, delim = '\t', header = false))
 
-	df = Array(CSV.read(distance, DataFrame, delim = '\t', header = false))
+    rm.([tmp, gene_1, gene_2])
 
-	rm.([tmp, gene_1, gene_2])
-
-	return df
+    return df
 end
 
-function get_bootstrap(
-	case_set::Vector{String},
-	control_set::Vector{String};
-	factors_raw::Matrix,
-	max_reps::Int64,
-	tolerance::Float64)
+function get_bootstrap(case_set::Vector{String},
+                       control_set::Vector{String};
+                       factors_raw::Matrix,
+                       max_reps::Int64,
+                       tolerance::Float64)
 
-	# Get cont
-	case_number    = length(case_set);
-	control_number = length(control_set);
+    # Get cont
+    case_number = length(case_set)
+    control_number = length(control_set)
 
-	# Get averages
-	case_avg, factors, factors_dict, used_number = get_factors(case_set, control_set,factors_raw);
-	control_avg                                  = vec(mean(factors, dims = 1));
+    # Get averages
+    case_avg, factors, factors_dict, used_number = get_factors(case_set, control_set,
+                                                               factors_raw)
+    control_avg = vec(mean(factors, dims = 1))
 
-	# high_low
-	high_low, inf_sup    = check_limits(case_avg,tolerance);
-	flt_avg              = case_avg .> control_avg;
-	high_low[flt_avg]   .= "higher";
-	high_low[.!flt_avg] .= "lower";
+    # high_low
+    high_low, inf_sup = check_limits(case_avg, tolerance)
+    flt_avg = case_avg .> control_avg
+    high_low[flt_avg] .= "higher"
+    high_low[.!flt_avg] .= "lower"
 
-	# Increase control dataset to iter to create the control sets per se. Creating a big list speeds up the process because it avoids repeating the slow start of adding control genes to the "fake" seed.
-	# gene_1, gene_2 = control_iteration(x, y)
+    # Increase control dataset to iter to create the control sets per se. Creating a big list speeds up the process because it avoids repeating the slow start of adding control genes to the "fake" seed.
+    # gene_1, gene_2 = control_iteration(x, y)
 
-	######################
-	# Iter combinations
-	######################
-	previous_gn  = 0;
-	same_counter = 0;
+    ######################
+    # Iter combinations
+    ######################
+    previous_gn = 0
+    same_counter = 0
 
-	#Control sets are created by packs of 100 to speed up control creation while keeping memory usage in check.
-	init_fake = fake_seed_num = 100;
+    #Control sets are created by packs of 100 to speed up control creation while keeping memory usage in check.
+    init_fake = fake_seed_num = 100
 
-	# to keep the control sets close the averages for confounding factors in the group of interest, we later require that there some level of alternance with the newly added control genes swithcing between increasing the overall average and decreasing it. 
+    # to keep the control sets close the averages for confounding factors in the group of interest, we later require that there some level of alternance with the newly added control genes swithcing between increasing the overall average and decreasing it. 
 
-	lim = size(factors, 2)
+    lim = size(factors, 2)
 
-	direction = fill("start", lim)
-	current_factors = case_avg
+    direction = fill("start", lim)
+    current_factors = case_avg
 
-	added_nonvips = 0
-	good_control = String[]
+    added_nonvips = 0
+    good_control = String[]
 
-	sc_gn = length(good_control)
+    sc_gn = length(good_control)
 
-	while sc_gn < (init_fake + (10 + 100) * case_number)
-		# the two control genes to choose to add to the current control set.
-		gene_1 = rand(control_set)
-		gene_2 = rand(control_set)
+    while sc_gn < (init_fake + (10 + 100) * case_number)
+        # the two control genes to choose to add to the current control set.
+        gene_1 = rand(control_set)
+        gene_2 = rand(control_set)
 
-		while gene_1 == gene_2
-			gene_2 = rand(control_set)
-		end
+        while gene_1 == gene_2
+            gene_2 = rand(control_set)
+        end
 
-		factor_value_1  = factors_dict[gene_1]
-		factor_value_2  = factors_dict[gene_2]
+        factor_value_1 = factors_dict[gene_1]
+        factor_value_2 = factors_dict[gene_2]
 
-		sc_fc           = length(factor_value_1)
-		sc_t            = length(good_control)
+        sc_fc = length(factor_value_1)
+        sc_t = length(good_control)
 
-		matching::Int64 = 0
+        matching::Int64 = 0
 
-		test_value_1    =
-			(
-				fake_seed_num * case_avg +
-				current_factors * sc_t +
-				factor_value_1 +
-				factor_value_2
-			) / (sc_t + 2 + fake_seed_num)
+        test_value_1 = (fake_seed_num * case_avg +
+                        current_factors * sc_t +
+                        factor_value_1 +
+                        factor_value_2) / (sc_t + 2 + fake_seed_num)
 
-		test_value_2    =
-			(current_factors * sc_t + factor_value_1 + factor_value_2) / (sc_t + 2)
+        test_value_2 = (current_factors * sc_t + factor_value_1 + factor_value_2) /
+                       (sc_t + 2)
 
-		matching     =
-			sum((test_value_1 .>= inf_sup[:, 1]) .&& (test_value_1 .<= inf_sup[:, 2]))
+        matching = sum((test_value_1 .>= inf_sup[:, 1]) .&&
+                       (test_value_1 .<= inf_sup[:, 2]))
 
-		if matching >= lim
+        if matching >= lim
+            test_dir = similar(direction)
+            flt_dir = test_value_1 .>= current_factors
+            test_dir[flt_dir] .= "more"
+            test_dir[.!flt_dir] .= "less"
+            other_dir = sum(test_dir .!= direction)
+            test_ln = length(good_control) + 1
 
-			test_dir             = similar(direction)
-			flt_dir              = test_value_1 .>= current_factors
-			test_dir[flt_dir]   .= "more"
-			test_dir[.!flt_dir] .= "less"
-			other_dir            = sum(test_dir .!= direction)
-			test_ln              = length(good_control) + 1
+            if ((other_dir >= 0) &&
+                (used_number[gene_1] / test_ln <= (max_reps / case_number)) &&
+                (used_number[gene_2] / test_ln <= (max_reps / case_number)))
+                if (fake_seed_num > 0)
+                    fake_seed_num -= 1
+                end
 
-			if (
-				(other_dir >= 0) &&
-				(used_number[gene_1] / test_ln <= (max_reps / case_number)) &&
-				(used_number[gene_2] / test_ln <= (max_reps / case_number))
-			)
+                push!(good_control, gene_1)
+                push!(good_control, gene_2)
 
-				if (fake_seed_num > 0)
-					fake_seed_num -= 1
-				end
+                used_number[gene_1] += 1
+                used_number[gene_2] += 1
 
-				push!(good_control, gene_1)
-				push!(good_control, gene_2)
+                # Update current_factors
+                current_factors = copy(test_value_1)
 
-				used_number[gene_1] += 1
-				used_number[gene_2] += 1
+                # Update directions
+                copy!(direction, test_dir)
+            end
+        end
 
-				# Update current_factors
-				current_factors = copy(test_value_1)
+        sc_gn = length(good_control)
 
-				# Update directions
-				copy!(direction, test_dir)
-			end
-		end
+        if (sc_gn == previous_gn)
+            same_counter += 1
+        elseif sc_gn > previous_gn
+            same_counter = 0
+        end
 
-		sc_gn = length(good_control)
+        if (same_counter >= 5000000)
+            break
+        end
 
-		if (sc_gn == previous_gn)
-			same_counter += 1
-		elseif sc_gn > previous_gn
-			same_counter = 0
-		end
+        previous_gn = sc_gn
+    end
 
-		if (same_counter >= 5000000)
-			break
-		end
-
-		previous_gn = sc_gn
-	end
-
-	if(length(good_control) < 1000)
-		return []
-	else
-		return (good_control)
-	end
+    if (length(good_control) < 1000)
+        return []
+    else
+        return (good_control)
+    end
 end
 
 function bootstrap(param::bootstrap_data)
+    @unpack data, annotation, dist, rep, tol, iter, factors, output = param
 
-	@unpack data, annotation, dist, rep, tol, iter, factors, output = param;
+    @info "Opening data"
 
-	@info "Opening data"
-
-    case_raw    = vec(Array(CSV.read(data, header = false, delim = '\t', DataFrame,stringtype=String)))
+    case_raw = vec(Array(CSV.read(data, header = false, delim = '\t', DataFrame,
+                                  stringtype = String)))
     factors_raw = Array(CSV.read(factors, header = false, delim = '\t', DataFrame))
-    factors_id  = string.(@view factors_raw[:,1])
-    factors     = Float64.(@view factors_raw[:,2:end])
+    factors_id = string.(@view factors_raw[:, 1])
+    factors = Float64.(@view factors_raw[:, 2:end])
 
-	@info "Estimating distance between genes"
-	distance_raw = get_distance(data, annotation)
+    @info "Estimating distance between genes"
+    distance_raw = get_distance(data, annotation)
 
-	#Filter case, control and distance
-	distance       = string.(distance_raw[distance_raw[:, 2].>=dist, 1])
+    #Filter case, control and distance
+    distance = string.(distance_raw[distance_raw[:, 2] .>= dist, 1])
 
-	case, control  = filter_case_control(case_raw, factors_id, distance)
+    case, control = filter_case_control(case_raw, factors_id, distance)
 
-	case_number    = length(case)
-	control_number = length(control)
+    case_number = length(case)
+    control_number = length(control)
 
-	@info "There are " *
-		  string(case_number) *
-		  " genes of interest and " *
-		  string(control_number) *
-		  " potential control genes at distance of at least " *
-		  string(dist) *
-		  " bases."
+    @info "There are " *
+          string(case_number) *
+          " genes of interest and " *
+          string(control_number) *
+          " potential control genes at distance of at least " *
+          string(dist) *
+          " bases."
 
-	if (control_number <= (1.5 * case_number))
-		@warn "Warning! The number of control genes is less than 1.5 times the number of genes of interest. FDR may be high as a result."
-	end
+    if (control_number <= (1.5 * case_number))
+        @warn "Warning! The number of control genes is less than 1.5 times the number of genes of interest. FDR may be high as a result."
+    end
 
-	# using ThreadsX
-	n_case    = fill(case, iter)
-	n_control = fill(control, iter)
+    # using ThreadsX
+    n_case = fill(case, iter)
+    n_control = fill(control, iter)
 
-	@info "Running bootstrap"
-	good_control = ThreadsX.map( (x, y) -> get_bootstrap(x, y, factors_raw = factors_raw, max_reps = rep, tolerance = tol),n_case,n_control)
+    @info "Running bootstrap"
+    good_control = ThreadsX.map((x, y) -> get_bootstrap(x, y, factors_raw = factors_raw,
+                                                        max_reps = rep, tolerance = tol),
+                                n_case, n_control)
 
-	if any(isempty.(good_control))
-		@error "The bootstrap struggled too much to find matching controls. Stopping bootstrap test here. Please restart the entire pipeline for safety at input $data changing the parameters" 
-	else
+    if any(isempty.(good_control))
+        @error "The bootstrap struggled too much to find matching controls. Stopping bootstrap test here. Please restart the entire pipeline for safety at input $data changing the parameters"
+    else
+        out_samples = ThreadsX.map(x -> get_samples(case, x), good_control)
 
-		out_samples  = ThreadsX.map(x -> get_samples(case, x), good_control)
+        try
+            rm(output * "_control.txt")
+        catch err
+            touch(output * "_control.txt")
+        end
 
-		try
-			rm(output * "_control.txt")
-		catch err
-			touch(output * "_control.txt")
-		end
+        io = Base.open(output * "_control.txt", "a+")
+        for i in vcat(out_samples...)
+            println(io, i)
+        end
 
-		io = Base.open(output * "_control.txt", "a+")
-		for i ∈ vcat(out_samples...)
-			println(io, i)
-		end
+        close(io)
 
-		close(io)
-
-		io = Base.open(output * "_case.txt", "w+")
-		for i ∈ case
-			println(io, i)
-		end
-		close(io)
-	end
+        io = Base.open(output * "_case.txt", "w+")
+        for i in case
+            println(io, i)
+        end
+        close(io)
+    end
 end

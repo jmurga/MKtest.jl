@@ -20,22 +20,24 @@ Divergence sampling from Poisson distribution. The expected neutral and selected
  - `Array{Int64,1}` containing the expected count of neutral and selected fixations.
 
 """
-function poisson_fixation(observed_values::Vector{Int64}, λds::SubArray, λdn::SubArray,λweak::SubArray,λstrong::SubArray)
+function poisson_fixation(observed_values::Vector{Int64}, λds::SubArray, λdn::SubArray,
+                          λweak::SubArray, λstrong::SubArray)
+    ds = @. λds / (λds + λdn) * observed_values
+    dn = @. λdn / (λds + λdn) * observed_values
+    dweak = @. λweak / (λds + λdn) * observed_values
+    dstrong = @. λstrong / (λds + λdn) * observed_values
 
-	ds             = @. λds / (λds + λdn) * observed_values
-	dn             = @. λdn / (λds + λdn) * observed_values
-	dweak          = @. λweak / (λds + λdn) * observed_values
-	dstrong        = @. λstrong / (λds + λdn) * observed_values
+    sampled_ds = pois_rand.(ds)
+    sampled_dn = pois_rand.(dn)
+    sampled_weak = pois_rand.(dweak)
+    sampled_strong = pois_rand.(dstrong)
 
-	sampled_ds     = pois_rand.(ds)
-	sampled_dn     = pois_rand.(dn)
-	sampled_weak   = pois_rand.(dweak)
-	sampled_strong = pois_rand.(dstrong)
+    alphas = @. [sampled_weak / sampled_dn sampled_strong / sampled_dn (sampled_weak +
+                                                                        sampled_strong) /
+                                                                       sampled_dn]
 
-	alphas         = @. [sampled_weak/sampled_dn sampled_strong/sampled_dn (sampled_weak+sampled_strong)/sampled_dn]
-
-	out            = alphas, sampled_dn, sampled_ds
-	return out
+    out = alphas, sampled_dn, sampled_ds
+    return out
 end
 
 """
@@ -61,23 +63,24 @@ The success rate managing the Poisson distribution by the observed count each fr
  - `Array{Int64,2}` containing the expected total count of neutral and selected polymorphism.
 
 """
-function poisson_polymorphism(observed_values::Vector{Float64}, λps::Matrix{Float64}, λpn::Matrix{Float64})
+function poisson_polymorphism(observed_values::Vector{Float64}, λps::Matrix{Float64},
+                              λpn::Matrix{Float64})
 
-	# Neutral λ;
-	λ1 = @. λps / (λps + λpn) * observed_values
-	# Selected λ;
-	λ2 = @. λpn / (λps + λpn) * observed_values
+    # Neutral λ;
+    λ1 = @. λps / (λps + λpn) * observed_values
+    # Selected λ;
+    λ2 = @. λpn / (λps + λpn) * observed_values
 
-	# Replace negative and 0 rates values. Strange behaviour depending on θ and Γ values
-	# Relative rates output NaN values due to 0 divisons.
+    # Replace negative and 0 rates values. Strange behaviour depending on θ and Γ values
+    # Relative rates output NaN values due to 0 divisons.
 
-	replace!(λ1,NaN=>1)	
-	replace!(λ2,NaN=>1)
+    replace!(λ1, NaN => 1)
+    replace!(λ2, NaN => 1)
 
-	sampled_ps = pois_rand.(λ1)
-	sampled_pn = pois_rand.(λ2)
+    sampled_ps = pois_rand.(λ1)
+    sampled_pn = pois_rand.(λ2)
 
-	return (sampled_pn, sampled_ps)
+    return (sampled_pn, sampled_ps)
 end
 
 """
@@ -105,102 +108,107 @@ Ouput the expected values from the Poisson sampling process. Please check [`pois
 	sampling_summaries(gammaL,gammaH,ppos_l,ppos_h,observedData,nopos)
 
 """
-function sampling_summaries(models::SharedMatrix,fs::Vector{Float64},d::Vector{Int64},neut::SharedMatrix,sel::SharedMatrix,dsdn::SharedMatrix,output::String)
+function sampling_summaries(models::SharedMatrix, fs::Vector{Float64}, d::Vector{Int64},
+                            neut::SharedMatrix, sel::SharedMatrix, dsdn::SharedMatrix,
+                            output::String)
+    ds = @view dsdn[:, 1]
+    dn = @view dsdn[:, 2]
+    dweak = @view dsdn[:, 3]
+    dstrong = @view dsdn[:, 4]
+    gn = abs.(@view models[:, end])
+    sh = round.(view(models, :, size(models, 2) - 1), digits = 5)
 
-	ds             = @view dsdn[:,1]
-	dn             = @view dsdn[:,2]
-	dweak          = @view dsdn[:,3]
-	dstrong        = @view dsdn[:,4]
-	gn             = abs.(@view models[:,end])
-	sh             = round.(view(models,:,size(models,2)-1),digits=5)
+    ## Outputs
+    alphas, exp_dn, exp_ds = poisson_fixation(d, ds, dn, dweak, dstrong)
+    exp_pn, exp_ps = poisson_polymorphism(fs, permutedims(neut), permutedims(sel))
 
-	## Outputs
-	alphas, exp_dn, exp_ds = poisson_fixation(d ,ds, dn, dweak, dstrong);
-	exp_pn, exp_ps         = poisson_polymorphism(fs, permutedims(neut), permutedims(sel));
+    ## Alpha from expected values. Used as summary statistics
+    α_summaries = @. round(1 - ((exp_ds / exp_dn) * (exp_pn / exp_ps)'), digits = 5)
+    expected_values = hcat(round.(alphas, digits = 5), gn, sh, α_summaries)
+    expected_values = filter_expected(expected_values)
 
-	## Alpha from expected values. Used as summary statistics
-	α_summaries     = @. round(1 - ((exp_ds/exp_dn) * (exp_pn/exp_ps)'),digits=5);
-	expected_values = hcat(round.(alphas,digits=5),gn,sh,α_summaries);
-	expected_values = filter_expected(expected_values);
-
-	write_files(expected_values,output)
+    write_files(expected_values, output)
 end
 
 """
-	summary_statistics(param::parameters,rates::JLD2.JLDFile,analysis_folder::String,summstat_size::Int64,replicas::Int64,bootstrap::Bool)
+	summary_statistics(param,h5_file,sfs,divergence,analysis_folder,summstat_size)
 
 Estimate summary statistics using observed data and analytical rates. *analysis_folder* will check for the SFS and divergence file and will be used to output summary statistics
 
 # Arguments
  - `param::parameters` : Mutable structure containing the models
  - `h5_file::String` : HDF5 containing solved models, fixation and polymorphic rates
- - `sfs::Vector{Matrix{Float64}}`: SFS matrix.
- - `divergence::Vector{Matrix{Float64}}` : divergence matrix.
- - `analysis_folder::String` : Path to save summary statistics and observed data.
- - `summstat_size::Int64` : Number of summary statistics
+ - `sfs::Vector`: SFS data parsed from parse_sfs().
+ - `divergence::Vector`: divergence data from parse_sfs().
+ - `analysis_folder::String` : path to save summary statistics and observed data.
+ - `summstat_size::Int64` : number of summary statistics to sample.
 """
-function summary_statistics(param::parameters;h5_file::String,sfs::Vector,divergence::Vector,analysis_folder::String,summstat_size::Int64)
+function summary_statistics(param::parameters; h5_file::String, sfs::Vector,
+                            divergence::Vector, analysis_folder::String,
+                            summstat_size::Int64)
 
-	## Opening files
-	# if length(sfs) > 1
-	# 	throw(ArgumentError("You have more than one SFS and divergence file. Please be sure you have on set of files to bootstrap manually your data."))
-	# end
+    ## Opening files
+    # if length(sfs) > 1
+    # 	throw(ArgumentError("You have more than one SFS and divergence file. Please be sure you have on set of files to bootstrap manually your data."))
+    # end
 
-	assertion_params(param);
+    assertion_params(param)
 
-	α,sfs_p,divergence_p = data_to_poisson(sfs,divergence,param.dac);
+    α, sfs_p, divergence_p = data_to_poisson(sfs, divergence, param.dac)
 
-	if any(0 .∈ sfs_p) | any(0 .∈ divergence_p)
-		throw(ArgumentError("Your SFS contains 0 values at the selected DACs or the divergence is 0. Please consider to bin the SFS and re-estimate the rates using the selected bin as sample the new sample size."))
-	end
+    if any(0 .∈ sfs_p) | any(0 .∈ divergence_p)
+        throw(ArgumentError("Your SFS contains 0 values at the selected DACs or the divergence is 0. Please consider to bin the SFS and re-estimate the rates using the selected bin as sample the new sample size."))
+    end
 
-	# Open rates
-	@info "Opening and random sampling $summstat_size expected SFS and fixation rates"
-	string_cutoff = "cutoff=[" * string(param.cutoff[1]) * "," * string(param.cutoff[end]) * "]";
-	h             = jldopen(h5_file);
-	tmp           = h[string(param.N)* "/" * string(param.n) * "/" * string_cutoff]
-	
-	# Sample index to subset models
-	idx           = sample(1:size(tmp["models"],1),summstat_size,replace=false);
-	# Convert random models to solve to a SharedMatrix. Only reading shouldn't generate race-condition
-	models        = SharedMatrix(Array(view(tmp["models"],idx,:)));
-	dsdn          = SharedMatrix(tmp["dsdn"][idx,:]);
+    # Open rates
+    @info "Opening and random sampling $summstat_size expected SFS and fixation rates"
+    string_cutoff = "cutoff=[" * string(param.cutoff[1]) * "," * string(param.cutoff[end]) *
+                    "]"
+    h = jldopen(h5_file)
+    tmp = h[string(param.N) * "/" * string(param.n) * "/" * string_cutoff]
 
-	# Filtering polymorphic rate by dac
-	n             = hcat(map(x -> view(tmp["neut"][x],:),param.dac)...);
-	s             = hcat(map(x -> view(tmp["sel"][x],:),param.dac)...);
+    # Sample index to subset models
+    idx = sample(1:size(tmp["models"], 1), summstat_size, replace = false)
+    # Convert random models to solve to a SharedMatrix. Only reading shouldn't generate race-condition
+    models = SharedMatrix(Array(view(tmp["models"], idx, :)))
+    dsdn = SharedMatrix(tmp["dsdn"][idx, :])
 
-	neut          = SharedMatrix(n[idx,:]);
-	sel           = SharedMatrix(s[idx,:]);
-	
-	# Making summaries
-	summ_output   = analysis_folder .* "/summstat_" .* string.(1:size(sfs_p,1)) .* ".txt"
+    # Filtering polymorphic rate by dac
+    n = hcat(map(x -> view(tmp["neut"][x], :), param.dac)...)
+    s = hcat(map(x -> view(tmp["sel"][x], :), param.dac)...)
 
-	@info "Sampling and writting summary statistics at $analysis_folder"
+    neut = SharedMatrix(n[idx, :])
+    sel = SharedMatrix(s[idx, :])
 
-	# 20 threads: case + control ~ 25GB
-	expected_values = ThreadsX.map((x,y,z) -> sampling_summaries(models,x,y,neut,sel,dsdn,z),sfs_p,divergence_p,summ_output);
+    # Making summaries
+    summ_output = analysis_folder .* "/summstat_" .* string.(1:size(sfs_p, 1)) .* ".txt"
 
-	α_output = analysis_folder * "/alphas_" .* string.(1:size(sfs_p,1)) .* ".txt";
-	
-	@. write_files(α, α_output);
+    @info "Sampling and writting summary statistics at $analysis_folder"
+
+    # 20 threads: case + control ~ 25GB
+    expected_values = ThreadsX.map((x, y, z) -> sampling_summaries(models, x, y, neut, sel,
+                                                                   dsdn, z), sfs_p,
+                                   divergence_p, summ_output)
+
+    α_output = analysis_folder * "/alphas_" .* string.(1:size(sfs_p, 1)) .* ".txt"
+
+    @. write_files(α, α_output)
 end
 
 function filter_expected(x::Matrix{Float64})
-		
-	replace!(x, -Inf=>NaN)
-	x = @view x[vec(.!any(isnan.(x),dims=2)),:]
-	x = @view x[(x[:,3] .< 1),:]
-	x = @view x[(x[:,1] .> 0),:]
+    replace!(x, -Inf => NaN)
+    x = @view x[vec(.!any(isnan.(x), dims = 2)), :]
+    x = @view x[(x[:, 3] .< 1), :]
+    x = @view x[(x[:, 1] .> 0), :]
 
-	return(Matrix(x))
+    return (Matrix(x))
 end
 
-function pol_correction!(sfs_all::Vector{Matrix{Float64}},sfs_in::Vector{Matrix{Float64}};column::Vector{Int}=[2])
+function pol_correction!(sfs_all::Vector{Matrix{Float64}}, sfs_in::Vector{Matrix{Float64}};
+                         column::Vector{Int} = [2])
+    pn_all = map(x -> sum(x[:, column]), sfs_all)
+    sfs_pn = map(x -> sum(x[:, column]), sfs_in)
+    ratio_all_sub = map((x, y) -> x / y, pn_all, sfs_pn)
 
-	pn_all        = map(x->sum(x[:,column]),sfs_all)
-	sfs_pn        = map(x -> sum(x[:,column]),sfs_in)
-	ratio_all_sub = map( (x,y) -> x/y,pn_all,sfs_pn)
-
-	map( (x,y) -> y[:,column] .= x * y[:,column],ratio_all_sub,sfs_in)
+    map((x, y) -> y[:, column] .= x * y[:, column], ratio_all_sub, sfs_in)
 end

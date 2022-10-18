@@ -1,21 +1,20 @@
 module MKtest
 
 using Parameters,
-	SparseArrays,
-	CSV,
-	JLD2,
-	DataFrames,
-	Quadmath,
-	StatsBase,
-	Unzip,
-	ThreadsX,
-	Suppressor,
-	CondaPkg,
-	Random,
-	Distributions,
-	CairoMakie,
-	KernelDensity,
-	SharedArrays
+      SparseArrays,
+      CSV,
+      JLD2,
+      DataFrames,
+      Quadmath,
+      StatsBase,
+      Unzip,
+      ThreadsX,
+      Suppressor,
+      CondaPkg,
+      Random,
+      Distributions,
+      KernelDensity,
+      SharedArrays
 
 # Analytical solutions
 import Roots: find_zero
@@ -28,7 +27,6 @@ import GZip: open
 import Parsers: parse
 import OrderedCollections: OrderedDict
 import Random: randstring
-import AlgebraOfGraphics: data, mapping, histogram, visual, draw, save
 import Tables: table
 
 # MK-approaches

@@ -7,35 +7,17 @@ We link [ABCreg](https://github.com/molpopgen/ABCreg) with Julia to perform ABC 
 It is possible to perform the inference through Julia. We set the tolerance value such that 2500 acceptances were recorded for the inference
 
 ```julia
-MKtest.ABCreg(analysis_folder="analysis/",S=size(adap.dac,1),tol=0.025,abcreg="/home/jmurga/ABCreg/src/reg");
+posteriors = MKtest.ABCreg(analysis_folder="analysis/",S=size(adap.dac,1),tol=0.025,abcreg="/home/jmurga/ABCreg/src/reg");
 ```
-
-The function will output one file per bootstrapped replicas containing the posteriors distributions. The posterior distributions contains five columns corresponding to :
+The function will output one file per dataset containing the posteriors distributions. The posterior distributions contains five columns corresponding to:
  - α weak: Contribution of weak selecction to $\alpha$
  - α strong: Contribution of strong selecction to $\alpha$
  - α: Adaptation rate
  - γ: Negative selection coefficient
  - β: DFE shape parameter
 
-We used R to estimate the Maximum-A-Posteriori (MAP) from posterior distributions following ABCreg examples. We linked Julia and R internally. The module contains functions to perform the estimations without quit the Julia session.
-
-If you will perform MAP estimates and plot using our module, be sure you have installed R and the following packages: ggplot2 and data.table, locfit. 
+You can check multiple statistics from posteriors distribution using `MKtest.summary_abc` function. Please check [```MKtest.summary_abc```](@ref), you can approximate the inference using different statistics such as the mode, the mean or the median from posterior.
 
 ```julia
-MKtest.source_plot_map_r("analysis/script.jl")
-posterior, tgp_map = MKtest.plot_map(analysis_folder="analysis/");
-DataFrames.describe(tgp_map)
+df_summary, parameter_inference = MKtest.summary_abc(posteriors)
 ```
-
-```
- Row │ variable  mean          min           median        max          nmissing  eltype   
-     │ Symbol    Float64       Float64       Float64       Float64      Int64     DataType 
-─────┼─────────────────────────────────────────────────────────────────────────────────────
-   1 │ aw           0.108927     0.010857       0.108796      0.19754          0  Float64
-   2 │ as           0.0506607   -0.00750128     0.0514826     0.134143         0  Float64
-   3 │ a            0.152842     0.0962341      0.149083      0.233131         0  Float64
-   4 │ gam_neg    1184.81       512.458       1277.47       1903.12             0  Float64
-   5 │ shape        0.142934     0.128369       0.14189       0.167394         0  Float64
-```
-
-![image](https://raw.githubusercontent.com/jmurga/MKtest.jl/master/docs/src/figure2.svg)

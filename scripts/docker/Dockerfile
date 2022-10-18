@@ -1,5 +1,7 @@
 FROM julia
 
+ENV PATH /root/mambaforge/bin:$PATH
+
 RUN apt-get update\
     && apt-get install -y libglib2.0-0 libxext6 wget bzip2 ca-certificates curl git vim make build-essential libgsl-dev libz-dev gzip parallel && \
     apt-get clean  && \
@@ -7,15 +9,23 @@ RUN apt-get update\
 
 RUN mkdir -p /analysis
 
-ADD data/tgp.txt /analysis/tgp.txt
-ADD data/dgn_ral.txt /analysis/dgn_ral.txt
-ADD data/dgn_zi.txt /analysis/dgn_zi.txt
+RUN curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Mambaforge-$(uname)-$(uname -m).sh"
+RUN bash Mambaforge-$(uname)-$(uname -m).sh -b
 
-RUN julia -e 'using Pkg;Pkg.add(["IJulia","CSV","DataFrames"])'
+ENV LD_LIBRARY_PATH /root/mambaforge/lib:$LD_LIBRARY_PATH
+
+RUN mamba update -n base -c defaults conda
+RUN mamba init bash
+
+RUN /root/mambaforge/bin/mamba install -c conda-forge jupyter -y
+
+ADD data/* analysis/
+ADD scripts/abcmk_cli.jl /analysis/abcmk_cli.jl
+ADD scripts/precompile_mktest.jl /analysis/precompile_mktest.jl
+
+RUN julia -e 'using Pkg;Pkg.add(["IJulia","CSV","DataFrames","PackageCompiler","Fire"])'
 
 RUN julia -e 'using Pkg;Pkg.add(PackageSpec(path="https://github.com/jmurga/MKtest.jl"))'
-
-ADD scripts/abcmk_cli.jl /analysis/abcmk_cli.jl
 
 RUN julia -e 'using PackageCompiler;PackageCompiler.create_sysimage(:MKtest, sysimage_path="/analysis/mktest.so", precompile_execution_file="/analysis/precompile_mktest.jl")'
 
@@ -25,5 +35,3 @@ RUN cd /analysis/ABCreg/src && make
 ENV PATH /analysis/ABCreg/src:$PATH
 
 WORKDIR /analysis
-
-CMD ["julia","-J","mktest.so"]
