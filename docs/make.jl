@@ -16,14 +16,14 @@ makedocs(;
         pages     = [
                 "Home" => "index.md",
                 "Package Overview" => [
-                        "Empirical estimation" => "empirical.md",
+                        "Infering the rate and strength of adaptation" => "empirical.md",
                         "Rates" => "rates.md",
                         "Input data" => "input.md",
                         "Summary statistics" => "summstat.md",
                         "ABC inference" => "abc.md"
                 ],
                 "Command-Line interface" => "cli.md",
-                "MK extension" => "mk.md",
+                "MK approaches" => "mk.md",
                 "Reference" => "reference.md"
         ]
 
