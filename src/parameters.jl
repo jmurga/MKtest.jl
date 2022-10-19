@@ -74,7 +74,7 @@ end
 Expected reduction in nucleotide diversity. Explored at [Charlesworth B., 1994](https://doi.org/10.1017/S0016672300032365):
 
 ```math
-\\frac{\\pi}{\\pi_{0}} = \\e^{\\frac{4\\muL}{2rL+t}}
+\\frac{\\pi}{\\pi_{0}} = e^{\\frac{4\\mu L}{2rL+t}}
 ```
 
 # Arguments

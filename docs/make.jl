@@ -16,11 +16,6 @@ makedocs(;
         pages     = [
                 "Home" => "index.md",
                 "Package Overview" => [
-                        "Analytical estimations" => "analytical.md",
-                        "Processing data" => "data.md",
-                        "MK approaches" => "mk.md"
-                ],
-                "Infering the rate and strength of adaptation" =>[
                         "Empirical estimation" => "empirical.md",
                         "Rates" => "rates.md",
                         "Input data" => "input.md",
@@ -28,6 +23,7 @@ makedocs(;
                         "ABC inference" => "abc.md"
                 ],
                 "Command-Line interface" => "cli.md",
+                "MK extension" => "mk.md",
                 "Reference" => "reference.md"
         ]
 

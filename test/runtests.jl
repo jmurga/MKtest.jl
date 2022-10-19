@@ -5,7 +5,7 @@ using Test
 @testset "MKtest.jl" begin
 
 	adap  = MKtest.parameters(N=1000,n=661,gam_dfe=-457,gam_flanking=-1000,al_low=0.2,B_bins=[0.2,0.999])
-	binom = MKtest.binom_op!(adap)
+	binom = MKtest.binom_op(adap)
 	MKtest.set_θ!(adap)
 	MKtest.set_ppos!(adap)
 

@@ -1,41 +1,10 @@
 # MKtest.jl
 
-MKtest.jl is a Julia package containing an extension of a fast Approximate Bayesian Computation version of the McDonald-Kreitman (ABC-MK) presented in [Uricchio et al.(2019)](https://doi.org/10.1038/s41559-019-0890-6) that significantly improves the efficiency of the population genetics inferences. Following [Uricchio et al.(2019)](https://doi.org/10.1038/s41559-019-0890-6), the analytical calculations were used to explore the effect of background selection and selective interference on weakly beneficial alleles. Nonetheless, we developed a more straightforward and computationally efficient ABC-based inference procedure that accounts for the DFE of deleterious and beneficial alleles and partial recombination between selected genomic elements. Our approach directly estimates $\alpha$, $\alpha_W$, $\alpha_S$, and the Gamma distribution DFE parameters. 
+MKtest.jl is a Julia package including a fast Approximate Bayesian Computation version of the McDonald-Kreitman test (ABC-MK) presented in [Uricchio et al. (2019)](https://doi.org/10.1038/s41559-019-0890-6). The new ABC-MK implementation significantly improves the efficiency of the population genetics inferences. Following [Uricchio et al.(2019)](https://doi.org/10.1038/s41559-019-0890-6), the analytical estimations were used to explore the effect of background selection and selective interference on weakly beneficial alleles. Nonetheless, we developed a more straightforward and computationally efficient ABC-based inference procedure that accounts for the DFE of deleterious and beneficial alleles and partial recombination between selected genomic elements. Our approach estimates $\alpha$, $\alpha_W$, $\alpha_S$, and the Gamma distribution DFE parameters. 
 
-In addition, the package automatizes other MK-like analyses parsing polymorphic and divergence data as well as executing several extensions such as [Grapes](https://doi.org/10.1371/journal.pgen.1005774), [aMK](https://doi.org/10.1073/pnas.1220835110), [imputedMK](https://doi.org/10.1093/g3journal/jkac206) or [fwwMK](https://doi.org/10.1038/4151024a).
+In addition, the package automatizes other MK-like analyses parsing polymorphic and divergence data as well as including several extensions such as [Grapes](https://doi.org/10.1371/journal.pgen.1005774), [aMK](https://doi.org/10.1073/pnas.1220835110), [imputedMK](https://doi.org/10.1093/g3journal/jkac206) or [fwwMK](https://doi.org/10.1038/4151024a).
 
 
-## Docker installation
-We highly recommend using the Docker image to execute the software. The Docker image is based on Debian and includes all the software needed to run the pipeline. You can access Julia or Jupyter pulling the image from [Docker Hub](https://hub.docker.com/r/jmurga/mktest). 
-
-Please, remember to use ```julia -t``` to use multiple threads and parallelize the estimation. Although optional, note that you can run Julia using a pre-compiled image inside docker to avoid package loading latency. To save the results, you can link the folder ```/analysis``` with any folder in your ```${HOME}``` directory.
-
-```bash
-MYPATH="/home/jmurga/temporal_analysis/"
-# Pull the image
-docker pull jmurga/mktest
-
-# Runninh temporal docker container linking some local volume to export data. Consider to create a container.
-# Using -t 8 to parallelize using 8 threads
-# Using -J mktest.so to avoid loading package latency
-docker run -it -v --rm ${MYPATH}:/analysis/folder jmurga/mktest julia -t 8 -J mktest.so
-
-# Run jupyter notebook from docker image. Change the port if 8888 is already used
-docker run -it --rm -v ${MYPATH}:/analysis/folder -p 8888:8888 jmurga/mktest /bin/bash -c "jupyter-lab --ip='*' --port=8888 --no-browser --allow-root"
-```
-
-To use our command-line interface, just run
-
-```bash
-docker run -it -v ${MYPATH}:/analysis/ jmurga/mktest julia -t 8 -J mktest.so /analysis/abcmk_cli.jl
-```
-
-## Singularity installation
-We have created a Singularity container to use the software in HPC systems. We have tested the software at HPC working with Slurm.
-
-```singularity
-singularity pull --arch amd64 library://jmurga/default/mktest:latest
-```
 
 ## Scratch installation
 To install our module from scratch, we highly recommend using [LTS official Julia binaries](https://julialang.org/downloads/). Once you have installed Julia in your system, consider to install some important dependencies to automatize your pipelines. We have prepared a file to install them.
@@ -73,4 +42,36 @@ brew install GSL zlib git
 ```bash
 git clone https://github.com/molpopgen/ABCreg.git ABCreg
 cd ABCreg/src && make
+```
+
+## Docker installation
+The Docker image is based on Debian and includes all the software needed to run the pipeline. You can access Julia or Jupyter pulling the image from [Docker Hub](https://hub.docker.com/r/jmurga/mktest). 
+
+Please, remember to use ```julia -t``` to use multiple threads and parallelize the estimation. Although optional, note that you can run Julia using a pre-compiled image inside docker to avoid package loading latency. To save the results, you can link the folder ```/analysis``` with any folder in your ```${HOME}``` directory.
+
+```bash
+MYPATH="/home/jmurga/temporal_analysis/"
+# Pull the image
+docker pull jmurga/mktest
+
+# Runninh temporal docker container linking some local volume to export data. Consider to create a container.
+# Using -t 8 to parallelize using 8 threads
+# Using -J mktest.so to avoid loading package latency
+docker run -it -v --rm ${MYPATH}:/analysis/folder jmurga/mktest julia -t 8 -J mktest.so
+
+# Run jupyter notebook from docker image. Change the port if 8888 is already used
+docker run -it --rm -v ${MYPATH}:/analysis/folder -p 8888:8888 jmurga/mktest /bin/bash -c "jupyter-lab --ip='*' --port=8888 --no-browser --allow-root"
+```
+
+To use our command-line interface, just run
+
+```bash
+docker run -it -v ${MYPATH}:/analysis/ jmurga/mktest julia -t 8 -J mktest.so /analysis/abcmk_cli.jl
+```
+
+## Singularity installation
+We have created a Singularity container to use the software in HPC systems. We have tested the software at HPC working with Slurm.
+
+```singularity
+singularity pull --arch amd64 library://jmurga/default/mktest:latest
 ```

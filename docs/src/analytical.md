@@ -1,6 +1,6 @@
 # MKtest estimation
 ## Solving $\alpha_{(x)}$
-Our method is based on the analytical solution of $\alpha_{(x)}$ given a genetic scenario. The approach could be extended to any *DFE* and background selection values to get summary statistics used at *ABC* methods. This example shows how the asymptotic $\alpha$ is affected by linkage and background selection.
+Our method is based on the analytical solution of $\alpha_{(x)}$ given a genetic model. The approach could be extended to any *DFE* and background selection values to get summary statistics used at *ABC* methods. This example shows how the asymptotic $\alpha$ is affected by linkage and background selection.
 
 Before starting, you need to set up a variable of type *MKtest.parameters*. It is a Mutable structure containing the parameters required to solve the analytical approach. Any value at ```MKtest.parameters``` can be easily changed. Remember, you need to define it before the execution. Otherwise, $\alpha_{(x)}$ will be solved with default values. To change any values, check the variables at the struct [`MKtest.parameters`](@ref) to set specific models.
 
@@ -27,7 +27,7 @@ where $\frac{LT}{LT}$ with a constant mutation rate tend to $1$.
 x,y = MKtest.analytical_alpha(adap)
 ```
 
-Internally the function (1) sets the mutation rate regarding the BGS strength and (2) sets the probability of fixations given the genetic scenario. Then, it estimates the SFS and fixations rates for neutral and non-neutral alleles. Please check [`MKtest.analytical_alpha`](@ref) to check the process.
+Internally the function (1) sets the mutation rate regarding the BGS strength and (2) sets the probability of fixations given the genetic model. Then, it estimates the SFS and fixations rates for neutral and non-neutral alleles. Please check [`MKtest.analytical_alpha`](@ref) to check the process.
 
 #### Plotting the results.
 The variable *x* contains $\alpha_{(x)}$ accounting for weakly beneficial alleles. *y* contains the value of $\alpha_{(x)}$, not accounting for weakly beneficial alleles. In this example, we do not model BGS (check *B* parameter in *MKtest.parameters* above)

@@ -1,6 +1,8 @@
-# Estimating fixation and polymorphic rates considering generalized model of selection and linkage
+# Estimating expected fixation rates and frequency spectra considering generalized model of selection and linkage
 
-Before executing the rate estimation, start-up Julia using `-t` option to add the desired number of threads to parallelize the estimation
+The first step is to solve *N* genetic models to obtain the analytical estimations. The process is automatize to create random combination model parameters given priors distributions. The expected fixation rates and frequency spectra, polymorphic rates, and model information will be used to estimate informative summary statistics needed to perform ABC inference. The following section show how to define a genetic a model, input prior distributions and solve the models.
+
+Before executing the rates estimation, start-up Julia using `-t` option to add the desired number of threads to parallelize the process
 
 ```bash
 julia -t8
@@ -8,11 +10,10 @@ julia -t8
 
 ```julia
 using MKtest
+mkpath("analysis/")
 ```
 
-Declare a variable containing some basic information about your model. We used a sample size of 661 to perform later analysis over TGP data. The selected Derived Alleles Counts (DAC) will be used to compute summary statistics and perform ABC inference. It is possible to subset any of the selected DAC values when computing summary statistics. If you want to exclude any variant bellow or above a frequency threshold you can use the argument `cutoff`.
-
-Note that ```MKtest.parameters``` contains information about mutation rate, recombination rate, DFE, BGS and probabilities of fixations. To check all the arguments you can access to the function documentation using ```@doc MKtest.parameter```
+You must to declare a variable containing some basic information about your model using the function ```MKtest.paramterers```. Note that ```MKtest.parameters``` contains information about mutation rate, recombination rate, DFE, BGS and probabilities of fixations. To check all the arguments you can access to the function documentation using ```@doc MKtest.parameter```
 
 ```julia
 @doc MKtest.parameters
@@ -61,13 +62,17 @@ Note that ```MKtest.parameters``` contains information about mutation rate, reco
 
 ```
 
-We will estimate the empirical adaptation rate using TGP data using the estimated DFE parameters at [Boyko et al (2008)](https://doi.org/10.1371/journal.pgen.1000083). Nonetheless, shape and scale DFE parameters are flexible in our model.
+
+We will estimate the empirical adaptation rate using TGP data using the estimated DFE parameters at [Boyko et al (2008)](https://doi.org/10.1371/journal.pgen.1000083). Hence, we used a sample size of 661 to perform the analysis and the infered deleterious DFE. Note that shape DFE parameter is flexible and modified by a factor of 4 and scale DFE parameter is modified from a prior distribution when executing ```MKtest.rates``` function. In addition we will input the selected Derived Alleles Counts (DAC) to later compute summary statistics and perform ABC inference. It is possible to subset any of the selected DAC values when computing summary statistics. If you want to exclude any variant bellow or above a frequency threshold you can use the argument `cutoff`.
+
 
 ```julia
-adap = MKtest.parameters(N=10000,n=661,dac=[1,2,4,5,10,20,50,100,200,400,500,661,925,1000],gam_dfe=-457,shape=0.184)
+adap = MKtest.parameters(N=10000,n=661,dac=[1,2,4,5,10,20,50,100,200,400,500,661,925,1000],gam_dfe=-457,shape=0.184,cutoff=[0.0,1.0])
 ```
 
-Now the variable ```adap``` contains sample size, DAC and DFE information. The function ```MKtest.rates``` will perform the analytical estimation of *N* independent models regarding DFE, BGS, mutation rate, and recombination rate. In the following example, we used the function ```MKtest.rates``` to input the prior distributions. The function will randomize the input values to solve *N* independent estimation regarding our model. 
+Now the variable ```adap``` contains sample size, DAC and deleterious DFE information. The function ```MKtest.rates``` will perform the analytical estimation of *N* independent models regarding DFE, BGS, mutation rate, and recombination rate. Please note you can edit such values when using ```MKtest.parameters```.
+
+Now you can used the function ```MKtest.rates``` to input the prior distributions. The function will randomize the input values to solve *N* independent estimation regarding our model.
 
 ```julia
   rates(param,gH,gL,gam_flanking,gam_dfe,alpha,iterations,output)
@@ -108,11 +113,10 @@ Now the variable ```adap``` contains sample size, DAC and DFE information. The f
 ```
 
 ```julia
-@time df = MKtest.rates(adap,gH=[200,2000],gL=[1,10],gam_dfe=[-2000,-200],gam_flanking=[-1000,-500],iterations = 10^5,output="analysis/rates.jld2");
+@time df = MKtest.rates(adap,gH=[200,2000],gL=[1,10],gam_dfe=[-2000,-200],gam_flanking=[-1000,-500],iterations = 10,output="analysis/rates.jld2");
 ```
 
-The function will create a HDF5 file containing the solved models, fixation rates, polymorphic rates, and the selected DAC. This information will be used later to estimate summary statistics.
-
+The function will create a HDF5 file containing the solved models, the expected fixation rates and frequency spectra, and the selected DAC. This information will be used later to estimate summary statistics.
 
 Note that [```MKtest.rates```](@ref) is the most resource and time-consuming function. In our case, the function will estimate 10^5 independent models. Each model solves the estimation for all possible BGS values. We used BGS values from 0.1 to 0.999 in 5% increments (defined at `adap.B_range`). In total, the example will produce 3.7 million estimates. We have used a hierarchical data structure (HDF5) to facilitate model parameters and rates storage.
 
