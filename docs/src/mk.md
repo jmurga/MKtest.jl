@@ -4,7 +4,7 @@ We included other MK approaches in our module. All the functions use the formate
 ## Standard MKT
 The standard McDonald & Kreitman test ([McDonald and Kreitman, 1991]) was developed to be applied to protein coding sequences, combining both divergence ($D$) and polymorphism ($P$) sites, and categorizing mutations as synonymous ($P_S$, $D_S$) and non-synonymous ($P_N$, $D_N$). 
 
-If all mutations are either strongly deleterious or neutral, then $Di/D0$ is expected to roughly equal $Pi/P0$. In contrast, if positive selection is operating in the region, adaptive mutations rapidly reach fixation and contribute more to divergence than polymorphism compared to neutral mutations, and then $Di/D0 > Pi/P0$. Assuming that adaptive mutations contribute little to polymorphism but substantially to divergence, the proportion of non-synonymous substitutions is inferred following Smith and Eyre-Walker (2002).
+If all mutations are either strongly deleterious or neutral, then $Di/D0$ is expected to roughly equal $Pi/P0$. In contrast, if positive selection is operating in the region, adaptive mutations rapidly reach fixation and contribute more to divergence than polymorphism compared to neutral mutations, and then $D_N/D_S > P_N/P_S$. Assuming that adaptive mutations contribute little to polymorphism but substantially to divergence, the proportion of non-synonymous substitutions is inferred following [Smith and Eyre-Walker (2002)](https://doi.org/10.1038/4151022a).
 
 $\alpha = 1 - (\frac{P_N}{P_S}\cdot\frac{D_S}{D_N})$
 
@@ -29,9 +29,7 @@ fww = MKtest.fwwMK(adap,sfs[1],divergence[1],cutoff=0.15)
 ```
 
 ## imputed MKT (in preparation)
-The imputed MKT (impMKT) is a modification of the Fay, Waycoff, and Wu MK extension (fwwMK) ([Fay et al. (2002)]([fwwMK](https://doi.org/10.1038/4151024a)) to improve gene-by-gene analyses. The method propose the imputation of slightly deleterious mutations at the SFS rather than removing all variants below a frequency threshold. The imputedMK aims to maximize the information to test the excess of divergence ratio relative to polymorphism at the gene level.
-
-$\alpha$ is estimated as
+The imputed MKT (impMKT) is a modification of the Fay, Waycoff, and Wu MK extension (fwwMK) ([Fay et al. (2002)]([fwwMK](https://doi.org/10.1038/4151024a)) to improve gene-by-gene analyses. The method propose the imputation of slightly deleterious mutations at the SFS rather than removing all variants below a frequency threshold. The imputedMK aims to maximize the information to test the excess of divergence ratio relative to polymorphism at the gene level. $\alpha$ is estimated as
 
 $\alpha_{imputed} = 1 - \left( \frac{P_{N} - P_{wd}}{P_{S}} \cdot \frac{D_{N}}{D_{S}} \right)$
 
@@ -46,9 +44,7 @@ imputed = MKtest.imputedMK(adap,sfs[1],divergence[1],cutoff=0.15)
 ```
 
 ## Asymptotic MKT
-Proposed by Messer and Petrov (2013). This extension is robust to the presence of selective sweeps (genetic hitchhiking) and the segregation of slightly deleterious polymorphisms substitutions (BGS). In this approach, the authors defined $\alpha$ as a function that depends on the SFS of alleles. Therefore, $\alpha$ is estimated in different frequency intervals ($x$), and these values are then adjusted to an exponential function. An exponential fit is suitable as the non-synonymous allele frequency is expected to decay exponentially over the respective levels of synonymous polymorphisms (Messer & Petrov, 2013).
-
-$\alpha$ is estimated as
+Proposed by Messer and Petrov (2013). This extension is robust to the presence of selective sweeps (genetic hitchhiking) and the segregation of slightly deleterious polymorphisms substitutions (BGS). In this approach, the authors defined $\alpha$ as a function that depends on the SFS of alleles. Therefore, $\alpha$ is estimated in different frequency intervals ($x$), and these values are then adjusted to an exponential function. An exponential fit is suitable as the non-synonymous allele frequency is expected to decay exponentially over the respective levels of synonymous polymorphisms (Messer & Petrov, 2013). $\alpha$ is estimated as
 
 $\alpha_{fit(x)} = a+b \cdot e^{-cx}$
 

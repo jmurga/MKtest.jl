@@ -62,12 +62,10 @@ You must to declare a variable containing some basic information about your mode
 
 ```
 
-
 We will estimate the empirical adaptation rate using TGP data using the estimated DFE parameters at [Boyko et al (2008)](https://doi.org/10.1371/journal.pgen.1000083). Hence, we used a sample size of 661 to perform the analysis and the infered deleterious DFE. Note that shape DFE parameter is flexible and modified by a factor of 4 and scale DFE parameter is modified from a prior distribution when executing ```MKtest.rates``` function. In addition we will input the selected Derived Alleles Counts (DAC) to later compute summary statistics and perform ABC inference. It is possible to subset any of the selected DAC values when computing summary statistics. If you want to exclude any variant bellow or above a frequency threshold you can use the argument `cutoff`.
 
-
 ```julia
-adap = MKtest.parameters(N=10000,n=661,dac=[1,2,4,5,10,20,50,100,200,400,500,661,925,1000],gam_dfe=-457,shape=0.184,cutoff=[0.0,1.0])
+adap = MKtest.parameters(N=1000,n=661,dac=[1,2,4,5,10,20,50,100,200,400,500,661,925,1000],gam_dfe=-457,shape=0.184,cutoff=[0.0,1.0])
 ```
 
 Now the variable ```adap``` contains sample size, DAC and deleterious DFE information. The function ```MKtest.rates``` will perform the analytical estimation of *N* independent models regarding DFE, BGS, mutation rate, and recombination rate. Please note you can edit such values when using ```MKtest.parameters```.
@@ -118,6 +116,4 @@ Now you can used the function ```MKtest.rates``` to input the prior distribution
 
 The function will create a HDF5 file containing the solved models, the expected fixation rates and frequency spectra, and the selected DAC. This information will be used later to estimate summary statistics.
 
-Note that [```MKtest.rates```](@ref) is the most resource and time-consuming function. In our case, the function will estimate 10^5 independent models. Each model solves the estimation for all possible BGS values. We used BGS values from 0.1 to 0.999 in 5% increments (defined at `adap.B_range`). In total, the example will produce 3.7 million estimates. We have used a hierarchical data structure (HDF5) to facilitate model parameters and rates storage.
-
-The following example took about 1.5 hours to execute on the hardware described at section [Infering the rate and strength of adaptation](empirical.md)
+Note that [```MKtest.rates```](@ref) is the most resource and time-consuming function. In our case, the function will estimate 10^5 independent models. Each model solves the estimation for all possible BGS values. We used BGS values from 0.1 to 0.999 in 5% increments (defined at `adap.B_range`). In total, the example will produce 3.7 million estimates. We have used a hierarchical data structure (HDF5) to facilitate model parameters and rates storage. Note that we used re-scale by a factor of 10 `adap.N=1000`. We explored that the analytical estimations produce similar $\alpha_{(x)}$ values excepting for singletons showing robuts estimations when `adap.N` is large enough (see *cite new ABC-MK*). The rates estimation took about 1.5 hours to execute on the hardware described at section [Infering the rate and strength of adaptation](empirical.md).

@@ -7,4 +7,4 @@ MKtest.jl is a Julia package including a fast Approximate Bayesian Computation v
 In addition, the package automatizes other MK-like analyses parsing polymorphic and divergence data as well as including several extensions such as [Grapes](https://doi.org/10.1371/journal.pgen.1005774), [aMK](https://doi.org/10.1073/pnas.1220835110), [imputedMK](https://doi.org/10.1093/g3journal/jkac206) or [fwwMK](https://doi.org/10.1038/4151024a).
 
 
-See the (documentation)[https://jmurga.github.io/MKtest.jl/dev] for details.
+See the [documentation](https://jmurga.github.io/MKtest.jl/dev) for details.

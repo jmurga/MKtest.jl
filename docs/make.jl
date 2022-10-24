@@ -18,12 +18,12 @@ makedocs(;
                 "Package Overview" => [
                         "Infering the rate and strength of adaptation" => "empirical.md",
                         "Rates" => "rates.md",
-                        "Input data" => "input.md",
                         "Summary statistics" => "summstat.md",
                         "ABC inference" => "abc.md"
                 ],
                 "Command-Line interface" => "cli.md",
                 "MK approaches" => "mk.md",
+                "Bootstrap" => "bootstrap.md",
                 "Reference" => "reference.md"
         ]
 

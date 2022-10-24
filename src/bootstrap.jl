@@ -1,5 +1,19 @@
-@with_kw mutable struct bootstrap_data
-    data::String = "vip_list.txt"
+"""
+Mutable structure containing the variables required to boostrap a gene file following. All the functions are solve using the internal values of the structure. You should declare a mutable structure to the perform the analytical estimations.
+
+# Bootstrap parameters
+ - `data::String`: gene list get control genes.
+ - `annotation::String`: bed file containing start and end gene coordinates.
+ - `dist::Int64`: miminum distance between case and control genes.
+ - `rep::Int64`: maximum number of genes by control set.
+ - `tol::Float64`: 
+ - `iter::Int64`: number of time defining the number of control sets. Each iter produce 100 sets.
+ - `factors::String`: file containing confounding factors.
+ - `output::String`
+
+"""
+@with_kw mutable struct bootstrap_parameters
+    data::String = "ensembl_list.txt"
     annotation::String = "ensembl_gene_coords_v69.bed"
     dist::Int64 = 1
     rep::Int64 = 3
@@ -246,14 +260,14 @@ function get_bootstrap(case_set::Vector{String},
     end
 end
 
-function bootstrap(param::bootstrap_data)
+function bootstrap(param::bootstrap_parameters)
     @unpack data, annotation, dist, rep, tol, iter, factors, output = param
 
     @info "Opening data"
 
     case_raw = vec(Array(CSV.read(data, header = false, delim = '\t', DataFrame,
                                   stringtype = String)))
-    factors_raw = Array(CSV.read(factors, header = false, delim = '\t', DataFrame))
+    factors_raw = Array(CSV.read(factors, header = false, DataFrame))
     factors_id = string.(@view factors_raw[:, 1])
     factors = Float64.(@view factors_raw[:, 2:end])
 
@@ -296,7 +310,7 @@ function bootstrap(param::bootstrap_data)
 
         try
             rm(output * "_control.txt")
-        catch err
+        catch e
             touch(output * "_control.txt")
         end
 

@@ -68,10 +68,3 @@ To use our command-line interface, just run
 ```bash
 docker run -it -v ${MYPATH}:/analysis/ jmurga/mktest julia -t 8 -J mktest.so /analysis/abcmk_cli.jl
 ```
-
-## Singularity installation
-We have created a Singularity container to use the software in HPC systems. We have tested the software at HPC working with Slurm.
-
-```singularity
-singularity pull --arch amd64 library://jmurga/default/mktest:latest
-```

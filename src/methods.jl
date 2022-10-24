@@ -273,7 +273,9 @@ function grapes(sfs::Vector{Matrix{Float64}},
         CondaPkg.add("grapes-static", channel = "genomedk")
     end
 
-    grapes = CondaPkg.which("grapes")
+    @assert model ∈ ["GammaZero", "GammaExpo", "DisplGamma", "ScaledBeta", "FGMBesselK"] "Please select a valid model: GammaZero GammaExpo DisplGamma ScaledBeta FGMBesselK"
+
+    grapes_bin = CondaPkg.which("grapes")
 
     sfs = reduce_sfs.(sfs, bins)
 
@@ -293,17 +295,19 @@ function grapes(sfs::Vector{Matrix{Float64}},
         DataFrame(hcat("dofe_" * string(w), bins, mn, pn, ms, ps, mn, dn, ms, ds...), :auto)
     end
 
+    @info "Converting SFS to dofe file"
     dofe = @. f(pn, ps, dn, ds, mn, ms, idx)
     h = fill(DataFrame(["" ""; "#unfolded" ""], :auto), length(sfs))
     output_dofe = @. folder * "/dofe_" * idx * ".txt"
     output_grapes = @. folder * "/dofe_" * idx * "." * model
 
-    @. write_files(h, output_dofe)
-    @. write_files(dofe, output_dofe, fill(true, length(sfs)))
+    @. write_files(h, output_dofe, false)
+    @. write_files(dofe, output_dofe, true)
 
-    r(d, o, m = model, gr = grapes) = run(`$gr -in $d -out $o -model $m`)
+    @info "Running Grapes"
+    r(d, o, m = model, gr = grapes_bin) = run(`$gr -in $d -out $o -model $m`)
 
-    @suppress_out begin progress_pmap(r, output_dofe, output_grapes) end
+    @suppress_out begin ThreadsX.map(r, output_dofe, output_grapes) end
 
     df = @suppress begin CSV.read.(output_grapes, DataFrame, footerskip = 1, skipto = 3) end
 

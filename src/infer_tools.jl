@@ -33,7 +33,7 @@ function parse_sfs(param::parameters;
                    div_columns::Vector{Int64} = [6, 7],
                    m_columns::Vector{Int64} = [8, 9],
                    bins::Union{Nothing, Int64} = nothing,
-                   isolines::Bool=false) where {S <: AbstractString}
+                   isolines::Bool = false) where {S <: AbstractString}
     @unpack n, cutoff = param
 
     if isolines
@@ -85,10 +85,12 @@ function get_pol_div(df_subset::Union{DataFrame, SubDataFrame},
     g(x) = parse.(Float64, filter(y -> y != "", x))
 
     tmp = split.(df_subset[:, sfs_columns], ",")
- 
+
     pn = vcat(g.(tmp[:, 1])...)
     ps = vcat(g.(tmp[:, 2])...)
 
+    pn = pn[pn .!= 0]
+    ps = ps[ps .!= 0]
     # Round SFS frequencies to the lowest floating value of the dataset independtly of the sample size. Needed to countmap and merge.
     dgts = length(string(minimum(vcat(pn, ps)))) - 2
 
@@ -113,9 +115,9 @@ function get_pol_div(df_subset::Union{DataFrame, SubDataFrame},
     end
 
     # Filtering SFS and changing frequency to DAC
-    sfs_flt = sfs[sfs[:,1] .>= cutoff[1] .&& sfs[:,1] .<= cutoff[2],[4,2,3]]
+    sfs_flt = sfs[sfs[:, 1] .>= cutoff[1] .&& sfs[:, 1] .<= cutoff[2], [4, 2, 3]]
 
-    scumu = MKtest.cumulative_sfs(sfs_flt)
+    scumu = cumulative_sfs(sfs_flt)
 
     α = round.(1 .- (Ds / Dn .* scumu[:, 2] ./ scumu[:, 3]), digits = 5)
 
@@ -153,6 +155,10 @@ function write_files(x::Matrix{Float64}, name::String)
     CSV.write(name, Tables.table(x), delim = '\t', header = false)
 end;
 
+function write_files(x::DataFrame, name::String, newfile::Bool)
+    CSV.write(name, x, delim = '\t', header = false, append = newfile)
+end;
+
 """
 	ABCreg(analysis_folder, S, P, tol, abcreg)
 
@@ -172,7 +178,8 @@ function ABCreg(;
                 S::Int64,
                 P::Int64 = 5,
                 tol::Float64,
-                abcreg::String)
+                abcreg::String,
+                rm_summaries::Bool)
 
     # List alphas and summstat files
     a_file = filter(x -> occursin("alphas", x), readdir(analysis_folder, join = true))
@@ -203,6 +210,12 @@ function ABCreg(;
     open(x) = Array(CSV.read(x, DataFrame))
     flt(x) = x[(x[:, 4] .> 0) .& (x[:, 1] .> 0) .& (x[:, 2] .> 0) .& (x[:, 3] .> 0), :]
     posteriors = flt.(open.(out))
+
+    # Remove summstat files
+    if rm_summaries
+        rm.(filter(x -> occursin("summstat", x) || occursin("alphas_", x),
+                   readdir(folder, join = true)))
+    end
 
     return posteriors
 end
@@ -263,7 +276,7 @@ function summary_abc(posteriors::Vector{Matrix{Float64}};
         df = hcat(stats, tmp)
 
         @info df
-        
+
         return df, df[df.Stats .== uppercasefirst(stat), 2:end]
     else
         df = DataFrame[]

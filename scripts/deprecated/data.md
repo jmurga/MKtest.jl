@@ -1,6 +1,5 @@
 # Parsing genomic data
-The module includes functions to parse TGP from [Uricchio et al. (2019)](https://doi.org/10.1038/s41559-019-0890-6) and DGN from [Murga-Moreno et al. (2019)](https://doi.org/10.1093/nar/gkz372
-).
+The module includes functions to parse TGP from [Uricchio et al. (2019)](https://doi.org/10.1038/s41559-019-0890-6) and DGN from [Murga-Moreno et al. (2019)](https://doi.org/10.1093/nar/gkz372).
 
 Please to parse raw data into SFS and divergence counts, first download raw files deposited in our repository:  
 

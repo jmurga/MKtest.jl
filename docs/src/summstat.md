@@ -1,15 +1,17 @@
 # Summary statistics
-To estimate summary statistics, we will used the estimated expected fixation rates and frequency spectra as well as empirical data.
+To estimate summary statistics, we need to used the estimated expected fixation rates and frequency spectra as well as empirical data.
 
 The module includes functions to parse TGP from [Uricchio et al. (2019)](https://doi.org/10.1038/s41559-019-0890-6) and DGN from [Murga-Moreno et al. (2019)](https://doi.org/10.1093/nar/gkz372
-).
-
-Please to parse raw data into SFS and divergence counts, first download raw files deposited in our repository:  
+). Please to parse TGP or DGN raw data into SFS and divergence counts, first download raw files deposited in our repository:  
 
  - [TGP](https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/tgp.txt)
  - [DGN Zambia population](https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/dgn_ral.txt)  
  - [DGN Raleigh population](https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/dgn_zi.txt)  
 
+If you are going to parse DGN, you need to change the value of the argument *isoline* to *true*. Following the [Murga-Moreno et al. (2019)](https://doi.org/10.1093/nar/gkz372) sample size for each population is:
+
+ - Zambia population: 154
+ - RAL population: 160
 
 ## Parsing genomic data
 
@@ -42,7 +44,7 @@ alpha, sfs, divergence, m = MKtest.parse_sfs(adap, data = "analysis/tgp.txt",gen
 Once you have the SFS and divergence data variable you can compute the summary statistic. To do it declare a model specifying the sample size corresponding to your data as well as the cutoff used to estimate the rates.
 
 ```julia
-adap = MKtest.parameters(N=10000,n=661,dac=[2,4,5,10,20,50,200,661,925],cutoff=[0.0,1.0])
+adap = MKtest.parameters(N=1000,n=661,dac=[2,4,5,10,20,50,200,661,925],cutoff=[0.0,1.0])
 ```
 
 Note you can only input DAC already estimated, nonetheles you can perform any subset from the estimated DAC. To check the estimated DAC you can follow the hierarchy of the hdf5 file.
@@ -54,7 +56,7 @@ h5   = jldopen("analysis/rates.jld2")
 h5
 
 JLDFile /home/jmurga/analysis/rates.jld2 (read-only)
- └─📂 10000
+ └─📂 1000
     └─📂 661
        └─📂 cutoff=[0.0,1.0]
           ├─🔢 models
@@ -66,7 +68,7 @@ JLDFile /home/jmurga/analysis/rates.jld2 (read-only)
 
 ```julia
 # Checking estimated dac, string pattern inside the HDF5 variable
-h5["10000/661/dac"]
+h5["1000/661/dac"]
 
 14-element Vector{Int64}:
     1
