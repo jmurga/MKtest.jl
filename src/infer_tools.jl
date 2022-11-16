@@ -179,7 +179,7 @@ function ABCreg(;
                 P::Int64 = 5,
                 tol::Float64,
                 abcreg::String,
-                rm_summaries::Bool)
+                rm_summaries::Bool=false)
 
     # List alphas and summstat files
     a_file = filter(x -> occursin("alphas", x), readdir(analysis_folder, join = true))
@@ -214,7 +214,7 @@ function ABCreg(;
     # Remove summstat files
     if rm_summaries
         rm.(filter(x -> occursin("summstat", x) || occursin("alphas_", x),
-                   readdir(folder, join = true)))
+                   readdir(analysis_folder, join = true)))
     end
 
     return posteriors

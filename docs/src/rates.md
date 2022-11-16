@@ -111,7 +111,7 @@ Now you can used the function ```MKtest.rates``` to input the prior distribution
 ```
 
 ```julia
-@time df = MKtest.rates(adap,gH=[200,2000],gL=[1,10],gam_dfe=[-2000,-200],gam_flanking=[-1000,-500],iterations = 10,output="analysis/rates.jld2");
+@time df = MKtest.rates(adap,gH=[200,2000],gL=[1,10],gam_dfe=[-2000,-200],gam_flanking=[-1000,-500],iterations = 10^5,output="analysis/rates.jld2");
 ```
 
 The function will create a HDF5 file containing the solved models, the expected fixation rates and frequency spectra, and the selected DAC. This information will be used later to estimate summary statistics.
