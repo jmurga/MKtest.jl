@@ -269,13 +269,14 @@ function grapes(sfs::Vector{Matrix{Float64}},
                 model::String,
                 folder::String,
                 bins::Int64)
-    if (isnothing(CondaPkg.which("grapes")))
+
+    grapes_bin = CondaPkg.which("grapes")
+
+    if (isnothing(grapes_bin))
         CondaPkg.add("grapes-static", channel = "genomedk")
     end
 
     @assert model ∈ ["GammaZero", "GammaExpo", "DisplGamma", "ScaledBeta", "FGMBesselK"] "Please select a valid model: GammaZero GammaExpo DisplGamma ScaledBeta FGMBesselK"
-
-    grapes_bin = CondaPkg.which("grapes")
 
     sfs = reduce_sfs.(sfs, bins)
 

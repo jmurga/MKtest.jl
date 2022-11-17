@@ -196,11 +196,68 @@ function ABCreg(;
     end
 
     # Using mapi instead map. Bash interaction not working as expected
+    buffer_tasks = 1
+    if length(out) > 1
+        buffer_tasks = Int(floor(length(out)/10))
+    end
+
     ThreadsX.mapi((x, y, z) -> r(x, y, z),
                   a_file,
                   sum_file,
                   out,
-                  ntasks = Threads.nthreads())
+                  basesize = buffer_tasks,
+                  ntasks   = Threads.nthreads())
+
+    @info "Opening and filtering posteriors distributions"
+    out = filter(x -> occursin("post", x), readdir(analysis_folder, join = true))
+    out = filter(x -> !occursin(".1.", x), out)
+
+    # Control outlier inference. 2Nes non negative values
+    open(x) = Array(CSV.read(x, DataFrame))
+    flt(x) = x[(x[:, 4] .> 0) .& (x[:, 1] .> 0) .& (x[:, 2] .> 0) .& (x[:, 3] .> 0), :]
+    posteriors = flt.(open.(out))
+
+    # Remove summstat files
+    if rm_summaries
+        rm.(filter(x -> occursin("summstat", x) || occursin("alphas_", x),
+                   readdir(analysis_folder, join = true)))
+    end
+
+    return posteriors
+end
+
+function ABCreg(;
+                analysis_folder::String,
+                S::Int64,
+                P::Int64 = 5,
+                tol::Float64,
+                abcreg::String,
+                rm_summaries::Bool=false)
+
+    # List alphas and summstat files
+    a_file = filter(x -> occursin("alphas", x), readdir(analysis_folder, join = true))
+    sum_file = filter(x -> occursin("summstat", x), readdir(analysis_folder, join = true))
+
+    # Creating output names
+    out = analysis_folder .* "/out_" .* string.(1:size(a_file, 1))
+
+    @info "Running ABCreg"
+    parallel_bin = CondaPkg.which("parallel")
+    
+    if isnothing(CondaPkg.which("parallel"))
+        CondaPkg.add("parallel", channel = "conda-forge")
+        parallel_bin = CondaPkg.which("parallel")
+    end
+    
+    # Using GNU-parallel from CondaPkg
+    nthreads = Threads.nthreads()
+    job_commands  = @. abcreg * " -d " * a_file * " -p " * sum_file* " -P " * string(P) * " -S " * string(S) * " -t " * string(tol) * " -b " * out
+    job_file = tempname(analysis_folder)
+
+    CSV.write(job_file,Tables.table(job_commands),header=false)
+
+    run(`$parallel_bin -j $nthreads -u -a $job_file`)
+    rm(job_file)
 
     @info "Opening and filtering posteriors distributions"
     out = filter(x -> occursin("post", x), readdir(analysis_folder, join = true))
