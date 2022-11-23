@@ -1,13 +1,14 @@
 name = "MKtest"
 uuid = "eac4f1b0-fea5-4d5c-b218-523869339fe7"
 authors = ["Jesús Murga-Moreno", "Lawrence Uricchio", "David Enard"]
-version = "1.0"
+version = "1.0.0"
 
 [deps]
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 Conda = "8f4d0f93-b110-5947-807f-2305c1781a2d"
 CondaPkg = "992eb4ea-22a4-4c89-a5bb-47a3300528ab"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 GZip = "92fee26a-97fe-5a0c-ad85-20a5f3185b63"
 HypothesisTests = "09f84164-cd44-5f33-b23f-e6b0d136a0d5"

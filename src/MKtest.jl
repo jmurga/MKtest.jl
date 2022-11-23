@@ -28,6 +28,7 @@ import Parsers: parse
 import OrderedCollections: OrderedDict
 import Random: randstring
 import Tables: table
+import DelimitedFiles: readdlm
 
 # MK-approaches
 import LsqFit: curve_fit, confidence_interval

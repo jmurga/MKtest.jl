@@ -189,85 +189,24 @@ function ABCreg(;
     out = analysis_folder .* "/out_" .* string.(1:size(a_file, 1))
 
     @info "Running ABCreg"
-    # Using mapi to limit tasks. ThreadsX.map Not working properly with bash function. Try change to pipeline or something else.
-    function r(a::String, s::String, o::String, abcreg::String = abcreg, P::Int64 = P,
-               S::Int64 = S, tol::Float64 = tol)
-        run(`$abcreg -d $a -p $s -P $P -S $S -t $tol -b $o`)
-    end
-
-    # Using mapi instead map. Bash interaction not working as expected
-    buffer_tasks = 1
-    if length(out) > 1
-        buffer_tasks = Int(floor(length(out)/10))
-    end
-
-    ThreadsX.mapi((x, y, z) -> r(x, y, z),
+    # Using mapi instead map to limit tasks. Bash interaction not working as expected
+    ThreadsX.mapi( (x, y, z) -> run(`$abcreg -d $x -p $y -P $P -S $S -t $tol -b $z`),
                   a_file,
                   sum_file,
                   out,
-                  basesize = buffer_tasks,
-                  ntasks   = Threads.nthreads())
+                  ntasks = Threads.nthreads())
 
     @info "Opening and filtering posteriors distributions"
     out = filter(x -> occursin("post", x), readdir(analysis_folder, join = true))
     out = filter(x -> !occursin(".1.", x), out)
 
+    # Move from CSV.read to readdlm, bug when threads enable in node server.
+    # open(x) = Array(CSV.read(x, DataFrame))
     # Control outlier inference. 2Nes non negative values
-    open(x) = Array(CSV.read(x, DataFrame))
-    flt(x) = x[(x[:, 4] .> 0) .& (x[:, 1] .> 0) .& (x[:, 2] .> 0) .& (x[:, 3] .> 0), :]
-    posteriors = flt.(open.(out))
-
-    # Remove summstat files
-    if rm_summaries
-        rm.(filter(x -> occursin("summstat", x) || occursin("alphas_", x),
-                   readdir(analysis_folder, join = true)))
-    end
-
-    return posteriors
-end
-
-function ABCreg(;
-                analysis_folder::String,
-                S::Int64,
-                P::Int64 = 5,
-                tol::Float64,
-                abcreg::String,
-                rm_summaries::Bool=false)
-
-    # List alphas and summstat files
-    a_file = filter(x -> occursin("alphas", x), readdir(analysis_folder, join = true))
-    sum_file = filter(x -> occursin("summstat", x), readdir(analysis_folder, join = true))
-
-    # Creating output names
-    out = analysis_folder .* "/out_" .* string.(1:size(a_file, 1))
-
-    @info "Running ABCreg"
-    parallel_bin = CondaPkg.which("parallel")
+    posteriors = @. read_gz(out)
+    # Remove is some file wasnt computed
+    posteriors = posteriors[@. !iszero(posteriors)]
     
-    if isnothing(CondaPkg.which("parallel"))
-        CondaPkg.add("parallel", channel = "conda-forge")
-        parallel_bin = CondaPkg.which("parallel")
-    end
-    
-    # Using GNU-parallel from CondaPkg
-    nthreads = Threads.nthreads()
-    job_commands  = @. abcreg * " -d " * a_file * " -p " * sum_file* " -P " * string(P) * " -S " * string(S) * " -t " * string(tol) * " -b " * out
-    job_file = tempname(analysis_folder)
-
-    CSV.write(job_file,Tables.table(job_commands),header=false)
-
-    run(`$parallel_bin -j $nthreads -u -a $job_file`)
-    rm(job_file)
-
-    @info "Opening and filtering posteriors distributions"
-    out = filter(x -> occursin("post", x), readdir(analysis_folder, join = true))
-    out = filter(x -> !occursin(".1.", x), out)
-
-    # Control outlier inference. 2Nes non negative values
-    open(x) = Array(CSV.read(x, DataFrame))
-    flt(x) = x[(x[:, 4] .> 0) .& (x[:, 1] .> 0) .& (x[:, 2] .> 0) .& (x[:, 3] .> 0), :]
-    posteriors = flt.(open.(out))
-
     # Remove summstat files
     if rm_summaries
         rm.(filter(x -> occursin("summstat", x) || occursin("alphas_", x),
@@ -289,6 +228,18 @@ function get_mode(posterior::Matrix{Float64})
     end
 
     return (out)
+end
+
+# read gz since CSV.read is bugged at node server
+function read_gz(out_file::String)
+    try
+        x = readdlm(open(out_file),'\t',header=false)
+        x = x[(x[:, 4] .> 0) .& (x[:, 1] .> 0) .& (x[:, 2] .> 0) .& (x[:, 3] .> 0), :]
+        return x
+    catch
+        @warn "$out_file is empty"
+        return zeros(1,5)
+    end    
 end
 
 """

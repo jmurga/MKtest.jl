@@ -308,7 +308,7 @@ function grapes(sfs::Vector{Matrix{Float64}},
     @info "Running Grapes"
     r(d, o, m = model, gr = grapes_bin) = run(`$gr -in $d -out $o -model $m`)
 
-    @suppress_out begin ThreadsX.map(r, output_dofe, output_grapes) end
+    @suppress_out begin ThreadsX.mapi(r, output_dofe, output_grapes,ntasks=Threads.nthreads()) end
 
     df = @suppress begin CSV.read.(output_grapes, DataFrame, footerskip = 1, skipto = 3) end
 
