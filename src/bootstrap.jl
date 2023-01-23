@@ -281,7 +281,7 @@ function bootstrap(param::bootstrap_parameters)
     #Filter case, control and distance
     distance = string.(distance_raw[distance_raw[:, 2] .>= dist, 1])
 
-    control = filter_case_control(case_raw, factors_id, distance)
+    control = filter_case_control(case, factors_id, distance)
 
     case_number = length(case)
     control_number = length(control)
