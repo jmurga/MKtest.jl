@@ -24,7 +24,7 @@ Function to solve analytical fixation rates and the expected SFS. The function w
 
 If rho and/or theta are not set, default values will be used (0.001).
 
-To parallelize the estimations please be sure you start up Julia using –threads/-t option and set the number of cores.
+To parallelize the estimations please be sure you start up Julia using --threads/-t option and set the number of cores.
 
 The function returns a HDF5 file containing models solved and rates. The rates will be used to compute summary statistics required at ABC.
 
@@ -50,7 +50,7 @@ Optional Arguments:
 ```
 
 ```
-julia -t8 abcmk_cli.jl rates 10000 661 100000 --alpha 0.1,0.9 --gam-dfe -1000,-200 --gam-flanking -1000,-500 --gL 1,10 --gH 200,2000 --output analysis/rates_cli.jld2
+julia -t8 abcmk_cli.jl rates 10000 661 100000 --alpha 0.1,0.9 --gam-dfe -1000,-200 --gam-flanking -1000,-500 --gL 1,10 --gH 200,2000 --output mktest/rates_cli.jld2
 ```
 ## Estimate summary statistics
 
@@ -76,13 +76,13 @@ Optional Arguments:
 ```
 
 ```bash
-julia abcmk_cli.jl summaries --folder analysis/ --rates analysis/rates.jld2 --samples 661 --dac 2,4,5,10,20,50,200,661,925 --summsize 1000000
+julia abcmk_cli.jl summaries --folder mktest/ --rates mktest/rates.jld2 --samples 661 --dac 2,4,5,10,20,50,200,661,925 --summsize 1000000
 ```
 
 The function will output observed data (*alphas_N.txt*) and summary statistics (*summaries_N.txt*) in the selected folder. These file will be used at ABC inference to generate posterior distributions.
 
 ```bash
-julia abcmk_cli.jl summaries --analysis_folder analysis/ --rates  analysis/rates.jld2 --samples 661 --replicas 100 --summstatSize 100000 --dac 2,4,5,10,20,50,200,661,925
+julia abcmk_cli.jl summaries --analysis_folder mktest/ --rates  mktest/rates.jld2 --samples 661 --replicas 100 --summstatSize 100000 --dac 2,4,5,10,20,50,200,661,925
 ```
 
 ## Perform ABC inference
@@ -114,5 +114,5 @@ Optional Arguments:
 
 
 ```bash
-julia -t8 abc 9 0.025 --folder analysis/ --S 9 --abcreg /home/jmurga/ABCreg/src/reg
+julia -t8 abc 9 0.025 --folder mktest/ --S 9 --abcreg /home/jmurga/ABCreg/src/reg
 ```

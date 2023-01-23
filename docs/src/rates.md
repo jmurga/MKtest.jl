@@ -2,7 +2,7 @@
 
 The first step is to solve *N* genetic models to obtain the analytical estimations. The process is automatize to create random combination model parameters given priors distributions. The expected fixation rates and frequency spectra, polymorphic rates, and model information will be used to estimate informative summary statistics needed to perform ABC inference. The following section show how to define a genetic a model, input prior distributions and solve the models.
 
-Before executing the rates estimation, start-up Julia using `-t` option to add the desired number of threads to parallelize the process
+Before executing the rates estimation, start-up Julia using `-t/--threads` option to add the desired number of threads to parallelize the process.
 
 ```bash
 julia -t8
@@ -10,7 +10,7 @@ julia -t8
 
 ```julia
 using MKtest
-mkpath("analysis/")
+mkpath("mktest/")
 ```
 
 You must to declare a variable containing some basic information about your model using the function ```MKtest.paramterers```. Note that ```MKtest.parameters``` contains information about mutation rate, recombination rate, DFE, BGS and probabilities of fixations. To check all the arguments you can access to the function documentation using ```@doc MKtest.parameter```
@@ -111,7 +111,7 @@ Now you can used the function ```MKtest.rates``` to input the prior distribution
 ```
 
 ```julia
-@time df = MKtest.rates(adap,gH=[200,2000],gL=[1,10],gam_dfe=[-2000,-200],gam_flanking=[-1000,-500],iterations = 10^5,output="analysis/rates.jld2");
+@time df = MKtest.rates(adap,gH=[200,2000],gL=[1,10],gam_dfe=[-2000,-200],gam_flanking=[-1000,-500],iterations = 10^5,output="mktest/rates.jld2");
 ```
 
 The function will create a HDF5 file containing the solved models, the expected fixation rates and frequency spectra, and the selected DAC. This information will be used later to estimate summary statistics.

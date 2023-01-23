@@ -19,25 +19,25 @@ Once you have downloaded the files, you can use the function ```MKtest.parse_sfs
 
 ```julia
 
-download("https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/tgp.txt","analysis/tgp.txt")
+download("https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/tgp.txt","mktest/tgp.txt")
 
 adap = MKtest.parameters(n=661,cutoff=[0.0,1.0])
-alpha, sfs, divergence, m= MKtest.parse_sfs(adap, data = "analysis/tgp.txt")
+alpha, sfs, divergence, m= MKtest.parse_sfs(adap, data = "mktest/tgp.txt")
 ```
 
 It is possible to directly subset genes IDs using the same ids deposited at you data. You can use a (column list file)[https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/ensembl_list.txt] or (CSV-like file)[https://raw.githubusercontent.com/jmurga/MKtest.jl/main/data/test_nonVIPs.txt] to subset the file list. If you use CSV-like each row will be parsed independtly.
 
 ```julia
-download("https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/ensembl_list.txt","analysis/ensembl_list.txt")
+download("https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/ensembl_list.txt","mktest/ensembl_list.txt")
 
-alpha, sfs, divergence = MKtest.parse_sfs(adap, data = "analysis/tgp.txt",gene_list = "analysis/ensembl_list.txt")
+alpha, sfs, divergence = MKtest.parse_sfs(adap, data = "mktest/tgp.txt",gene_list = "mktest/ensembl_list.txt")
 ```
 
 ```julia
-download("https://raw.githubusercontent.com/jmurga/MKtest.jl/main/data/example_bootstrap.txt","analysis/example_bootstrap.txt")
+download("https://raw.githubusercontent.com/jmurga/MKtest.jl/main/data/example_bootstrap.txt","mktest/example_bootstrap.txt")
 
 # In our case, eachrow is a bootstrapped set
-alpha, sfs, divergence, m = MKtest.parse_sfs(adap, data = "analysis/tgp.txt",gene_list = "analysis/example_bootstrap.txt")
+alpha, sfs, divergence, m = MKtest.parse_sfs(adap, data = "mktest/tgp.txt",gene_list = "mktest/example_bootstrap.txt")
 ```
 
 ## Estimating summary statistics
@@ -52,10 +52,10 @@ Note you can only input DAC already estimated, nonetheles you can perform any su
 ```julia 
 using JLD2
 # Check hierarchy
-h5   = jldopen("analysis/rates.jld2")
+h5   = jldopen("mktest/rates.jld2")
 h5
 
-JLDFile /home/jmurga/analysis/rates.jld2 (read-only)
+JLDFile /home/jmurga/mktest/rates.jld2 (read-only)
  └─📂 1000
     └─📂 661
        └─📂 cutoff=[0.0,1.0]
@@ -90,7 +90,7 @@ h5["1000/661/dac"]
 The function ```MKtest.summary_statistics``` will produce the simulated (summary statistics) and obversed data to run the ABC inference
 
 ```julia
-@time df = MKtest.summary_statistics(adap,h5_file="analysis/rates.jld2",sfs=sfs,divergence=divergence,analysis_folder="analysis/",summstat_size=10^5);
+@time df = MKtest.summary_statistics(adap,h5_file="mktest/rates.jld2",sfs=sfs,divergence=divergence,analysis_folder="mktest/",summstat_size=10^5);
 ```
 The function will create $N$ summary statistic files and the observed data files depending on the length of variables `sfs` and `divergence` parsed with `MKtest.parse_sfs` function (*summaries_N.txt* and *alpha_N.txt* respectively, see [Data](data.md)). Both files will be used to perform the ABC inference.
 
@@ -102,6 +102,6 @@ sfs = CSV.read("/path/to/sfs_file.txt", header=false, DataFrame) |> Matrix
 divergence = CSV.read("/path/to/divergence_file.txt", header=false, DataFrame) |> Matrix
 
 # Note we modified both variables into a Vector using square braces ([]) comprehesion
-@time df = MKtest.summary_statistics(adap,h5_file="analysis/rates.jld2",sfs=[sfs],divergence=[divergence],analysis_folder="analysis/",summstat_size=10^5);
+@time df = MKtest.summary_statistics(adap,h5_file="mktest/rates.jld2",sfs=[sfs],divergence=[divergence],analysis_folder="mktest/",summstat_size=10^5);
 ```
 

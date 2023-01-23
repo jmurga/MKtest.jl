@@ -78,7 +78,6 @@ function solve_rates(param::parameters, binom::SparseMatrixCSC{Float64, Int64})
     gL,
     gH,
     shape,
-    shape,
     scale,
     dac = param
 

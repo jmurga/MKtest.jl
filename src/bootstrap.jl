@@ -30,15 +30,18 @@ end
 function filter_case_control(x::Vector{String}, y::Vector{String}, distance::Vector{String})
 
     # setdiff!(x, hla_hist)
-    x_case::Vector{String} = intersect(x, y[:, 1])
+    # x_case::Vector{String} = intersect(x, y[:, 1])
     y_control::Vector{String} = setdiff(y[:, 1], x)
 
     intersect!(y_control, distance)
 
-    return (x_case, string.(y_control))
+    return (string.(y_control))
 end
 
-# Get factors
+"""
+    Filtering case and intersect with control.
+    The function will also filter by hla_dist and factors_raw (variables)
+"""
 function get_factors(case_set::Vector{String}, control_set::Vector{String},
                      factors_raw::Matrix)
     control_values = factors_raw[(@view factors_raw[:, 1]) .∈ [control_set], 1:end]
@@ -59,7 +62,9 @@ function get_factors(case_set::Vector{String}, control_set::Vector{String},
             control_number)
 end
 
-# check limits
+"""
+    Check limits 
+"""
 function check_limits(control_avg::Vector{Float64}, tol::Float64)
     l_u::Matrix{Float64} = hcat(control_avg, control_avg)
     lims::Vector{String} = fill("start", length(control_avg))
@@ -169,8 +174,7 @@ function get_bootstrap(case_set::Vector{String},
     #Control sets are created by packs of 100 to speed up control creation while keeping memory usage in check.
     init_fake = fake_seed_num = 100
 
-    # to keep the control sets close the averages for confounding factors in the group of interest, we later require that there some level of alternance with the newly added control genes swithcing between increasing the overall average and decreasing it. 
-
+    # to keep the control sets close the averages for confounding factors in the group of interest, we later require that there some level of alternance with the newly added control genes swithcing between increasing the overall average and decreasing it.
     lim = size(factors, 2)
 
     direction = fill("start", lim)
@@ -265,7 +269,7 @@ function bootstrap(param::bootstrap_parameters)
 
     @info "Opening data"
 
-    case_raw = vec(Array(CSV.read(data, header = false, delim = '\t', DataFrame,
+    case = vec(Array(CSV.read(data, header = false, delim = '\t', DataFrame,
                                   stringtype = String)))
     factors_raw = Array(CSV.read(factors, header = false, DataFrame))
     factors_id = string.(@view factors_raw[:, 1])
@@ -277,7 +281,7 @@ function bootstrap(param::bootstrap_parameters)
     #Filter case, control and distance
     distance = string.(distance_raw[distance_raw[:, 2] .>= dist, 1])
 
-    case, control = filter_case_control(case_raw, factors_id, distance)
+    control = filter_case_control(case_raw, factors_id, distance)
 
     case_number = length(case)
     control_number = length(control)

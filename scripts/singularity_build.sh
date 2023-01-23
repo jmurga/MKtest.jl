@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-image="singularity/abcmk.sif"
-def="singularity/abcmk.def"
+image="singularity/mktest.sif"
+def="singularity/Singularity"
 
-sudo singularity build -s ${image} ${def}
+singularity build -s ${image} ${def}

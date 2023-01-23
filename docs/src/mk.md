@@ -12,7 +12,7 @@ Please check [`MKtest.standardMK`](@ref) to obtain more info.
 
 ```julia
 adap = MKtest.parameters(n=661,cutoff=[0.0,1.0])
-alpha, sfs, divergence, m= MKtest.parse_sfs(adap, data = "analysis/tgp.txt")
+alpha, sfs, divergence, m= MKtest.parse_sfs(adap, data = "mktest/tgp.txt")
 
 mk = MKtest.standardMK(sfs[1],divergence[1])
 ```
@@ -58,5 +58,5 @@ amk, ci, model = MKtest.aMK(adap,alpha[1])
 Grapes is a ML method that can estimate the expected proportion of adaptive fixations given the inferred DFE from the MK data. Grapes assumes can model the DFE in the form of two different versions of the Fisher's geometric model, and a model assuming a Beta-shaped distribution of weak effect mutations, a Gamma distribution as well as a exponential distibution. Please check (Grapes repository)[https://github.com/BioPP/grapes] a cite (Galtier 2016)[https://doi.org/10.1371/journal.pgen.1005774] if you use `MKtest.grapes` function.
 
 ```julia
-grapes_df = grapes(sfs,divergence,m,"GammaExpo","analysis/",20)
+grapes_df = grapes(sfs,divergence,m,"GammaExpo","mktest/",20)
 ```

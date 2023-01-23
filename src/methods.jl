@@ -263,9 +263,9 @@ Run grapes using SFS and divergence data. The function will install grapes using
 # Output
  - `DataFrame`: grapes model estimation.
 """
-function grapes(sfs::Vector{Matrix{Float64}},
-                divergence::Vector{Matrix{Int64}},
-                m::Vector{Matrix{Int64}},
+function grapes(sfs::Vector,
+                divergence::Vector,
+                m::Vector,
                 model::String,
                 folder::String,
                 bins::Int64)
@@ -274,6 +274,7 @@ function grapes(sfs::Vector{Matrix{Float64}},
 
     if (isnothing(grapes_bin))
         CondaPkg.add("grapes-static", channel = "genomedk")
+        grapes_bin = CondaPkg.which("grapes")
     end
 
     @assert model ∈ ["GammaZero", "GammaExpo", "DisplGamma", "ScaledBeta", "FGMBesselK"] "Please select a valid model: GammaZero GammaExpo DisplGamma ScaledBeta FGMBesselK"

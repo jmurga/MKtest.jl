@@ -93,7 +93,7 @@ function Br(param::parameters, theta::Float64)
     return out
 end
 
-# Set mutation rate given the expected reduction in nucleotide diversity (B value ) in a locus.
+# Set mutation rate given the expected reduction in nucleotide diversity (B value) in a locus.
 """
 	set_θ!(param)
 

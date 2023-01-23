@@ -7,7 +7,7 @@ RUN apt-get update\
     apt-get clean  && \
     rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /analysis
+RUN mkdir -p /mktest
 
 RUN curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Mambaforge-$(uname)-$(uname -m).sh"
 RUN bash Mambaforge-$(uname)-$(uname -m).sh -b
@@ -17,21 +17,26 @@ ENV LD_LIBRARY_PATH /root/mambaforge/lib:$LD_LIBRARY_PATH
 RUN mamba update -n base -c defaults conda
 RUN mamba init bash
 
-RUN /root/mambaforge/bin/mamba install -c conda-forge jupyter -y
+RUN mamba install -c conda-forge jupyter -y
 
-ADD data/* analysis/
-ADD scripts/abcmk_cli.jl /analysis/abcmk_cli.jl
-ADD scripts/precompile_mktest.jl /analysis/precompile_mktest.jl
+ADD data/* mktest/
+ADD scripts/abcmk_cli.jl /mktest/abcmk_cli.jl
+ADD scripts/precompile_mktest.jl /mktest/precompile_mktest.jl
 
-RUN julia -e 'using Pkg;Pkg.add(["IJulia","CSV","DataFrames","PackageCompiler","Fire"])'
+RUN julia -e 'using Pkg;Pkg.add(["CondaPkg","CSV","DataFrames","PackageCompiler","Fire"])'
 
 RUN julia -e 'using Pkg;Pkg.add(PackageSpec(path="https://github.com/jmurga/MKtest.jl"))'
+RUN julia -e 'using CondaPkg;CondaPkg.add("grapes-static", channel = "genomedk");CondaPkg.add("bedtools", channel = "bioconda")'
 
-RUN julia -e 'using PackageCompiler;PackageCompiler.create_sysimage(:MKtest, sysimage_path="/analysis/mktest.so", precompile_execution_file="/analysis/precompile_mktest.jl")'
+RUN julia -e 'using PackageCompiler;PackageCompiler.create_sysimage(:MKtest, sysimage_path="/mktest/mktest.so", precompile_execution_file="/mktest/precompile_mktest.jl")'
 
-RUN git clone https://github.com/molpopgen/ABCreg.git /analysis/ABCreg
-RUN cd /analysis/ABCreg/src && make
+RUN git clone https://github.com/molpopgen/ABCreg.git /mktest/ABCreg
+RUN cd /mktest/ABCreg/src && make
 
-ENV PATH /analysis/ABCreg/src:$PATH
+ENV PATH /mktest/ABCreg/src:$PATH
 
-WORKDIR /analysis
+WORKDIR /mktest
+
+ENV NTHREADS=1
+
+CMD ["julia","-J","mktest.so","-t","auto"]

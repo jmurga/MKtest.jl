@@ -46,7 +46,7 @@ The following sections describe a pipeline to estimate the empirical adaptation 
  - Summary statistic estimations
  - ABC inference
 
-Please note that we use a relative path called *analysis/* to execute the whole pipeline. This path will be relative to the where Julia or the Command-Line Interface is executed.
+Please note that we use a relative path called *mktest/* to execute the whole pipeline. This path will be relative to the where Julia or the Command-Line Interface is executed.
 
 The software is prepared to parallelize each pipeline step using Julia using multi-threading computing. You can add the desired number of threads executing `-t` option when running julia (e.g using 8 cores: `julia -t8`). Please make some tests in your machine before executing expensive models. It is almost mandatory to parallelize at least the rate estimations.
 

@@ -23,9 +23,9 @@ For TGP we included the [counfounding dataset](https://raw.githubusercontent.com
 To run the bootstrap you must to declare a variable containing some basic information about data and bootstrap options using the function ```MKtest.bootstrap_parameters```. To check all the arguments you can access to the function documentation using ```@doc MKtest.bootstrap_parameters```
 
 ```julia
-b_param = MKtest.bootstrap_parameters(data = "analysis/ensembl_list.txt", annotation = "analysis/ensembl_gene_coords_v69.bed", dist = 1, rep = 3, tol = 0.05, iter = 10, factors = "analysis/confounding_factors.txt", output = "analysis/test")
+b_param = MKtest.bootstrap_parameters(data = "mktest/ensembl_list.txt", annotation = "mktest/ensembl_gene_coords_v69.bed", dist = 1, rep = 3, tol = 0.05, iter = 10, factors = "mktest/confounding_factors.txt", output = "mktest/test")
 ```
-To run the bootstrap just use `MKtest.boostrap` function. It will output one file containing the case genes (`analysis/test_case.txt`) and another containing the control genes (`analysis/test_control.txt`)
+To run the bootstrap just use `MKtest.boostrap` function. It will output one file containing the case genes (`mktest/test_case.txt`) and another containing the control genes (`analysis/test_control.txt`)
 
 ```julia
 MKtest.bootstrap(b_param)

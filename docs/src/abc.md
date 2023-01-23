@@ -7,7 +7,7 @@ We link [ABCreg](https://github.com/molpopgen/ABCreg) with Julia to perform ABC 
 It is possible to perform the inference through Julia. We set the tolerance value such that 2500 acceptances were recorded for the inference
 
 ```julia
-posteriors = MKtest.ABCreg(analysis_folder="analysis/",S=size(adap.dac,1),tol=0.025,abcreg="/home/jmurga/ABCreg/src/reg");
+posteriors = MKtest.ABCreg(analysis_folder="mktest/",S=size(adap.dac,1),tol=0.025,abcreg="/home/jmurga/ABCreg/src/reg");
 ```
 The function will output one file per dataset containing the posteriors distributions. The posterior distributions contains five columns corresponding to:
  - α weak: Contribution of weak selecction to $\alpha$
