@@ -36,4 +36,4 @@ From: julia:latest
 	make -C /mktest/ABCreg/src
 
 %runscript
-	exec julia -J /mktest/mktest.so /mktest/abcmk_cli.jl "$@"
+	exec julia /mktest/abcmk_cli.jl "$@"

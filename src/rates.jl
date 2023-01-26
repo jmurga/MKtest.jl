@@ -228,5 +228,5 @@ function rates(param::parameters;
         file[string(param.N) * "/" * string(param.n) * "/" * string_cutoff * "/dac"] = param.dac
     end
 
-    return (models)
+    return(Dict(:models => models,:neut => n,:sel => s,:dsdn => dsdn,:dax => param.dac))
 end
