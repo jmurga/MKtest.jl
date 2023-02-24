@@ -34,10 +34,12 @@ Function to estimate the asymptotic value of α(x).
 # Returns
  - `Tuple{Float64, Vector{Float64}, Vector{Float64}}`: Tuple containing aMK estimation, CI estimation, model output.
 """
-function aMK(param::parameters,
-             α::Vector{Float64};
-             dac_rm::Bool = false,
-             na_rm::Bool = false)
+function aMK(
+    param::parameters,
+    α::Vector{Float64};
+    dac_rm::Bool = false,
+    na_rm::Bool = false,
+)
     @unpack nn, dac = param
 
     f = collect(1:length(α)) / nn
@@ -58,12 +60,14 @@ function aMK(param::parameters,
 
     # Fit values
 
-    fitted1 = curve_fit(model,
-                        f,
-                        α,
-                        [-1.0, -1.0, 1.0];
-                        lower = [-1.0, -1.0, 1.0],
-                        upper = [1.0, 1.0, 10.0])
+    fitted1 = curve_fit(
+        model,
+        f,
+        α,
+        [-1.0, -1.0, 1.0];
+        lower = [-1.0, -1.0, 1.0],
+        upper = [1.0, 1.0, 10.0],
+    )
     fitted2 = curve_fit(model, f, α, fitted1.param)
     asymp = model(1, fitted2.param)
 
@@ -90,10 +94,14 @@ Function to estimate the imputedMK (https://doi.org/10.1093/g3journal/jkac206).
 # Returns
  - `Dict: Dictionary containing imputedMK estimation.
 """
-function imputedMK(param::parameters, sfs::Matrix{Float64}, divergence::Matrix{Int64};
-                   cutoff::Float64 = 0.15,
-                   m::T = nothing) where {T <: Union{Nothing, Array}}
-    output = OrderedDict{String, Float64}()
+function imputedMK(
+    param::parameters,
+    sfs::Matrix{Float64},
+    divergence::Matrix{Int64};
+    cutoff::Float64 = 0.15,
+    m::T = nothing,
+) where {T<:Union{Nothing,Array}}
+    output = OrderedDict{String,Float64}()
 
     pn = sum(sfs[:, 2])
     ps = sum(sfs[:, 3])
@@ -126,8 +134,8 @@ function imputedMK(param::parameters, sfs::Matrix{Float64}, divergence::Matrix{I
     output["alpha"] = round(1 - ((pn_neutral / ps) * (ds / dn)), digits = 3)
 
     #  method = :minlike same results R, python two.sides
-    output["pvalue"] = pvalue(FisherExactTest(Int(ps), Int(ceil(pn_neutral)), Int(ds),
-                                              Int(dn)))
+    output["pvalue"] =
+        pvalue(FisherExactTest(Int(ps), Int(ceil(pn_neutral)), Int(ds), Int(dn)))
 
     if (!isnothing(m))
         mn = m[1]
@@ -167,9 +175,14 @@ Function to estimate the fwwMK (https://doi.org/10.1038/4151024a).
 # Returns
  - `Dict: Dictionary containing imputedMK estimation.
 """
-function fwwMK(param::parameters, sfs::Matrix{Float64}, divergence::Matrix{Int64};
-               cutoff::Float64 = 0.15, m::T = nothing) where {T <: Union{Nothing, Array}}
-    output = OrderedDict{String, Float64}()
+function fwwMK(
+    param::parameters,
+    sfs::Matrix{Float64},
+    divergence::Matrix{Int64};
+    cutoff::Float64 = 0.15,
+    m::T = nothing,
+) where {T<:Union{Nothing,Array}}
+    output = OrderedDict{String,Float64}()
 
     ps = sum(sfs[:, 2])
     pn = sum(sfs[:, 3])
@@ -187,8 +200,8 @@ function fwwMK(param::parameters, sfs::Matrix{Float64}, divergence::Matrix{Int64
     # output['alpha'] = 1 - (((pn - deleterious) / ps) * (ds / dn))
     output["alpha"] = round(1 - ((pn_inter / ps_inter) * (ds / dn)), digits = 3)
     #  method = :minlike same results R, python two.sides
-    output["pvalue"] = pvalue(FisherExactTest(Int(ps_inter), Int(ceil(pn_inter)), Int(ds),
-                                              Int(dn)))
+    output["pvalue"] =
+        pvalue(FisherExactTest(Int(ps_inter), Int(ceil(pn_inter)), Int(ds), Int(dn)))
 
     if (!isnothing(m))
         mn = m[1]
@@ -218,9 +231,12 @@ Function to estimate the original α value.
 # Output
  - `Dict: Dictionary containing results
 """
-function standardMK(sfs::Matrix{Float64}, divergence::Matrix{Int64};
-                    m::T = nothing) where {T <: Union{Nothing, Array}}
-    output = OrderedDict{String, Float64}()
+function standardMK(
+    sfs::Matrix{Float64},
+    divergence::Matrix{Int64};
+    m::T = nothing,
+) where {T<:Union{Nothing,Array}}
+    output = OrderedDict{String,Float64}()
 
     pn = sum(sfs[:, 2])
     ps = sum(sfs[:, 3])
@@ -263,12 +279,24 @@ Run grapes using SFS and divergence data. The function will install grapes using
 # Output
  - `DataFrame`: grapes model estimation.
 """
-function grapes(sfs::Vector,
-                divergence::Vector,
-                m::Vector,
-                model::String,
-                folder::String,
-                bins::Int64)
+
+function grapes(
+    sfs::Vector,
+    divergence::Vector,
+    m::Vector,
+    model::String,
+    folder::String,
+    bins::Int64;
+    nearly_neutral::Int64 = 5,
+    FWW_threshold::Float64 = 0.15,
+    nb_rand_start::Int64 = 0,
+    anc_to_rec_Ne_ratio::Float64 = 1.0,
+    no_div_data::Bool = false,
+    no_div_param::Bool = false,
+    no_syn_orient_error::Bool = false,
+    fold::Bool = false,
+    fixed_param::String = "",
+)
 
     grapes_bin = CondaPkg.which("grapes")
 
@@ -277,7 +305,15 @@ function grapes(sfs::Vector,
         grapes_bin = CondaPkg.which("grapes")
     end
 
-    @assert model ∈ ["GammaZero", "GammaExpo", "DisplGamma", "ScaledBeta", "FGMBesselK"] "Please select a valid model: GammaZero GammaExpo DisplGamma ScaledBeta FGMBesselK"
+    @assert model ∈ [
+        "GammaZero",
+        "GammaExpo",
+        "GammaGamma",
+        "DisplGamma",
+        "ScaledBeta",
+        "FGMBesselK",
+        "all",
+    ] "Please select a valid model: GammaZero GammaExpo GammaGamma DisplGamma ScaledBeta FGMBesselK all"
 
     sfs = reduce_sfs.(sfs, bins)
 
@@ -307,11 +343,51 @@ function grapes(sfs::Vector,
     @. write_files(dofe, output_dofe, true)
 
     @info "Running Grapes"
-    r(d, o, m = model, gr = grapes_bin) = run(`$gr -in $d -out $o -model $m`)
+    if model == "GammaZero" || no_div_param
+        no_div_param = false
+    end
 
-    @suppress_out begin ThreadsX.mapi(r, output_dofe, output_grapes,ntasks=Threads.nthreads()) end
+    bool_options = ["-no_div_data", "-no_div_param", "-no_syn_orient_error", "-fold"]
+    bool_options = join(
+        bool_options[any(
+            vcat(no_div_data, no_div_param, no_syn_orient_error, fold),
+            dims = 2,
+        )],
+        " ",
+    )
 
-    df = @suppress begin CSV.read.(output_grapes, DataFrame, footerskip = 1, skipto = 3) end
+    if !isempty(fixed_param)
+        fixed_param = "-fixed_param " * fixed_param
+    end
 
+
+    r(
+        d,
+        o,
+        md = model,
+        gr = grapes_bin,
+        nt = nearly_neutral,
+        fww = FWW_threshold,
+        nb = nb_rand_start,
+        ne = anc_to_rec_Ne_ratio,
+        bopt = bool_options,
+        fp = fixed_param,
+    ) = run(
+        `$gr -in $d -out $o -model $md -nearly_neutral $nt -FWW_threshold $fww -nb_rand_start $nb -anc_to_rec_Ne_ratio $ne $bopt $fp`,
+    )
+
+    @suppress_out begin
+        ThreadsX.mapi(r, output_dofe, output_grapes, ntasks = Threads.nthreads())
+    end
+
+    if model == "all"
+        df = @suppress begin
+            CSV.read.(output_grapes, DataFrame)
+        end
+    else
+        df = @suppress begin
+            CSV.read.(output_grapes, DataFrame, footerskip = 1, skipto = 3)
+        end
+    end
     return (vcat(df...))
 end
