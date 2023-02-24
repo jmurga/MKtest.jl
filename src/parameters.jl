@@ -37,7 +37,7 @@ Mutable structure containing the variables required to solve the analytical appr
     gam_dfe::Int64 = -457
     scale::Float64 = shape / abs(gam_dfe)
     B::Float64 = 0.999
-    B_bins::Array{Float64, 1} = push!(collect(0.1:0.025:0.975), 0.999)
+    B_bins::Array{Float64,1} = push!(collect(0.1:0.025:0.975), 0.999)
     ppos_l::Float64 = 0
     ppos_h::Float64 = 0
     N::Int64 = 1000
@@ -47,20 +47,22 @@ Mutable structure containing the variables required to solve the analytical appr
     TE::Float64 = 5.0
     diploid::Bool = false
     cutoff::Vector{Float64} = [0.0, 1.0]
+    isolines::Bool = false
 
     NN::Int64 = 2 * N
     nn::Int64 = 2 * n
-    dac::Array{Int64, 1} = [2, 4, 5, 10, 20, 50, 200, 500, 700]
+    dac::Array{Int64,1} = [2, 4, 5, 10, 20, 50, 200, 500, 700]
 end
 
 function assertion_params(param::parameters)
-    @assert (param.cutoff[1] >= 0.0)&(param.cutoff[end] <= 1.0) "Frequency cutoff must be at the interval [0,1]"
+    @assert (param.cutoff[1] >= 0.0) & (param.cutoff[end] <= 1.0) "Frequency cutoff must be at the interval [0,1]"
     @assert all(param.dac .< param.nn) "Selected DAC is larger than sample size"
 
-    freq_dac = hcat(round.(collect(1:(param.nn - 1)) ./ param.nn, digits = 4),
-                    1:(param.nn - 1))
-    freq_dac = freq_dac[(freq_dac[:, 1] .>= param.cutoff[1]) .& (freq_dac[:, 1] .<= param.cutoff[end]),
-                        :]
+    freq_dac = hcat(round.(collect(1:(param.nn-1)) ./ param.nn, digits = 4), 1:(param.nn-1))
+    freq_dac = freq_dac[
+        (freq_dac[:, 1].>=param.cutoff[1]).&(freq_dac[:, 1].<=param.cutoff[end]),
+        :,
+    ]
 
     @assert all(in(freq_dac[:, 2]).(param.dac)) "Please select a DAC according to your frequency cutoff"
 end
@@ -109,24 +111,30 @@ function set_θ!(param::parameters)
 end
 
 function alpha_exp_sim_low(param::parameters, ppos_l::Float64, ppos_h::Float64)
-    return fix_pos_sim(param, param.gL, 0.5 * ppos_l) /
-           (fix_pos_sim(param, param.gL, 0.5 * ppos_l) +
-            fix_pos_sim(param, param.gH, 0.5 * ppos_h) +
-            fix_neg(param, 0.5 * ppos_l + 0.5 * ppos_h))
+    return fix_pos_sim(param, param.gL, 0.5 * ppos_l) / (
+        fix_pos_sim(param, param.gL, 0.5 * ppos_l) +
+        fix_pos_sim(param, param.gH, 0.5 * ppos_h) +
+        fix_neg(param, 0.5 * ppos_l + 0.5 * ppos_h)
+    )
 end
 
 function alpha_exp_sim_tot(param::parameters, ppos_l::Float64, ppos_h::Float64)
-    return (fix_pos_sim(param, param.gL, 0.5 * ppos_l) +
-            fix_pos_sim(param, param.gH, 0.5 * ppos_h)) /
-           (fix_pos_sim(param, param.gL, 0.5 * ppos_l) +
-            fix_pos_sim(param, param.gH, 0.5 * ppos_h) +
-            fix_neg(param, 0.5 * ppos_l + 0.5 * ppos_h))
+    return (
+        fix_pos_sim(param, param.gL, 0.5 * ppos_l) +
+        fix_pos_sim(param, param.gH, 0.5 * ppos_h)
+    ) / (
+        fix_pos_sim(param, param.gL, 0.5 * ppos_l) +
+        fix_pos_sim(param, param.gH, 0.5 * ppos_h) +
+        fix_neg(param, 0.5 * ppos_l + 0.5 * ppos_h)
+    )
 end
 
 function solv_eqns(param, config)
     ppos_l, ppos_h = config
-    return (alpha_exp_sim_tot(param, ppos_l, ppos_h) - param.al_tot,
-            alpha_exp_sim_low(param, ppos_l, ppos_h) - param.al_low)
+    return (
+        alpha_exp_sim_tot(param, ppos_l, ppos_h) - param.al_tot,
+        alpha_exp_sim_low(param, ppos_l, ppos_h) - param.al_low,
+    )
 end
 
 """
@@ -168,12 +176,13 @@ Binomial convolution to sample the allele frequencies probabilites depending on 
  - `Array{Float64,2}`: convoluted SFS for each B value defined in the model (param.B_bins). The estimations are saved at *convolutedBn.bn*.
 """
 function binom_op(param::parameters)
-    bn = Dict(param.B_bins[i] => spzeros(param.nn + 1, param.NN)
-              for i in 1:length(param.B_bins))
+    bn = Dict(
+        param.B_bins[i] => spzeros(param.nn + 1, param.NN) for i = 1:length(param.B_bins)
+    )
 
     for b in param.B_bins
         NN2 = convert(Int64, ceil(param.NN * b))
-        samples = collect(1:(param.nn - 1))
+        samples = collect(1:(param.nn-1))
         p_size = collect(0:NN2)
         samples_freqs = permutedims(p_size / NN2)
         neutral_sfs = @. 1 / p_size
@@ -192,7 +201,7 @@ end
 
 function binom_op(NN, nn, B)
     NN2 = convert(Int64, ceil(NN * B))
-    samples = collect(1:(nn - 1))
+    samples = collect(1:(nn-1))
     p_size = collect(0:NN2)
     samples_freqs = permutedims(p_size / NN2)
 
@@ -300,17 +309,17 @@ function analytical_alpha(param::parameters)
     ## Polymorphism
     neut = sfs_neut(param, binom)
 
-    selH::Array{Float64, 1} = if isinf(exp(param.gH * 2))
+    selH::Array{Float64,1} = if isinf(exp(param.gH * 2))
         sfs_pos_float(param, param.gH, param.ppos_h, binom)
     else
         sfs_pos(param, param.gH, param.ppos_h, binom)
     end
 
-    selL::Array{Float64, 1} = sfs_pos(param, param.gL, param.ppos_l, binom)
-    selN::Array{Float64, 1} = sfs_neg(param, param.ppos_h + param.ppos_l, binom)
+    selL::Array{Float64,1} = sfs_pos(param, param.gL, param.ppos_l, binom)
+    selN::Array{Float64,1} = sfs_neg(param, param.ppos_h + param.ppos_l, binom)
 
-    function split_columns(matrix::Array{Float64, 2})
-        (view(matrix, :, i) for i in 1:size(matrix, 2))
+    function split_columns(matrix::Array{Float64,2})
+        (view(matrix, :, i) for i = 1:size(matrix, 2))
     end
     tmp = cumulative_sfs(hcat(neut, selH, selL, selN), false)
 

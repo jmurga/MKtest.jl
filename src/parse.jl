@@ -26,15 +26,16 @@ Function to parse polymorphism and divergence by subset of genes. The input data
  - `Vector{Matrix{Float64}}`: Site Frequency Spectrum (non-cumulative)
  - `Vector{Matrix{Int64}}`: Synonymous and non-synonymous divergence counts
 """
-function parse_sfs(param::parameters;
-                   data::S,
-                   gene_list::Union{Nothing, Vector{S}, S} = nothing,
-                   sfs_columns::Vector{Int64} = [3, 5],
-                   div_columns::Vector{Int64} = [6, 7],
-                   m_columns::Vector{Int64} = [8, 9],
-                   bins::Union{Nothing, Int64} = nothing,
-                   isolines::Bool = false) where {S <: AbstractString}
-    @unpack n, cutoff = param
+function parse_sfs(
+    param::parameters;
+    data::S,
+    gene_list::Union{Nothing,Vector{S},S} = nothing,
+    sfs_columns::Vector{Int64} = [3, 5],
+    div_columns::Vector{Int64} = [6, 7],
+    m_columns::Vector{Int64} = [8, 9],
+    bins::Union{Nothing,Int64} = nothing,
+) where {S<:AbstractString}
+    @unpack n, cutoff, isolines = param
 
     if isolines
         s_size = n
@@ -48,7 +49,7 @@ function parse_sfs(param::parameters;
         ids = @view df[:, 1]
 
         @assert gene_list isa AbstractString || gene_list isa Vector{String} "Please input a valid gene_list file or vector containing gene ids"
-        
+
         if gene_list isa AbstractString
             gene_matrix = Array(CSV.read(gene_list, header = false, DataFrame))
         else
@@ -67,12 +68,23 @@ function parse_sfs(param::parameters;
             push!(out, tmp)
         end
 
-        α, sfs, divergence, m = unzip(map(i -> get_pol_div(i, s_size, cutoff, sfs_columns,
-                                                           div_columns, m_columns, bins),
-                                          out))
+        α, sfs, divergence, m = unzip(
+            map(
+                i -> get_pol_div(
+                    i,
+                    s_size,
+                    cutoff,
+                    sfs_columns,
+                    div_columns,
+                    m_columns,
+                    bins,
+                ),
+                out,
+            ),
+        )
     else
-        α, sfs, divergence, m = get_pol_div(df, s_size, cutoff, sfs_columns, div_columns,
-                                            m_columns, bins)
+        α, sfs, divergence, m =
+            get_pol_div(df, s_size, cutoff, sfs_columns, div_columns, m_columns, bins)
         α = [α]
         sfs = [sfs]
         divergence = [divergence]
@@ -82,13 +94,15 @@ function parse_sfs(param::parameters;
     return α, sfs, divergence, m
 end
 
-function get_pol_div(df_subset::Union{DataFrame, SubDataFrame},
-                     s_size::Int64,
-                     cutoff::Vector{Float64},
-                     sfs_columns::Vector{Int64},
-                     div_columns::Vector{Int64},
-                     m_columns::Vector{Int64},
-                     bins::Union{Nothing, Int64})
+function get_pol_div(
+    df_subset::Union{DataFrame,SubDataFrame},
+    s_size::Int64,
+    cutoff::Vector{Float64},
+    sfs_columns::Vector{Int64},
+    div_columns::Vector{Int64},
+    m_columns::Vector{Int64},
+    bins::Union{Nothing,Int64},
+)
     g(x) = parse.(Float64, filter(y -> y != "", x))
 
     tmp = split.(df_subset[:, sfs_columns], ",")
@@ -96,10 +110,10 @@ function get_pol_div(df_subset::Union{DataFrame, SubDataFrame},
     pn = vcat(g.(tmp[:, 1])...)
     ps = vcat(g.(tmp[:, 2])...)
 
-    pn = pn[pn .!= 0]
-    ps = ps[ps .!= 0]
+    pn = pn[pn.!=0]
+    ps = ps[ps.!=0]
     # Round SFS frequencies to the lowest floating value of the dataset independtly of the sample size. Needed to countmap and merge.
-    freq = OrderedDict(round.(collect(1:(s_size - 1)) / s_size, digits = 4) .=> 0)
+    freq = OrderedDict(round.(collect(1:(s_size-1)) / s_size, digits = 4) .=> 0)
 
     pn = sort(OrderedDict(countmap(round.(pn, digits = 4))))
     ps = sort(OrderedDict(countmap(round.(ps, digits = 4))))
@@ -112,15 +126,15 @@ function get_pol_div(df_subset::Union{DataFrame, SubDataFrame},
     sfs_ps = reduce(vcat, values(merge(+, freq, ps)))
 
     if (!isnothing(bins))
-        sfs_pn = reduce_sfs(hcat(collect(1:(s_size - 1)), sfs_pn), bins)[:, 2]
-        sfs_ps = reduce_sfs(hcat(collect(1:(s_size - 1)), sfs_ps), bins)[:, 2]
-        sfs = hcat(collect(1:(bins - 1)) ./ bins, sfs_pn, sfs_ps, 1:(bins - 1))
+        sfs_pn = reduce_sfs(hcat(collect(1:(s_size-1)), sfs_pn), bins)[:, 2]
+        sfs_ps = reduce_sfs(hcat(collect(1:(s_size-1)), sfs_ps), bins)[:, 2]
+        sfs = hcat(collect(1:(bins-1)) ./ bins, sfs_pn, sfs_ps, 1:(bins-1))
     else
-        sfs = hcat(freq.keys, sfs_pn, sfs_ps, (1:(s_size - 1)))
+        sfs = hcat(freq.keys, sfs_pn, sfs_ps, (1:(s_size-1)))
     end
 
     # Filtering SFS and changing frequency to DAC
-    sfs_flt = sfs[sfs[:, 1] .>= cutoff[1] .&& sfs[:, 1] .<= cutoff[2], [4, 2, 3]]
+    sfs_flt = sfs[sfs[:, 1].>=cutoff[1].&&sfs[:, 1].<=cutoff[2], [4, 2, 3]]
 
     scumu = cumulative_sfs(sfs_flt)
 
@@ -135,10 +149,12 @@ function get_pol_div(df_subset::Union{DataFrame, SubDataFrame},
     return (α, sfs_flt, [Dn Ds], m)
 end
 
-function data_to_poisson(sfs::Vector{Matrix{Float64}},
-                         divergence::Vector{Matrix{Int64}},
-                         dac::Vector{Int64})
-    f(x::Matrix{Float64}, d::Vector{Int64} = dac) = map(z -> sum(x[x[:, 1] .== z, 2:3]), d)
+function data_to_poisson(
+    sfs::Vector{Matrix{Float64}},
+    divergence::Vector{Matrix{Int64}},
+    dac::Vector{Int64},
+)
+    f(x::Matrix{Float64}, d::Vector{Int64} = dac) = map(z -> sum(x[x[:, 1].==z, 2:3]), d)
     al(a, b) = hcat(a[:, 1], @. round(1 - (b[2] / b[1] * a[:, 2] / a[:, 3]), digits = 5))
 
     scumu = cumulative_sfs.(sfs)
@@ -163,9 +179,11 @@ Bootstrap data following polyDFE manual.
  - `sfs::Vector{Matrix{Float64}}`: boostrapped sfs.
  - `divergence::Vector{Matrix{Float64}}`: divergence data.
 """
-function bootstrap_data!(sfs::Matrix{Float64},
-                         divergence::Matrix{Float64},
-                         bootstrap::Int64)
+function bootstrap_data!(
+    sfs::Matrix{Float64},
+    divergence::Matrix{Float64},
+    bootstrap::Int64,
+)
     pr(x::Matrix{Float64}) = hcat(x[:, 1], pois_rand.(x[:, 2:end]))
 
     sfs = repeat(sfs, bootstrap)

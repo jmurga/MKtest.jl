@@ -28,12 +28,13 @@ Performing ABC inference using ABCreg. Please, be sure the input folder contain 
  - `posteriors:Vector{Matrix{Float64}}`: posteriors distributions estimated by ABCreg.
 """
 function ABCreg(;
-                analysis_folder::String,
-                S::Int64,
-                P::Int64 = 5,
-                tol::Float64,
-                abcreg::String,
-                rm_summaries::Bool=false)
+    analysis_folder::String,
+    S::Int64,
+    P::Int64 = 5,
+    tol::Float64,
+    abcreg::String,
+    rm_summaries::Bool = false,
+)
 
     # List alphas and summstat files
     a_file = filter(x -> occursin("alphas", x), readdir(analysis_folder, join = true))
@@ -44,11 +45,13 @@ function ABCreg(;
 
     @info "Running ABCreg"
     # Using mapi instead map to limit tasks. Bash interaction not working as expected
-    ThreadsX.mapi( (x, y, z) -> run(`$abcreg -d $x -p $y -P $P -S $S -t $tol -b $z`),
-                  a_file,
-                  sum_file,
-                  out,
-                  ntasks = Threads.nthreads())
+    ThreadsX.mapi(
+        (x, y, z) -> run(`$abcreg -d $x -p $y -P $P -S $S -t $tol -b $z`),
+        a_file,
+        sum_file,
+        out,
+        ntasks = Threads.nthreads(),
+    )
 
     @info "Opening and filtering posteriors distributions"
     out = filter(x -> occursin("post", x), readdir(analysis_folder, join = true))
@@ -57,14 +60,18 @@ function ABCreg(;
     # Move from CSV.read to readdlm, bug when threads enable in node server.
     # open(x) = Array(CSV.read(x, DataFrame))
     # Control outlier inference. 2Nes non negative values
-    posteriors = @. read_gz(out);
+    posteriors = @. read_gz(out)
     # Remove is some file wasnt computed
     posteriors = posteriors[@. !iszero(posteriors)]
-    
+
     # Remove summstat files
     if rm_summaries
-        rm.(filter(x -> occursin("summstat", x) || occursin("alphas_", x),
-                   readdir(analysis_folder, join = true)))
+        rm.(
+            filter(
+                x -> occursin("summstat", x) || occursin("alphas_", x),
+                readdir(analysis_folder, join = true),
+            )
+        )
     end
 
     return posteriors
@@ -75,9 +82,9 @@ function get_mode(posterior::Matrix{Float64})
     # Allocating outputs
     out = zeros((1, size(posterior, 2)))
 
-    for j::Int64 in 1:size(posterior, 2)
+    for j::Int64 = 1:size(posterior, 2)
         y = kde(posterior[:, j])
-        m = collect(y.x)[y.density .== maximum(y.density)][1]
+        m = collect(y.x)[y.density.==maximum(y.density)][1]
         out[j] = m
     end
 
@@ -87,13 +94,13 @@ end
 # read gz since CSV.read is bugged at node server
 function read_gz(out_file::String)
     try
-        x = readdlm(open(out_file),'\t',header=false)
-        x = x[(x[:, 4] .> 0) .& (x[:, 1] .> 0) .& (x[:, 2] .> 0) .& (x[:, 3] .> 0), :]
+        x = readdlm(open(out_file), '\t', header = false)
+        x = x[(x[:, 4].>0).&(x[:, 1].>0).&(x[:, 2].>0).&(x[:, 3].>0), :]
         return x
     catch
         @warn "$out_file is empty"
-        return zeros(1,5)
-    end    
+        return zeros(1, 5)
+    end
 end
 
 """
@@ -108,8 +115,7 @@ Posterior distributions statistics. The function estimates Min., 0.5% Perc., Med
  - `DataFrame`: posterior statistics.
  - `DataFrame`: chosen statistic inference.
 """
-function summary_abc(posteriors::Vector{Matrix{Float64}};
-                     stat::String = "Mean")
+function summary_abc(posteriors::Vector{Matrix{Float64}}; stat::String = "Mean")
     @info "Computing statistics over posteriors distributions"
 
     p_min = vcat(map(x -> minimum(x, dims = 1), posteriors)...)
@@ -121,51 +127,55 @@ function summary_abc(posteriors::Vector{Matrix{Float64}};
     p_upper = vcat(map(x -> mapslices(q_upper, x, dims = 1), posteriors)...)
 
     if length(posteriors) == 1
-        stats = DataFrame(:Stats => repeat([
-                                               "Min.",
-                                               "0.5% Perc.",
-                                               "Median",
-                                               "Mean",
-                                               "Mode",
-                                               "99.5% Perc.",
-                                               "Max",
-                                           ],
-                                           inner = length(posteriors)))
+        stats = DataFrame(
+            :Stats => repeat(
+                ["Min.", "0.5% Perc.", "Median", "Mean", "Mode", "99.5% Perc.", "Max"],
+                inner = length(posteriors),
+            ),
+        )
 
-        tmp = DataFrame(vcat(p_min, p_lower, p_median, p_mean, p_mode, p_upper, p_max),
-                        [:α_weak, :α_strong, :α, :γ, :β])
+        tmp = DataFrame(
+            vcat(p_min, p_lower, p_median, p_mean, p_mode, p_upper, p_max),
+            [:α_weak, :α_strong, :α, :γ, :β],
+        )
 
         df = hcat(stats, tmp)
 
         @info df
 
-        return df, df[df.Stats .== uppercasefirst(stat), 2:end]
+        return df, df[df.Stats.==uppercasefirst(stat), 2:end]
     else
         df = DataFrame[]
-        for i::Int64 in 1:length(posteriors)
-            stats = DataFrame(:Stats => [
-                                  "Min.",
-                                  "0.5% Perc.",
-                                  "Median",
-                                  "Mean",
-                                  "Mode",
-                                  "95% Perc.",
-                                  "Max",
-                              ])
+        for i::Int64 = 1:length(posteriors)
+            stats = DataFrame(
+                :Stats => [
+                    "Min.",
+                    "0.5% Perc.",
+                    "Median",
+                    "Mean",
+                    "Mode",
+                    "95% Perc.",
+                    "Max",
+                ],
+            )
 
-            tmp = DataFrame(hcat(p_min[i, :],
-                                 p_lower[i, :],
-                                 p_median[i, :],
-                                 p_mean[i, :],
-                                 p_mode[i, :],
-                                 p_upper[i, :],
-                                 p_max[i, :])',
-                            [:α_weak, :α_strong, :α, :γ, :β])
+            tmp = DataFrame(
+                hcat(
+                    p_min[i, :],
+                    p_lower[i, :],
+                    p_median[i, :],
+                    p_mean[i, :],
+                    p_mode[i, :],
+                    p_upper[i, :],
+                    p_max[i, :],
+                )',
+                [:α_weak, :α_strong, :α, :γ, :β],
+            )
             push!(df, hcat(stats, tmp))
         end
 
         df_vcat = vcat(df...)
 
-        return df, df_vcat[df_vcat.Stats .== uppercasefirst(stat), 2:end]
+        return df, df_vcat[df_vcat.Stats.==uppercasefirst(stat), 2:end]
     end
 end

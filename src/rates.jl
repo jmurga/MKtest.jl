@@ -1,6 +1,8 @@
-function simulate_models!(param::parameters,
-                          binom::Dict{Float64, SparseMatrixCSC{Float64, Int64}},
-                          var_params::Vector{Float64})
+function simulate_models!(
+    param::parameters,
+    binom::Dict{Float64,SparseMatrixCSC{Float64,Int64}},
+    var_params::Vector{Float64},
+)
     (gH, gL, gam_flanking, gam_dfe, shape, alpha, alpha_low) = var_params
 
     param.shape = shape
@@ -18,8 +20,10 @@ function simulate_models!(param::parameters,
     return (m, r_ps, r_pn, r_f)
 end
 
-function solve_model!(param::parameters,
-                      binom::Dict{Float64, SparseMatrixCSC{Float64, Int64}})
+function solve_model!(
+    param::parameters,
+    binom::Dict{Float64,SparseMatrixCSC{Float64,Int64}},
+)
     @unpack B, dac, B_bins = param
 
     assertion_params(param)
@@ -34,7 +38,7 @@ function solve_model!(param::parameters,
     set_θ!(param)
     try
         set_ppos!(param)
-        for j::Int64 in 1:length(B_bins)
+        for j::Int64 = 1:length(B_bins)
             # Set B value
             param.B = param.B_bins[j]
             # Solve θ non-coding for the B value.
@@ -61,7 +65,7 @@ function solve_model!(param::parameters,
     return (m, r_ps, r_pn, r_f)
 end
 
-function solve_rates(param::parameters, binom::SparseMatrixCSC{Float64, Int64})
+function solve_rates(param::parameters, binom::SparseMatrixCSC{Float64,Int64})
 
     ################################################
     # Subset rates accounting for positive alleles #
@@ -101,7 +105,7 @@ function solve_rates(param::parameters, binom::SparseMatrixCSC{Float64, Int64})
     sel_l::Vector{Float64} = sfs_pos(param, gL, ppos_l, binom)
     sel_neg::Vector{Float64} = sfs_neg(param, ppos_l + ppos_h, binom)
 
-    split_columns(matrix::Matrix{Float64}) = (view(matrix, :, i) for i in 1:size(matrix, 2))
+    split_columns(matrix::Matrix{Float64}) = (view(matrix, :, i) for i = 1:size(matrix, 2))
     tmp = cumulative_sfs(hcat(neut, sel_h, sel_l, sel_neg), false)
 
     neut, sel_h, sel_l, sel_neg = split_columns(tmp)
@@ -110,8 +114,8 @@ function solve_rates(param::parameters, binom::SparseMatrixCSC{Float64, Int64})
     ##########
     # Output #
     ##########
-    analytical_m::Matrix{Float64} = hcat(B, al_low, al_tot, gam_flanking, gL, gH, shape,
-                                         -(shape / scale))
+    analytical_m::Matrix{Float64} =
+        hcat(B, al_low, al_tot, gam_flanking, gL, gH, shape, -(shape / scale))
     analytical_ps::Matrix{Float64} = permutedims(neut[dac])
     analytical_pn::Matrix{Float64} = permutedims(sel[dac])
     analytical_f::Matrix{Float64} = hcat(ds, dn, f_pos_l, f_pos_h)
@@ -137,14 +141,16 @@ Function to solve randomly *N* scenarios. The function will create *N* models, d
  - `DataFrame`: models solved.
  - `Output`: HDF5 file containing models solved and rates.
 """
-function rates(param::parameters;
-               gH::Vector{Int64},
-               gL::Vector{Int64},
-               gam_flanking::Vector{Int64},
-               gam_dfe::Vector{Int64},
-               alpha::Vector{Float64} = [0.1, 0.9],
-               iterations::Int64,
-               output::String)
+function rates(
+    param::parameters;
+    gH::Vector{Int64},
+    gL::Vector{Int64},
+    gam_flanking::Vector{Int64},
+    gam_dfe::Vector{Int64},
+    alpha::Vector{Float64} = [0.1, 0.9],
+    iterations::Int64,
+    output::String,
+)
 
     # param = parameters(N=1000,n=661);gH=[200,2000];gL=[1,10];gam_flanking=[-1000.,-100];gam_dfe=[-1000.,-100];iterations = 100;alpha=[0.1,0.9];B=[0.1,0.999];iterations=100000
 
@@ -168,23 +174,25 @@ function rates(param::parameters;
 
     # Priors
     priors = Vector{Float64}[]
-    for i::Int64 in 1:iterations
-        push!(priors,
-              [
-                  rand(u_gh),
-                  rand(u_gl),
-                  rand(u_gam_flanking),
-                  rand(u_gam_dfe),
-                  shape * 2^rand(afac),
-                  rand(u_tot),
-                  rand(u_low),
-              ])
+    for i::Int64 = 1:iterations
+        push!(
+            priors,
+            [
+                rand(u_gh),
+                rand(u_gl),
+                rand(u_gam_flanking),
+                rand(u_gam_dfe),
+                shape * 2^rand(afac),
+                rand(u_tot),
+                rand(u_low),
+            ],
+        )
     end
 
     # Solving models in multi-threading
     @info "Solving models in multiple threads"
-    m, r_ps, r_pn, r_f = unzip(ThreadsX.map(x -> simulate_models!(deepcopy(param), binom, x),
-                                            priors))
+    m, r_ps, r_pn, r_f =
+        unzip(ThreadsX.map(x -> simulate_models!(deepcopy(param), binom, x), priors))
 
     @info "Saving solved models in $output"
     # Reducing models array
@@ -193,40 +201,41 @@ function rates(param::parameters;
     idx = sum.(eachrow(df)) .!= 0
 
     # Saving models and rates
-    models = @view DataFrame(df,
-                             [
-                                 :B,
-                                 :al_low,
-                                 :al_tot,
-                                 :gam_flanking,
-                                 :gL,
-                                 :gH,
-                                 :shape,
-                                 :gam_dfe,
-                             ])[idx,
-                                :]
+    models = @view DataFrame(
+        df,
+        [:B, :al_low, :al_tot, :gam_flanking, :gL, :gH, :shape, :gam_dfe],
+    )[
+        idx,
+        :,
+    ]
     neut = @view vcat(r_ps...)[idx, :]
     sel = @view vcat(r_pn...)[idx, :]
     dsdn = @view vcat(r_f...)[idx, :]
 
     # Saving multiple summary statistics
-    n = OrderedDict{Int, Array}()
-    s = OrderedDict{Int, Array}()
+    n = OrderedDict{Int,Array}()
+    s = OrderedDict{Int,Array}()
     for i in eachindex(param.dac)
         n[param.dac[i]] = neut[:, i]
         s[param.dac[i]] = sel[:, i]
     end
 
     # Writting HDF5 file
-    string_cutoff = "cutoff=[" * string(param.cutoff[1]) * "," * string(param.cutoff[end]) *
-                    "]"
+    string_cutoff =
+        "cutoff=[" * string(param.cutoff[1]) * "," * string(param.cutoff[end]) * "]"
     JLD2.jldopen(output, "a+") do file
-        file[string(param.N) * "/" * string(param.n) * "/" * string_cutoff * "/models"] = models
-        file[string(param.N) * "/" * string(param.n) * "/" * string_cutoff * "/neut"] = n
-        file[string(param.N) * "/" * string(param.n) * "/" * string_cutoff * "/sel"] = s
-        file[string(param.N) * "/" * string(param.n) * "/" * string_cutoff * "/dsdn"] = dsdn
-        file[string(param.N) * "/" * string(param.n) * "/" * string_cutoff * "/dac"] = param.dac
+        file[string(param.N)*"/"*string(param.n)*"/"*string_cutoff*"/models"] = models
+        file[string(param.N)*"/"*string(param.n)*"/"*string_cutoff*"/neut"] = n
+        file[string(param.N)*"/"*string(param.n)*"/"*string_cutoff*"/sel"] = s
+        file[string(param.N)*"/"*string(param.n)*"/"*string_cutoff*"/dsdn"] = dsdn
+        file[string(param.N)*"/"*string(param.n)*"/"*string_cutoff*"/dac"] = param.dac
     end
 
-    return(Dict(:models => models,:neut => n,:sel => s,:dsdn => dsdn,:dax => param.dac))
+    return (Dict(
+        :models => models,
+        :neut => n,
+        :sel => s,
+        :dsdn => dsdn,
+        :dax => param.dac,
+    ))
 end

@@ -42,24 +42,29 @@ end
     Filtering case and intersect with control.
     The function will also filter by hla_dist and factors_raw (variables)
 """
-function get_factors(case_set::Vector{String}, control_set::Vector{String},
-                     factors_raw::Matrix)
-    control_values = factors_raw[(@view factors_raw[:, 1]) .∈ [control_set], 1:end]
-    control_dict = Dict{String, Vector{Float64}}()
+function get_factors(
+    case_set::Vector{String},
+    control_set::Vector{String},
+    factors_raw::Matrix,
+)
+    control_values = factors_raw[(@view factors_raw[:, 1]).∈[control_set], 1:end]
+    control_dict = Dict{String,Vector{Float64}}()
 
     for row in eachrow(control_values)
         control_dict[row[1]] = row[2:end]
     end
 
-    control_number::Dict{String, Int64} = Dict(control_set .=> 0)
+    control_number::Dict{String,Int64} = Dict(control_set .=> 0)
 
-    case_avg::Vector{Float64} = vec(mean(factors_raw[(@view factors_raw[:, 1]) .∈ [case_set],
-                                                     2:end], dims = 1))
+    case_avg::Vector{Float64} =
+        vec(mean(factors_raw[(@view factors_raw[:, 1]).∈[case_set], 2:end], dims = 1))
 
-    return (case_avg,
-            convert(Matrix{Float64}, @view control_values[:, 2:end]),
-            control_dict,
-            control_number)
+    return (
+        case_avg,
+        convert(Matrix{Float64}, @view control_values[:, 2:end]),
+        control_dict,
+        control_number,
+    )
 end
 
 """
@@ -87,7 +92,7 @@ function get_samples(case_set::Vector{String}, control_boot::Vector{String})
     case_number = length(case_set)
 
     out = String[]
-    for p::Int64 in 0:99
+    for p::Int64 = 0:99
         sup_ind = sc_t - 1 - p * case_number
         inf_ind = sc_t - 1 - p * case_number - case_number + 1
         iter = control_boot[inf_ind:sup_ind]
@@ -110,13 +115,18 @@ function get_distance(data::String, annotation::String)
     tmp = tempname()
     out = IOBuffer()
 
-    run(pipeline(`fgrep -f $data $annotation`,
-                 `awk  -F'\t' 'BEGIN {OFS = FS} {print $1,int(($2+$3)/2),int(($2+$3)/2+1),$4,$5}'`,
-                 `sort -k1,2V`, tmp))
+    run(
+        pipeline(
+            `fgrep -f $data $annotation`,
+            `awk  -F'\t' 'BEGIN {OFS = FS} {print $1,int(($2+$3)/2),int(($2+$3)/2+1),$4,$5}'`,
+            `sort -k1,2V`,
+            tmp,
+        ),
+    )
 
     run(pipeline(`cut -f1 $annotation`, stdout = out))
 
-    nchr = unique(split(String(take!(out)), "\n")[1:(end - 1)])
+    nchr = unique(split(String(take!(out)), "\n")[1:(end-1)])
     distance = tempname()
     gene_1 = tempname()
     gene_2 = tempname()
@@ -124,11 +134,25 @@ function get_distance(data::String, annotation::String)
     for i in nchr
         try
             run(pipeline(`grep -P "^$i\t" $tmp`, stdout = gene_1))
-            run(pipeline(`grep -P "^$i\t" $annotation`,
-                         `awk -F'\t' 'BEGIN {OFS = FS} {print $1,int(($2+$3)/2),int(($2+$3)/2+1),$4,$5}'`,
-                         `sort -k2,3n`, gene_2))
-            run(pipeline(pipeline(`$bedtools closest -d -a $gene_2 -b $gene_1`,
-                                  `cut -f4,11`, `sort`), stdout = distance, append = true))
+            run(
+                pipeline(
+                    `grep -P "^$i\t" $annotation`,
+                    `awk -F'\t' 'BEGIN {OFS = FS} {print $1,int(($2+$3)/2),int(($2+$3)/2+1),$4,$5}'`,
+                    `sort -k2,3n`,
+                    gene_2,
+                ),
+            )
+            run(
+                pipeline(
+                    pipeline(
+                        `$bedtools closest -d -a $gene_2 -b $gene_1`,
+                        `cut -f4,11`,
+                        `sort`,
+                    ),
+                    stdout = distance,
+                    append = true,
+                ),
+            )
         catch e
             continue
         end
@@ -141,19 +165,21 @@ function get_distance(data::String, annotation::String)
     return df
 end
 
-function get_bootstrap(case_set::Vector{String},
-                       control_set::Vector{String};
-                       factors_raw::Matrix,
-                       max_reps::Int64,
-                       tolerance::Float64)
+function get_bootstrap(
+    case_set::Vector{String},
+    control_set::Vector{String};
+    factors_raw::Matrix,
+    max_reps::Int64,
+    tolerance::Float64,
+)
 
     # Get cont
     case_number = length(case_set)
     control_number = length(control_set)
 
     # Get averages
-    case_avg, factors, factors_dict, used_number = get_factors(case_set, control_set,
-                                                               factors_raw)
+    case_avg, factors, factors_dict, used_number =
+        get_factors(case_set, control_set, factors_raw)
     control_avg = vec(mean(factors, dims = 1))
 
     # high_low
@@ -202,16 +228,19 @@ function get_bootstrap(case_set::Vector{String},
 
         matching::Int64 = 0
 
-        test_value_1 = (fake_seed_num * case_avg +
-                        current_factors * sc_t +
-                        factor_value_1 +
-                        factor_value_2) / (sc_t + 2 + fake_seed_num)
+        test_value_1 =
+            (
+                fake_seed_num * case_avg +
+                current_factors * sc_t +
+                factor_value_1 +
+                factor_value_2
+            ) / (sc_t + 2 + fake_seed_num)
 
-        test_value_2 = (current_factors * sc_t + factor_value_1 + factor_value_2) /
-                       (sc_t + 2)
+        test_value_2 =
+            (current_factors * sc_t + factor_value_1 + factor_value_2) / (sc_t + 2)
 
-        matching = sum((test_value_1 .>= inf_sup[:, 1]) .&&
-                       (test_value_1 .<= inf_sup[:, 2]))
+        matching =
+            sum((test_value_1 .>= inf_sup[:, 1]) .&& (test_value_1 .<= inf_sup[:, 2]))
 
         if matching >= lim
             test_dir = similar(direction)
@@ -221,9 +250,11 @@ function get_bootstrap(case_set::Vector{String},
             other_dir = sum(test_dir .!= direction)
             test_ln = length(good_control) + 1
 
-            if ((other_dir >= 0) &&
+            if (
+                (other_dir >= 0) &&
                 (used_number[gene_1] / test_ln <= (max_reps / case_number)) &&
-                (used_number[gene_2] / test_ln <= (max_reps / case_number)))
+                (used_number[gene_2] / test_ln <= (max_reps / case_number))
+            )
                 if (fake_seed_num > 0)
                     fake_seed_num -= 1
                 end
@@ -269,8 +300,9 @@ function bootstrap(param::bootstrap_parameters)
 
     @info "Opening data"
 
-    case = vec(Array(CSV.read(data, header = false, delim = '\t', DataFrame,
-                                  stringtype = String)))
+    case = vec(
+        Array(CSV.read(data, header = false, delim = '\t', DataFrame, stringtype = String)),
+    )
     factors_raw = Array(CSV.read(factors, header = false, DataFrame))
     factors_id = string.(@view factors_raw[:, 1])
     factors = Float64.(@view factors_raw[:, 2:end])
@@ -279,7 +311,7 @@ function bootstrap(param::bootstrap_parameters)
     distance_raw = get_distance(data, annotation)
 
     #Filter case, control and distance
-    distance = string.(distance_raw[distance_raw[:, 2] .>= dist, 1])
+    distance = string.(distance_raw[distance_raw[:, 2].>=dist, 1])
 
     control = filter_case_control(case, factors_id, distance)
 
@@ -303,9 +335,17 @@ function bootstrap(param::bootstrap_parameters)
     n_control = fill(control, iter)
 
     @info "Running bootstrap"
-    good_control = ThreadsX.map((x, y) -> get_bootstrap(x, y, factors_raw = factors_raw,
-                                                        max_reps = rep, tolerance = tol),
-                                n_case, n_control)
+    good_control = ThreadsX.map(
+        (x, y) -> get_bootstrap(
+            x,
+            y,
+            factors_raw = factors_raw,
+            max_reps = rep,
+            tolerance = tol,
+        ),
+        n_case,
+        n_control,
+    )
 
     if any(isempty.(good_control))
         @error "The bootstrap struggled too much to find matching controls. Stopping bootstrap test here. Please restart the entire pipeline for safety at input $data changing the parameters"
