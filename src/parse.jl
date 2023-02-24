@@ -101,8 +101,8 @@ function get_pol_div(df_subset::Union{DataFrame, SubDataFrame},
     # Round SFS frequencies to the lowest floating value of the dataset independtly of the sample size. Needed to countmap and merge.
     freq = OrderedDict(round.(collect(1:(s_size - 1)) / s_size, digits = 4) .=> 0)
 
-    pn = sort(OrderedDict(countmap(round.(pn, digits = dgts))))
-    ps = sort(OrderedDict(countmap(round.(ps, digits = dgts))))
+    pn = sort(OrderedDict(countmap(round.(pn, digits = 4))))
+    ps = sort(OrderedDict(countmap(round.(ps, digits = 4))))
 
     # Dn, Ds, Pn, Ps, sfs
     Dn = sum(df_subset[:, div_columns[1]])
