@@ -32,10 +32,10 @@ function ABCreg(;
     S::Int64,
     P::Int64 = 5,
     tol::Float64,
-    abcreg::String,
     rm_summaries::Bool = false,
 )
 
+    abcreg = abspath(joinpath(@__DIR__, "..", "scripts", "reg"))
     # List alphas and summstat files
     a_file = filter(x -> occursin("alphas", x), readdir(analysis_folder, join = true))
     sum_file = filter(x -> occursin("summstat", x), readdir(analysis_folder, join = true))

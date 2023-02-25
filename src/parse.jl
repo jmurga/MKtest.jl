@@ -193,12 +193,3 @@ function bootstrap_data!(
     return sfs, divergence
 end
 
-function load_tgp()
-    return(CSV.read(abspath(joinpath(@__DIR__, "..", "data", "tgp.txt")),DataFrame,header=false))
-end
-
-
-function reg()
-    r = abspath(joinpath(@__DIR__, "..", "scripts", "reg"))
-    run(`$r`)
-end

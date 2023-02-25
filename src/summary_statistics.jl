@@ -147,7 +147,7 @@ end
 """
 	summary_statistics(param,h5_file,sfs,divergence,analysis_folder,summstat_size)
 
-Estimate summary statistics using observed data and analytical rates. *analysis_folder* will check for the SFS and divergence file and will be used to output summary statistics
+Estimate summary statistics using observed data and analytical rates. *analysis_folder* will be used to output summary statistics
 
 # Arguments
  - `param::parameters` : Mutable structure containing the models
