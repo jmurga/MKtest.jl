@@ -15,7 +15,7 @@ using Parameters,
     Distributions,
     KernelDensity,
     SharedArrays
-
+    
 # Analytical solutions
 import Roots: find_zero
 import NLsolve: nlsolve

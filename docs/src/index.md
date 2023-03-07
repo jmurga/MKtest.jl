@@ -53,22 +53,8 @@ julia -t8 -J mktest/mktest.so
 
 
 ### ABCreg
-We have linked [ABCreg](https://github.com/molpopgen/ABCreg) with Julia to perform ABC inference. Nonetheless others ABC softwares could be used (like [abc (R package)](https://doi.org/10.1111/j.2041-210X.2011.00179.x) or [ABCToolBox](https://doi.org/10.1186/1471-2105-11-116)). If you are going to use ABCreg to directly make inference from our software please [cite the publication](https://doi.org/10.1186/1471-2156-10-35) and compile it in your system. Anyway, once you get the summary statistic files you can use any other ABC software.
+We have linked [ABCreg](https://github.com/molpopgen/ABCreg) with Julia to perform ABC inference. Nonetheless others ABC softwares could be used (like [abc (R package)](https://doi.org/10.1111/j.2041-210X.2011.00179.x) or [ABCToolBox](https://doi.org/10.1186/1471-2105-11-116)). If you are going to use ABCreg to directly make inference from our software please [cite the publication](https://doi.org/10.1186/1471-2156-10-35)
 
-ABCreg needs *GSL* and *libz* to work. Please install both libraries before compile the software:
-
-```bash
-# Linux debian-based installation
-sudo apt install libgsl-dev libz-dev build-essential git
-# MacOS installation
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-brew install GSL zlib git
-```
-
-```bash
-git clone https://github.com/molpopgen/ABCreg.git ABCreg
-cd ABCreg/src && make
-```
 
 ## Docker installation
 The Docker image is based on Debian and includes all the software needed to run the pipeline. You can access Julia or Jupyter pulling the image from [Docker Hub](https://hub.docker.com/r/jmurga/mktest) or build yourself using the [Dockerfile on github](https://github.com/jmurga/MKtest.jl/blob/main/scripts/docker/Dockerfile). 

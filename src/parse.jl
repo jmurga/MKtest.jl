@@ -140,7 +140,7 @@ function get_pol_div(
 
     α = round.(1 .- (Ds / Dn .* scumu[:, 2] ./ scumu[:, 3]), digits = 5)
 
-    m::Matrix{Int64} = try
+    m::Matrix{Float64} = try
         [sum(df_subset[:, m_columns[1]]) sum(df_subset[:, m_columns[2]])]
     catch
         m = [0 0]

@@ -1,4 +1,4 @@
-using GSL, LinkedLists, Parameters, StaticArrays, Printf, QuadGK, ProgressMeter
+using GSL, LinkedLists, Parameters, StaticArrays, Printf, QuadGK, ProgressMeter, ThreadsX
 
 @with_kw struct recipe
 	epochs::Array{Int64,1} = [1000]
@@ -384,7 +384,7 @@ function simulate_batch(param::recipe,sample_size::Int64,replicas::Int64;pool::B
 	n_sample_size = [sample_size for i::Int64=1:replicas]
 
 
-	mut = progress_pmap(simulate,n_params,n_sample_size);
+	mut = ThreadsX.map(simulate,n_params,n_sample_size);
 
 	if pool
 		s = sum(x->x[1][:,2],mut);
@@ -431,7 +431,7 @@ function two_epochs(ne_prior::Union{Int64,Nothing},θ_prior::Union{Float64,Nothi
 		push!(n_params,recipe(N=[ne_prior[i],ne_two[i]],epochs=[1,epoch_two[i]],θ=θ_prior[i],burnin_period=false))
 	end
 	
-	mut = pmapbatch(simulate,n_params,n_sample_size);
+	mut = ThreadsX.map(simulate,n_params,n_sample_size);
 	
 	f(x) = map(y->y[1][:,2],x)
 	ps   = hcat(f(mut)...)
@@ -476,7 +476,7 @@ function three_epochs(ne_prior::Union{Int64,Nothing},θ_prior::Union{Float64,Not
 		push!(n_params,recipe(N=[ne_prior[i],ne_two[i],ne_three[i]],epochs=[ne_prior[i]*10,epoch_two[i],epoch_three[i]],θ=θ_prior[i]))
 	end
 
-	mut = pmapbatch(simulate,n_params,n_sample_size);
+	mut = ThreadsX.map(simulate,n_params,n_sample_size);
 
 	f(x) = map(y->y[1][:,2],x)
 	ps   = hcat(f(mut)...)
@@ -527,7 +527,7 @@ function exponential(ne_prior::Union{Int64,Nothing},θ_prior::Union{Float64,Noth
 		push!(n_params,recipe(N=vcat(ne_prior[i],ne_two[i],tmp_ne),epochs=vcat(1,epoch_two[i],tmp_epoch),θ=θ_prior[i],burnin_period=false))
 	end
 	
-	mut = pmapbatch(simulate,n_params,n_sample_size);
+	mut = ThreadsX.map(simulate,n_params,n_sample_size);
 	
 	f(x) = map(y->y[1][:,2],x)
 	ps   = hcat(f(mut)...)

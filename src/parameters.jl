@@ -273,7 +273,7 @@ Analytical α(x) estimation. Solve α(x) generally. We used the expected fixatio
 # Returns
  - `Tuple{Vector{Float64},Vector{Float64}}`: α(x) accounting for weak adaptation, α(x) non-accouting for weak adaptation.
 """
-function analytical_alpha(param::parameters)
+function analytical_alpha(param::parameters;cumulative::Bool=false)
     binom = binom_op(param.NN, param.nn, param.B)
     ################################################################
     # Solve the model similarly to original python mktest  #	
@@ -321,8 +321,12 @@ function analytical_alpha(param::parameters)
     function split_columns(matrix::Array{Float64,2})
         (view(matrix, :, i) for i = 1:size(matrix, 2))
     end
-    tmp = cumulative_sfs(hcat(neut, selH, selL, selN), false)
 
+    tmp = hcat(neut, selH, selL, selN)
+    if cumulative
+        tmp = cumulative(tmp)
+    end
+    
     neut, selH, selL, selN = split_columns(tmp)
     sel = (selH + selL) + selN
 

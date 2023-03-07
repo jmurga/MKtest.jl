@@ -295,7 +295,7 @@ function fwwMK(
         pn_inter = sum(sfs_tmp[flt_inter, 2])
         ps_inter = sum(sfs_tmp[flt_inter, 3])
 
-        # output['alpha'] = 1 - (((pn - deleterious) / ps) * (ds / dn))
+
         tmp["alpha"] = round(1 - ((pn_inter / ps_inter) * (ds / dn)), digits = 3)
         #  method = :minlike same results R, python two.sides
         tmp["pvalue"] =
