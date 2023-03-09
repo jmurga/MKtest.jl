@@ -177,15 +177,15 @@ Function to estimate the imputedMK (https://doi.org/10.1093/g3journal/jkac206).
 function imputedMK(
     param::parameters,
     sfs::Vector,
-    divergence::Vector,
+    divergence::Vector;
     cutoff::Float64 = 0.15,
     m::T = nothing,
 ) where {T<:Union{Nothing,Array}}
     output = Vector{OrderedDict}(undef, length(sfs))
-    tmp = OrderedDict{String,Float64}()
 
     @unpack isolines = param
     Threads.@threads for i ∈ eachindex(sfs)
+        tmp = OrderedDict{String,Float64}()
 
         pn = sum(sfs[i][:, 2])
         ps = sum(sfs[i][:, 3])
@@ -251,6 +251,95 @@ function imputedMK(
     end
     return output
 end
+
+"""
+    imputedMK(param,sfs,divergence;m,cutoff)
+
+Function to estimate the imputedMK (https://doi.org/10.1093/g3journal/jkac206).
+
+# Arguments
+ - `param::parameters`: mutable structure containing the variables required to solve the model.
+ - `sfs::Matrix{Float64}`: SFS data parsed from parse_sfs().
+ - `divergence::Matrix{Int64}`: divergence data from parse_sfs().
+ - `cutoff{Float64}`: frequency cutoff to perform imputedMK.
+ - `m::Matrix{Int64}`: total number of sites parsed from parse_sfs()
+# Returns
+ - `Dict: Dictionary containing imputedMK estimation.
+"""
+
+function imputedMK(
+    param::parameters,
+    sfs::Matrix,
+    divergence::Matrix;
+    cutoff::Float64 = 0.15,
+    m::T = nothing,
+) where {T<:Union{Nothing,Array}}
+    output = OrderedDict{String,Float64}()
+
+    pn = sum(sfs[:, 2])
+    ps = sum(sfs[:, 3])
+    dn = divergence[1]
+    ds = divergence[2]
+
+    deleterious = 0
+    ### Estimating slightly deleterious with pn/ps ratio
+
+    s_size = if isolines
+        param.n
+    else
+        param.nn
+    end
+
+    sfs[:, 1] = sfs[:, 1] ./ s_size
+
+    flt_low = (sfs[:, 1] .<= cutoff)
+    pn_low = sum(sfs[flt_low, 2])
+    ps_low = sum(sfs[flt_low, 3])
+
+    flt_inter = (sfs[:, 1] .>= cutoff) .& (sfs[:, 1] .<= 1)
+    pn_inter = sum(sfs[flt_inter, 2])
+    ps_inter = sum(sfs[flt_inter, 3])
+
+    ratio_ps = ps_low / ps_inter
+    deleterious = pn_low - (pn_inter * ratio_ps)
+
+    if (deleterious > pn) || (deleterious < 0)
+        deleterious = 0
+        pn_neutral = round(pn - deleterious, digits = 3)
+    else
+        pn_neutral = round(pn - deleterious, digits = 3)
+    end
+
+    output["alpha"] = round(1 - ((pn_neutral / ps) * (ds / dn)), digits = 3)
+
+    #  method = :minlike same results R, python two.sides
+    output["pvalue"] =
+        pvalue(FisherExactTest(Int(ps), Int(ceil(pn_neutral)), Int(ds), Int(dn)))
+
+    if (!isnothing(m))
+        mn = m[1]
+        ms = m[2]
+        # ## Estimation of b: weakly deleterious
+        output["b"] = (deleterious / ps) * (ms / mn)
+
+        ## Estimation of f: neutral sites
+        output["f"] = (ms * pn_neutral) / (mn * ps)
+
+        ## Estimation of d, strongly deleterious sites
+        output["d"] = 1 - (output["f"] + output["b"])
+
+        ka = dn / mn
+        ks = ds / ms
+        output["omega"] = ka / ks
+
+        # Omega A and Omega D
+        output["omegaA"] = output["omega"] * output["alpha"]
+        output["omegaD"] = output["omega"] - output["omegaA"]
+    end
+
+    return output
+end
+
 """
 	fwwMK(param,sfs,divergence;m,cutoff)
 
@@ -260,7 +349,7 @@ Function to estimate the fwwMK (https://doi.org/10.1038/4151024a).
  - `param::parameters`: mutable structure containing the variables required to solve the model.
  - `sfs::Matrix{Float64}`: SFS data parsed from parse_sfs().
  - `divergence::Matrix{Int64}`: divergence data from parse_sfs().
- - `cutoff{Float64}`: frequency cutoff to perform imputedMK.
+ - `cutoff{Float64}`: frequency cutoff to perform fwwMK.
  - `m::Matrix{Int64}`: total number of sites parsed from parse_sfs()
 # Returns
  - `Dict: Dictionary containing imputedMK estimation.
@@ -273,10 +362,10 @@ function fwwMK(
     m::T = nothing,
 ) where {T<:Union{Nothing,Array}}
     output = Vector{OrderedDict}(undef, length(sfs))
-    tmp = OrderedDict{String,Float64}()
 
     @unpack isolines = param;
     Threads.@threads for i ∈ eachindex(sfs)
+        tmp = OrderedDict{String,Float64}()
         ps = sum(sfs[i][:, 2])
         pn = sum(sfs[i][:, 3])
         dn = divergence[i][1]
@@ -318,6 +407,70 @@ function fwwMK(
 end
 
 """
+    fwwMK(param,sfs,divergence;m,cutoff)
+
+Function to estimate the fwwMK (https://doi.org/10.1038/4151024a).
+
+# Arguments
+ - `param::parameters`: mutable structure containing the variables required to solve the model.
+ - `sfs::Matrix{Float64}`: SFS data parsed from parse_sfs().
+ - `divergence::Matrix{Int64}`: divergence data from parse_sfs().
+ - `cutoff{Float64}`: frequency cutoff to perform fwwMK.
+ - `m::Matrix{Int64}`: total number of sites parsed from parse_sfs()
+# Returns
+ - `Dict: Dictionary containing imputedMK estimation.
+"""
+function fwwMK(
+    param::parameters,
+    sfs::Vector,
+    divergence::Vector;
+    cutoff::Float64 = 0.15,
+    m::T = nothing,
+) where {T<:Union{Nothing,Array}}
+    output = OrderedDict{String,Float64}()
+
+    @unpack isolines = param;
+
+    ps = sum(sfs[:, 2])
+    pn = sum(sfs[:, 3])
+    dn = divergence[1]
+    ds = divergence[2]
+
+    deleterious = 0
+    ### Estimating slightly deleterious with pn/ps ratio
+    s_size = if isolines
+        param.n
+    else
+        param.nn
+    end
+
+    sfs[:, 1] = sfs[:, 1] ./ s_size
+    flt_inter = (sfs[:, 1] .>= cutoff) .& (sfs[:, 1] .<= 1)
+    pn_inter = sum(sfs[flt_inter, 2])
+    ps_inter = sum(sfs[flt_inter, 3])
+
+
+    output["alpha"] = round(1 - ((pn_inter / ps_inter) * (ds / dn)), digits = 3)
+    #  method = :minlike same results R, python two.sides
+    output["pvalue"] =
+        pvalue(FisherExactTest(Int(ps_inter), Int(ceil(pn_inter)), Int(ds), Int(dn)))
+
+    if (!isnothing(m))
+        mn = m[1]
+        ms = m[2]
+        ka = dn / mn
+        ks = ds / ms
+        output["omega"] = ka / ks
+
+        # Omega A and Omega D
+        output["omegaA"] = output["omega"] * output["alpha"]
+        output["omegaD"] = output["omega"] - output["omegaA"]
+    end
+
+    return output
+end
+
+"""
 	standardMK(sfs,divergence;m)
 
 Function to estimate the original α value.
@@ -336,9 +489,9 @@ function standardMK(
     m::T = nothing,
 ) where {T<:Union{Nothing,Array}}
     output = Vector{OrderedDict}(undef, length(sfs))
-    tmp = OrderedDict{String,Float64}()
 
     Threads.@threads for i ∈ eachindex(sfs)
+        tmp = OrderedDict{String,Float64}()
         pn = sum(sfs[i][:, 2])
         ps = sum(sfs[i][:, 3])
         dn = divergence[i][1]
