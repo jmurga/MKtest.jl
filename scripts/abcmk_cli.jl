@@ -95,15 +95,10 @@ ABC inference and statistic. Please, be sure your analysis_folder contain the fi
                    abcreg::String = "reg")
     @eval using MKtest
 
-    if(!isempty(Sys.which("reg")))
-        abcreg = Sys.which("reg")
-    end
-
     posteriors = MKtest.ABCreg(analysis_folder = folder,
                                P = 5,
                                S = nsumm,
-                               tol = tol,
-                               abcreg = abcreg)
+                               tol = tol)
 
     out = MKtest.summary_abc(posteriors)
 

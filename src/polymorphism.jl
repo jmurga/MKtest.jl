@@ -11,7 +11,7 @@
 
 	sfs_neut(param,binom)
 
-Expected rate of neutral allele frequency reduce by backgrou	nd selection. The spectrum depends on the number of individual []
+Expected rate of neutral allele frequency reduce by background selection. The spectrum depends on the number of individual []
 
 ```math
 \\mathbb{E}[Ps_{(x)}] = \\sum{x^{*}=x}{x^{*}=1}f_{B}(x)
@@ -23,16 +23,14 @@ Expected rate of neutral allele frequency reduce by backgrou	nd selection. The s
  - `Vector{Float64}`: expected rate of neutral alleles frequencies.
 """
 function sfs_neut(param::parameters, binom::SparseMatrixCSC{Float64,Int64})
-    NN2 = convert(Int64, ceil(param.NN * param.B))
+    NN2 = ceil(Int,param.NN * param.B)
 
     # Allocating variables
-    neutral_sfs(i::Int64) = 1.0 / (i)
-
-    x = collect(0:NN2)
-    solved_neutral_sfs = neutral_sfs.(x)
+    x = 0:NN2
+    solved_neutral_sfs = 1 ./ x
     replace!(solved_neutral_sfs, Inf => 0.0)
 
-    out::Array{Float64,1} = param.B * (param.θ_coding) * 0.25 * (binom * solved_neutral_sfs)
+    out::Vector{Float64} = param.B * (param.θ_coding) * 0.25 * (binom * solved_neutral_sfs)
 
     return out
 end
@@ -66,9 +64,9 @@ function sfs_pos(
         red_plus = Φ(param, s)
 
         # Solving sfs
-        NN2 = convert(Int64, ceil(param.NN * param.B))
-        xa1 = collect(0:NN2)
-        xa2 = xa1 / (NN2)
+        NN2 = ceil(Int,param.NN * param.B)
+        xa1 = 0:NN2
+        xa2 = @. xa1 / NN2
 
         # Solving float precision performance using exponential rule. Only one BigFloat estimation.
         s_corrected = s * param.B
@@ -89,10 +87,10 @@ function sfs_pos(
         # p*0.5*(ℯ^(2*s_corrected)*(1-ℯ^(-2.0*s_corrected*(1.0-i)))/((ℯ^(2*s_corrected)-1.0)*i*(1.0-i)))
 
         # Allocating outputs
-        solved_positive_sfs::Array{Float64,1} = (1.0 / (NN2)) * (positive_sfs.(xa2))
+        solved_positive_sfs::Vector{Float64} = (1.0 / (NN2)) * (positive_sfs.(xa2))
         replace!(solved_positive_sfs, NaN => 0.0)
 
-        out::Array{Float64,1} =
+        out::Vector{Float64} =
             (param.θ_coding) * red_plus * 0.75 * (binom * solved_positive_sfs)
     end
 
@@ -112,9 +110,9 @@ function sfs_pos_float(
         red_plus = Φ(param, s)
 
         # Solving sfs
-        NN2 = convert(Int64, ceil(param.NN * param.B))
-        xa1 = collect(0:NN2)
-        xa2 = xa1 / (NN2)
+        NN2 = ceil(Int,param.NN * param.B)
+        xa1 = 0:NN2
+        xa2 = @. xa1 / NN2
 
         s_corrected = s * param.B
         s_exp1::Quadmath.Float128 = exp(Quadmath.Float128(s_corrected * 2))
@@ -128,10 +126,11 @@ function sfs_pos_float(
         )
             Float64(p * 0.5 * (g1 * (1 - g2^(1.0 - i)) / ((g1 - 1.0) * i * (1.0 - i))))
         end
+
         # Allocating outputs
-        solved_positive_sfs::Array{Float64,1} = (1.0 / (NN2)) * (positive_sfs.(xa2))
+        solved_positive_sfs::Vector{Float64} = (1.0 / (NN2)) * (positive_sfs.(xa2))
         replace!(solved_positive_sfs, NaN => 0.0)
-        out::Array{Float64,1} =
+        out::Vector{Float64} =
             (param.θ_coding) * red_plus * 0.75 * (binom * solved_positive_sfs)
         # out = out[2:end-1]
 
@@ -156,10 +155,9 @@ Expected rate of positive selected allele frequency reduce by background selecti
 """
 function sfs_neg(param::parameters, p::Float64, binom::SparseMatrixCSC{Float64,Int64})
     beta = param.scale / (1.0 * param.B)
-    NN2 = convert(Int64, ceil(param.NN * param.B))
-    xa = collect(0:NN2) / NN2
-
-    solve_z = similar(xa)
+    NN2 = ceil(Int,param.NN * param.B)
+    xa1 = 0:NN2
+    xa2 = @. xa1 / NN2
 
     function z(x::Float64, p::Float64 = p)
         (1.0 - p) *
@@ -169,7 +167,7 @@ function sfs_neg(param::parameters, p::Float64, binom::SparseMatrixCSC{Float64,I
         ((-1.0 + x) * x)
     end
 
-    solve_z = z.(xa)
+    solve_z = z.(xa2)
 
     if (solve_z[1] == Inf || isnan(solve_z[1]))
         solve_z[1] = 0.0
@@ -195,34 +193,51 @@ Changing SFS considering all values above a frequency *x*. The original aMK appr
  - `freqs::Bool`: true/false wheter the input SFS vector containing a first columns with the frequencies.
 # Output 
  - `Vector{Float64}`: SFS vector.
-"""
-function cumulative_sfs(sfs_tmp::Union{Array,SubArray}, freqs::Bool = true)
-    out = Array{Float64}(undef, size(sfs_tmp, 1), size(sfs_tmp, 2))
+"""#=
+function cumulative_sfs!(sfs_tmp::Matrix{Float64},freqs::Bool=true)
 
-    if freqs
-        idx = 2
-    else
-        idx = 1
+    idx = ifelse(freqs, 2, 1)
+
+    for c ∈ eachcol(@view sfs_tmp[:,2:end])
+        cumulative_vector!(c)
     end
 
-    out[1, idx:end] = sum(sfs_tmp[:, idx:end], dims = 1)
+    return sfs_tmp
+end
+=#
+function cumulative_vector!(v::Union{SubArray,Vector{T}}) where {T<:Number}
+    n = length(v)
+    @inbounds for i = 1:n
+        v[i] = sum(@view v[i:end])
+    end
+    return v
+end
 
-    @simd for i = 2:(size(sfs_tmp)[1])
-        app = out[i-1, idx:end] .- sfs_tmp[i-1, idx:end]
+function cumulative_sfs(sfs_tmp::Union{Array, SubArray}, freqs::Bool = true)
+    n, m = size(sfs_tmp)
+    out = similar(sfs_tmp)
+
+    idx = ifelse(freqs, 2, 1)
+
+    out[1, idx:end] = sum(sfs_tmp[:, idx:end], dims=1)
+
+    @inbounds @simd for i in 2:n
+        app = view(out,i-1, idx:size(out,2)) .- view(sfs_tmp,i-1, idx:size(out,2))
 
         if sum(app) > 0.0
-            out[i, idx:end] = app
+            out[i, idx:end] .= app
         else
-            out[i, idx:end] = zeros(length(app))
+            out[i, idx:end] .= 0.0
         end
     end
 
     if freqs
-        out[:, 1] = sfs_tmp[:, 1]
+        out[:, 1] .= sfs_tmp[:, 1]
     end
 
     return out
 end
+
 
 """
 	reduce_sfs(sfs_tmp,bins)

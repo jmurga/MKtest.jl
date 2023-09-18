@@ -7,10 +7,8 @@ From: julia:latest
 
 	export PATH=$/usr/local/julia/bin:$PATH
 	export PATH=$/mktest/ABCreg/src/:$PATH
-	# export PATH=$/root/mambaforge/bin:$PATH
 
 	export JULIA_DEPOT_PATH=:/opt/.julia
-	# export LD_LIBRARY_PATH=$/root/mambaforge/lib:$LD_LIBRARY_PATH
 
 %post
 	
@@ -24,16 +22,16 @@ From: julia:latest
 
 	mkdir -p /mktest
 
-	wget https://raw.githubusercontent.com/jmurga/MKtest.jl/master/scripts/precompile_mktest.jl -O /mktest/precompile_mktest.jl
 	wget https://raw.githubusercontent.com/jmurga/MKtest.jl/master/scripts/abcmk_cli.jl -O /mktest/abcmk_cli.jl
 	
-	julia -e 'using Pkg;Pkg.add(["CondaPkg","Fire","JLD2", "DataFrames", "CSV","PackageCompiler"])'
-	julia -e 'using Pkg;Pkg.add(PackageSpec(path="https://github.com/jmurga/MKtest.jl"))'
+	julia -e 'using Pkg;Pkg.add(["CondaPkg","Fire","JLD2", "DataFrames", "CSV","StatsBase"]);Pkg.add(PackageSpec(path="https://github.com/jmurga/MKtest.jl"))'
+
 	julia -e 'using CondaPkg;CondaPkg.add("grapes-static", channel = "genomedk");CondaPkg.add("bedtools", channel = "bioconda")'
-	# julia -e 'using PackageCompiler;PackageCompiler.create_sysimage(:MKtest, sysimage_path="/mktest/mktest.so", precompile_execution_file="/mktest/precompile_mktest.jl")'
+
+	julia -e 'using CondaPkg,Pkg;CondaPkg.add.(["r-essentials","r-locfit","r-sparsem","r-quantreg","r-nnet"], channel = "conda-forge");r = CondaPkg.which("R");ENV["R_HOME"] = replace(r,"bin"=>"lib");Pkg.add("RCall");using RCall;R"""install.packages("abc",repos="http://cran.r-project.org",dependencies = TRUE)"""'
 
 	git clone https://github.com/molpopgen/ABCreg.git /mktest/ABCreg
 	make -C /mktest/ABCreg/src
 
 %runscript
-	exec julia /mktest/abcmk_cli.jl "$@"
+	exec julia "$@"

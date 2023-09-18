@@ -31,13 +31,12 @@ Mutable structure containing the variables required to solve the analytical appr
     al_low::Float64 = 0.2
     al_tot::Float64 = 0.4
     θ_flanking::Float64 = 1e-3
-    gam_flanking::Int64 = -457
+    gam_flanking::Int64 = -500
     θ_coding::Float64 = 1e-3
     shape::Float64 = 0.184
     gam_dfe::Int64 = -457
     scale::Float64 = shape / abs(gam_dfe)
     B::Float64 = 0.999
-    B_bins::Array{Float64,1} = push!(collect(0.1:0.025:0.975), 0.999)
     ppos_l::Float64 = 0
     ppos_h::Float64 = 0
     N::Int64 = 1000
@@ -54,6 +53,7 @@ Mutable structure containing the variables required to solve the analytical appr
     dac::Array{Int64,1} = [2, 4, 5, 10, 20, 50, 200, 500, 700]
 end
 
+
 function assertion_params(param::parameters)
     @assert (param.cutoff[1] >= 0.0) & (param.cutoff[end] <= 1.0) "Frequency cutoff must be at the interval [0,1]"
     @assert all(param.dac .< param.nn) "Selected DAC is larger than sample size"
@@ -65,6 +65,7 @@ function assertion_params(param::parameters)
     ]
 
     @assert all(in(freq_dac[:, 2]).(param.dac)) "Please select a DAC according to your frequency cutoff"
+
 end
 
 ################################
@@ -170,17 +171,17 @@ Binomial convolution to sample the allele frequencies probabilites depending on 
 
 # Arguments
  - `param::parameters`
- - `binom::binomialDict`
+ - `B_bins::Vector{Float64}`
 
 # Returns
- - `Array{Float64,2}`: convoluted SFS for each B value defined in the model (param.B_bins). The estimations are saved at *convolutedBn.bn*.
+ - `Array{Float64,2}`: convoluted SFS for each B value defined in the model (B_bins). The estimations are saved at *convolutedBn.bn*.
 """
-function binom_op(param::parameters)
+function binom_op(param::parameters,B_bins::Vector{Float64})
     bn = Dict(
-        param.B_bins[i] => spzeros(param.nn + 1, param.NN) for i = 1:length(param.B_bins)
+        B_bins[i] => spzeros(param.nn + 1, param.NN) for i = 1:length(B_bins)
     )
 
-    for b in param.B_bins
+    for b in B_bins
         NN2 = convert(Int64, ceil(param.NN * b))
         samples = collect(1:(param.nn-1))
         p_size = collect(0:NN2)
@@ -199,7 +200,8 @@ function binom_op(param::parameters)
     return (bn)
 end
 
-function binom_op(NN, nn, B)
+function binom_op(param)
+    @unpack NN,nn,B = param;
     NN2 = convert(Int64, ceil(NN * B))
     samples = collect(1:(nn-1))
     p_size = collect(0:NN2)
@@ -274,7 +276,7 @@ Analytical α(x) estimation. Solve α(x) generally. We used the expected fixatio
  - `Tuple{Vector{Float64},Vector{Float64}}`: α(x) accounting for weak adaptation, α(x) non-accouting for weak adaptation.
 """
 function analytical_alpha(param::parameters;cumulative::Bool=false)
-    binom = binom_op(param.NN, param.nn, param.B)
+    binom = binom_op(param)
     ################################################################
     # Solve the model similarly to original python mktest  #	
     ################################################################
@@ -309,14 +311,14 @@ function analytical_alpha(param::parameters;cumulative::Bool=false)
     ## Polymorphism
     neut = sfs_neut(param, binom)
 
-    selH::Array{Float64,1} = if isinf(exp(param.gH * 2))
+    selH= if isinf(exp(param.gH * 2))
         sfs_pos_float(param, param.gH, param.ppos_h, binom)
     else
         sfs_pos(param, param.gH, param.ppos_h, binom)
     end
 
-    selL::Array{Float64,1} = sfs_pos(param, param.gL, param.ppos_l, binom)
-    selN::Array{Float64,1} = sfs_neg(param, param.ppos_h + param.ppos_l, binom)
+    selL= sfs_pos(param, param.gL, param.ppos_l, binom)
+    selN= sfs_neg(param, param.ppos_h + param.ppos_l, binom)
 
     function split_columns(matrix::Array{Float64,2})
         (view(matrix, :, i) for i = 1:size(matrix, 2))
@@ -324,7 +326,7 @@ function analytical_alpha(param::parameters;cumulative::Bool=false)
 
     tmp = hcat(neut, selH, selL, selN)
     if cumulative
-        tmp = cumulative(tmp)
+        tmp = cumulative_sfs(tmp,false)
     end
     
     neut, selH, selL, selN = split_columns(tmp)

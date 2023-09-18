@@ -304,14 +304,14 @@ function bootstrap(param::bootstrap_parameters)
         Array(CSV.read(data, header = false, delim = '\t', DataFrame, stringtype = String)),
     )
     factors_raw = Array(CSV.read(factors, header = false, DataFrame))
-    factors_id = string.(@view factors_raw[:, 1])
+    factors_id = String.(@view factors_raw[:, 1])
     factors = Float64.(@view factors_raw[:, 2:end])
 
     @info "Estimating distance between genes"
     distance_raw = get_distance(data, annotation)
 
     #Filter case, control and distance
-    distance = string.(distance_raw[distance_raw[:, 2].>=dist, 1])
+    distance = String.(distance_raw[distance_raw[:, 2].>=dist, 1])
 
     control = filter_case_control(case, factors_id, distance)
 
@@ -372,3 +372,19 @@ function bootstrap(param::bootstrap_parameters)
         close(io)
     end
 end
+
+"""
+
+    empirical_pvalues(observed_values)
+
+Estimating empirical p-values from a vector of summary statistics
+
+# Arguments
+ - `observed_values::Vector{Float64}` : Vector of summary statistics to convert into empirical p-values.
+# Returns
+ - Vector{Float64} : Empirical p-values. Large values will show small p-values.
+"""
+function empirical_pvalues(observed_values::Vector{Float64})
+  return ordinalrank(observed_values * -1)/length(observed_values)
+end
+

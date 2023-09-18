@@ -3,7 +3,7 @@
 ########################
 
 """
-	parse_sfs(param;data,gene_list,sfs_columns,div_columns,m_columns,bins,isolines)
+	parse_sfs(param;data,gene_list,sfs_columns,div_columns,l_columns,bins,isolines)
 
 Function to parse polymorphism and divergence by subset of genes. The input data is based on supplementary material described at [Uricchio et al. 2019](https://doi.org/10.1038/s41559-019-0890-6). Please be sure the file is tabulated.
 
@@ -19,7 +19,7 @@ Function to parse polymorphism and divergence by subset of genes. The input data
  - `gene_list:S`: path to gene list. 
  - `sfs_columns::Vector{Int64}`: column numbers corresponding to Pn and Ps frequencies. Default values [3,5]
  - `div_columns::Vector{Int64}`: column numbers corresponding to Dn and Ds frequencies. Default values [6,7]
- - `m_columns::Vector{Int64}`: column numbers corresponding to total number of non-synonymous and synonymous sites. Not require at data. Default values [7,8]
+ - `l_columns::Vector{Int64}`: column numbers corresponding to total number of non-synonymous and synonymous sites. Not require at data. Default values [7,8]
  - `bins::Union{Nothing,Int64}`: size to bin the SFS independtly of the sample size.
 # Returns
  - `Vector{Vector{Float64}}`: α_x values. Estimated using the cumulative SFS
@@ -32,7 +32,7 @@ function parse_sfs(
     gene_list::Union{Nothing,Vector{S},S} = nothing,
     sfs_columns::Vector{Int64} = [3, 5],
     div_columns::Vector{Int64} = [6, 7],
-    m_columns::Vector{Int64} = [8, 9],
+    l_columns::Vector{Int64} = [8, 9],
     bins::Union{Nothing,Int64} = nothing,
 ) where {S<:AbstractString}
     @unpack n, cutoff, isolines = param
@@ -59,16 +59,15 @@ function parse_sfs(
         m, n = size(gene_matrix)
 
         if n == 1
-            gene_matrix = permutedims(gene_matrix)
+            out = [filter_df(df,ids,gene_matrix)]
+        else
+            out = Vector{SubDataFrame}(undef,m)
+            Threads.@threads for i=1:m
+                out[i] = filter_df(df,ids,view(gene_matrix,i,:))
+            end
         end
 
-        out = SubDataFrame[]
-        for c in eachrow(gene_matrix)
-            tmp = @view df[filter(!isnothing, indexin(c, ids)), :]
-            push!(out, tmp)
-        end
-
-        α, sfs, divergence, m = unzip(
+        α, sfs, divergence = unzip(
             map(
                 i -> get_pol_div(
                     i,
@@ -76,23 +75,26 @@ function parse_sfs(
                     cutoff,
                     sfs_columns,
                     div_columns,
-                    m_columns,
+                    l_columns,
                     bins,
                 ),
                 out,
             ),
         )
     else
-        α, sfs, divergence, m =
-            get_pol_div(df, s_size, cutoff, sfs_columns, div_columns, m_columns, bins)
+        α, sfs, divergence =
+            get_pol_div(df, s_size, cutoff, sfs_columns, div_columns, l_columns, bins)
         α = [α]
         sfs = [sfs]
         divergence = [divergence]
-        m = [m]
     end
 
-    return α, sfs, divergence, m
+    return α, sfs, divergence
 end
+
+# Not duplicated entries in ids or df, so get first index using indexin is valid
+filter_df(df::DataFrame,ids::SubArray,row::Union{SubArray,Array}) = view(df,filter(!isnothing, indexin(row, ids)), :)
+
 
 function get_pol_div(
     df_subset::Union{DataFrame,SubDataFrame},
@@ -100,68 +102,75 @@ function get_pol_div(
     cutoff::Vector{Float64},
     sfs_columns::Vector{Int64},
     div_columns::Vector{Int64},
-    m_columns::Vector{Int64},
+    l_columns::Vector{Int64},
     bins::Union{Nothing,Int64},
-)
-    g(x) = parse.(Float64, filter(y -> y != "", x))
+)::Tuple{Vector{Float64}, Matrix{Float64}, Matrix{Float64}}
 
-    tmp = split.(df_subset[:, sfs_columns], ",")
+    pn, ps  = eachcol(view(df_subset,:, sfs_columns))
+    pn = split(join(pn),",");
+    ps = split(join(ps),",");
+    pn = parse.(Float64,view(pn,pn.!=""));
+    ps = parse.(Float64,view(ps,ps.!=""));
+    pn = view(pn,pn.!=0);
+    ps = view(ps,ps.!=0);
 
-    pn = vcat(g.(tmp[:, 1])...)
-    ps = vcat(g.(tmp[:, 2])...)
-
-    pn = pn[pn.!=0]
-    ps = ps[ps.!=0]
     # Round SFS frequencies to the lowest floating value of the dataset independtly of the sample size. Needed to countmap and merge.
+
     freq = OrderedDict(round.(collect(1:(s_size-1)) / s_size, digits = 4) .=> 0)
 
-    pn = sort(OrderedDict(countmap(round.(pn, digits = 4))))
-    ps = sort(OrderedDict(countmap(round.(ps, digits = 4))))
+    c_pn = sort(countmap(round.(pn, digits = 4)))
+    c_ps = sort(countmap(round.(ps, digits = 4)))
 
     # Dn, Ds, Pn, Ps, sfs
-    Dn = sum(df_subset[:, div_columns[1]])
-    Ds = sum(df_subset[:, div_columns[2]])
+    Dn = sum(view(df_subset,:, div_columns[1]))
+    Ds = sum(view(df_subset,:, div_columns[2]))
+    sfs_pn = merge(+, freq, c_pn).vals
+    sfs_ps = merge(+, freq, c_ps).vals
 
-    sfs_pn = reduce(vcat, values(merge(+, freq, pn)))
-    sfs_ps = reduce(vcat, values(merge(+, freq, ps)))
-
-    if (!isnothing(bins))
-        sfs_pn = reduce_sfs(hcat(collect(1:(s_size-1)), sfs_pn), bins)[:, 2]
-        sfs_ps = reduce_sfs(hcat(collect(1:(s_size-1)), sfs_ps), bins)[:, 2]
-        sfs = hcat(collect(1:(bins-1)) ./ bins, sfs_pn, sfs_ps, 1:(bins-1))
+    sfs = if (!isnothing(bins))
+        sfs_pn_binned::Vector{Float64} = reduce_sfs(hcat(collect(1:(s_size-1)), sfs_pn), bins)[:, 2]
+        sfs_ps_binned::Vector{Float64} = reduce_sfs(hcat(collect(1:(s_size-1)), sfs_ps), bins)[:, 2]
+        hcat(collect(1:(bins-1)) ./ bins, sfs_pn, sfs_ps, 1:(bins-1))
     else
-        sfs = hcat(freq.keys, sfs_pn, sfs_ps, (1:(s_size-1)))
-    end
+        hcat(freq.keys, sfs_pn, sfs_ps, (1:(s_size-1)))
+    end;
 
     # Filtering SFS and changing frequency to DAC
-    sfs_flt = sfs[sfs[:, 1].>=cutoff[1].&&sfs[:, 1].<=cutoff[2], [4, 2, 3]]
+    sfs_flt = sfs[view(sfs,:, 1).>=cutoff[1] .&& view(sfs,:, 1) .<=cutoff[2], [4, 2, 3]];
 
-    scumu = cumulative_sfs(sfs_flt)
+    scumu = cumulative_sfs(sfs_flt);
 
-    α = round.(1 .- (Ds / Dn .* scumu[:, 2] ./ scumu[:, 3]), digits = 5)
+    α = round.(1 .- (Ds / Dn .* scumu[:, 2] ./ scumu[:, 3]), digits = 5);
 
-    m::Matrix{Float64} = try
-        [sum(df_subset[:, m_columns[1]]) sum(df_subset[:, m_columns[2]])]
+    l = try
+        [round(sum(df_subset[:, l_columns[1]]),digits=2) round(sum(df_subset[:, l_columns[2]]),digits=2)]
     catch
-        m = [0 0]
-    end
+        [0 0]
+    end;
 
-    return (α, sfs_flt, [Dn Ds], m)
+    return (α, sfs_flt, hcat([Dn Ds], l))
 end
+
 
 function data_to_poisson(
     sfs::Vector{Matrix{Float64}},
-    divergence::Vector{Matrix{Int64}},
-    dac::Vector{Int64},
+    divergence::Vector{Matrix{Float64}},
+    dac::Vector{Int64}
 )
-    f(x::Matrix{Float64}, d::Vector{Int64} = dac) = map(z -> sum(x[x[:, 1].==z, 2:3]), d)
-    al(a, b) = hcat(a[:, 1], @. round(1 - (b[2] / b[1] * a[:, 2] / a[:, 3]), digits = 5))
-
     scumu = cumulative_sfs.(sfs)
-    s_poisson = f.(scumu)
-    d_poisson = [[sum(divergence[i][1:2])] for i in eachindex(divergence)]
-    α_x = al.(scumu, divergence)
-    α_observed = map(x -> permutedims(x[in(dac).(x[:, 1]), 2]), α_x)
+    s_poisson = fill(zeros(length(dac)),length(sfs))
+
+    for (i, sf) in enumerate(scumu)
+        s_poisson[i] = map(z -> sum(sf[sf[:, 1] .== z, 2:3]), dac)
+    end
+
+    d_poisson = map(x -> [sum(x[1:2]), x[3], x[4]], divergence);
+
+    α_observed = fill(zeros(1,length(dac)),length(sfs))
+    for (i, sf) in enumerate(scumu)
+        tmp = sf[in(dac).(view(sf,:,1)),:];
+        α_observed[i] = permutedims(@. round(1 - (divergence[i][2] / divergence[i][1] * tmp[:, 2] / tmp[:, 3]), digits=5))
+    end
 
     return (α_observed, s_poisson, d_poisson)
 end

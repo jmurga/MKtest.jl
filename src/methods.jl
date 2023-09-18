@@ -71,14 +71,16 @@ function aMK(
 
     f = collect(1:length(α)) / nn
 
+    α_i = deepcopy(α)
+
     if dac_rm
         f = dac / nn
-        α = α[dac]
+        α_i = α_i[dac]
     end
 
     if na_rm
-        flt = .!isnan.(α) .&& .!isinf.(α) .&& α .!= 1
-        α = α[flt]
+        flt = .!isnan.(α_i) .&& .!isinf.(α_i) .&& α_i .!= 1
+        α_i = α_i[flt]
         f = f[flt]
     end
 
@@ -90,12 +92,12 @@ function aMK(
     fitted1 = curve_fit(
         model,
         f,
-        α,
+        α_i,
         [-1.0, -1.0, 1.0];
         lower = [-1.0, -1.0, 1.0],
         upper = [1.0, 1.0, 10.0],
     )
-    fitted2 = curve_fit(model, f, α, fitted1.param)
+    fitted2 = curve_fit(model, f, α_i, fitted1.param)
     asymp = model(1, fitted2.param)
 
     ci = try
@@ -128,18 +130,20 @@ function aMK(param::parameters, α::Vector; dac_rm::Bool = false, na_rm::Bool = 
 
     @unpack nn, dac = param
 
+    α_i = deepcopy(α)
+
     f = Vector{Vector{Float64}}(undef, length(α))
-    for i ∈ eachindex(α)
-        tmp = collect(1:length(α[i])) / nn
+    for i ∈ eachindex(α_i)
+        tmp = collect(1:length(α_i[i])) / nn
 
         if dac_rm
             tmp = dac / nn
-            α[i] = α[i][dac]
+            α_i[i] = α_i[i][dac]
         end
 
         if na_rm
-            flt = .!isnan.(α[i]) .&& .!isinf.(α[i]) .&& α[i] .!= 1
-            α[i] = α[i][flt]
+            flt = .!isnan.(α_i[i]) .&& .!isinf.(α_i[i]) .&& α_i[i] .!= 1
+            α_i[i] = α_i[i][flt]
             tmp = tmp[flt]
         end
         f[i] = tmp
@@ -149,15 +153,29 @@ function aMK(param::parameters, α::Vector; dac_rm::Bool = false, na_rm::Bool = 
     model(x, p) = @. p[1] + p[2] * exp(-x * p[3])
 
     # Fit values
-    fitted1 = ThreadsX.map((x,y) -> curve_fit(model,y,x,[-1.0, -1.0, 1.0];lower = [-1.0, -1.0, 1.0],upper = [1.0, 1.0, 10.0]),α,f)
-    fitted2 = ThreadsX.map((x,y,z) -> curve_fit(model, y,x, z.param),α,f,fitted1)
-    asymp = ThreadsX.map(x -> model(1, x.param),fitted2)
+    amk_v = Vector{Float64}(undef, length(α))
+    model_params = Vector{Vector{Float64}}(undef, length(α))
+    ci_v = Vector{Vector{Float64}}(undef, length(α))
 
-    ci = ThreadsX.map(x -> confidence_interval(x)[1],fitted2)
-    model_params = map(x-> x.param,fitted2)
+    Threads.@threads for i ∈ eachindex(α_i)
+        fitted1 = curve_fit(model,f[i],α_i[i],[-1.0, -1.0, 1.0];lower = [-1.0, -1.0, 1.0],upper = [1.0, 1.0, 10.0])
+        fitted2 = curve_fit(model, α_i[i],f[i], fitted1.param)
+        asymp = model(1, fitted2.param)
+        amk_v[i] = asymp
 
-    return (asymp,ci,model_params)
+        model_params[i] = fitted2.param
+
+        ci_v[i] = try
+            [confidence_interval(fitted2)[1][1], confidence_interval(fitted2)[1][2]]
+        catch
+            [0.0, 0.0]
+        end
+
+    end
+
+    return (amk_v,ci_v,model_params)
 end
+
 
 """
 	imputedMK(param,sfs,divergence;m,cutoff)
@@ -207,7 +225,7 @@ function imputedMK(
         pn_low = sum(sfs_tmp[flt_low, 2])
         ps_low = sum(sfs_tmp[flt_low, 3])
 
-        flt_inter = (sfs_tmp[:, 1] .>= cutoff) .& (sfs_tmp[:, 1] .<= 1)
+        flt_inter = (sfs_tmp[:, 1] .> cutoff) .& (sfs_tmp[:, 1] .<= 1)
         pn_inter = sum(sfs_tmp[flt_inter, 2])
         ps_inter = sum(sfs_tmp[flt_inter, 3])
 
@@ -228,19 +246,19 @@ function imputedMK(
             pvalue(FisherExactTest(Int(ps), Int(ceil(pn_neutral)), Int(ds), Int(dn)))
 
         if (!isnothing(m))
-            mn = m[1]
-            ms = m[2]
+            ln = m[1]
+            ls = m[2]
             # ## Estimation of b: weakly deleterious
-            tmp["b"] = (deleterious / ps) * (ms / mn)
+            tmp["b"] = (deleterious / ps) * (ls / ln)
 
             ## Estimation of f: neutral sites
-            tmp["f"] = (ms * pn_neutral) / (mn * ps)
+            tmp["f"] = (ls * pn_neutral) / (ln * ps)
 
             ## Estimation of d, strongly deleterious sites
             tmp["d"] = 1 - (tmp["f"] + tmp["b"])
 
-            ka = dn / mn
-            ks = ds / ms
+            ka = dn / ln
+            ks = ds / ls
             tmp["omega"] = ka / ks
 
             # Omega A and Omega D
@@ -317,19 +335,19 @@ function imputedMK(
         pvalue(FisherExactTest(Int(ps), Int(ceil(pn_neutral)), Int(ds), Int(dn)))
 
     if (!isnothing(m))
-        mn = m[1]
-        ms = m[2]
+        ln = m[1]
+        ls = m[2]
         # ## Estimation of b: weakly deleterious
-        output["b"] = (deleterious / ps) * (ms / mn)
+        output["b"] = (deleterious / ps) * (ls / ln)
 
         ## Estimation of f: neutral sites
-        output["f"] = (ms * pn_neutral) / (mn * ps)
+        output["f"] = (ls * pn_neutral) / (ln * ps)
 
         ## Estimation of d, strongly deleterious sites
-        output["d"] = 1 - (output["f"] + output["b"])
+        # output["d"] = 1 - (output["f"] + output["b"])
 
-        ka = dn / mn
-        ks = ds / ms
+        ka = dn / ln
+        ks = ds / ls
         output["omega"] = ka / ks
 
         # Omega A and Omega D
@@ -347,8 +365,8 @@ Function to estimate the fwwMK (https://doi.org/10.1038/4151024a).
 
 # Arguments
  - `param::parameters`: mutable structure containing the variables required to solve the model.
- - `sfs::Matrix{Float64}`: SFS data parsed from parse_sfs().
- - `divergence::Matrix{Int64}`: divergence data from parse_sfs().
+ - `sfs::Vector`: SFS data parsed from parse_sfs().
+ - `divergence::Vector`: divergence data from parse_sfs().
  - `cutoff{Float64}`: frequency cutoff to perform fwwMK.
  - `m::Matrix{Int64}`: total number of sites parsed from parse_sfs()
 # Returns
@@ -361,6 +379,7 @@ function fwwMK(
     cutoff::Float64 = 0.15,
     m::T = nothing,
 ) where {T<:Union{Nothing,Array}}
+
     output = Vector{OrderedDict}(undef, length(sfs))
 
     @unpack isolines = param;
@@ -391,10 +410,10 @@ function fwwMK(
             pvalue(FisherExactTest(Int(ps_inter), Int(ceil(pn_inter)), Int(ds), Int(dn)))
 
         if (!isnothing(m))
-            mn = m[1]
-            ms = m[2]
-            ka = dn / mn
-            ks = ds / ms
+            ln = m[1]
+            ls = m[2]
+            ka = dn / ln
+            ks = ds / ls
             tmp["omega"] = ka / ks
 
             # Omega A and Omega D
@@ -413,8 +432,8 @@ Function to estimate the fwwMK (https://doi.org/10.1038/4151024a).
 
 # Arguments
  - `param::parameters`: mutable structure containing the variables required to solve the model.
- - `sfs::Matrix{Float64}`: SFS data parsed from parse_sfs().
- - `divergence::Matrix{Int64}`: divergence data from parse_sfs().
+ - `sfs::Matrix`: SFS data parsed from parse_sfs().
+ - `divergence::Matrix`: divergence data from parse_sfs().
  - `cutoff{Float64}`: frequency cutoff to perform fwwMK.
  - `m::Matrix{Int64}`: total number of sites parsed from parse_sfs()
 # Returns
@@ -422,8 +441,8 @@ Function to estimate the fwwMK (https://doi.org/10.1038/4151024a).
 """
 function fwwMK(
     param::parameters,
-    sfs::Vector,
-    divergence::Vector;
+    sfs::Matrix,
+    divergence::Matrix;
     cutoff::Float64 = 0.15,
     m::T = nothing,
 ) where {T<:Union{Nothing,Array}}
@@ -456,10 +475,10 @@ function fwwMK(
         pvalue(FisherExactTest(Int(ps_inter), Int(ceil(pn_inter)), Int(ds), Int(dn)))
 
     if (!isnothing(m))
-        mn = m[1]
-        ms = m[2]
-        ka = dn / mn
-        ks = ds / ms
+        ln = m[1]
+        ls = m[2]
+        ka = dn / ln
+        ks = ds / ls
         output["omega"] = ka / ks
 
         # Omega A and Omega D
@@ -498,15 +517,15 @@ function standardMK(
         ds = divergence[i][2]
 
         tmp["alpha"] = round(1 - ((pn / ps) * (ds / dn)), digits = 3)
-        #  method = :mnnlike same results R, python two.sides
+        #  method = :lnnlike same results R, python two.sides
         tmp["pvalue"] = pvalue(FisherExactTest(Int(ps), Int(ceil(pn)), Int(ds), Int(dn)))
 
         if (!isnothing(m))
-            mn = m[1]
-            ms = m[2]
+            ln = m[1]
+            ls = m[2]
 
-            ka = dn / mn
-            ks = ds / ms
+            ka = dn / ln
+            ks = ds / ls
             tmp["omega"] = ka / ks
 
             # Omega A and Omega D
@@ -538,9 +557,7 @@ Run grapes using SFS and divergence data. The function will install grapes using
 function grapes(
     sfs::Vector,
     divergence::Vector,
-    m::Vector,
     model::String,
-    folder::String,
     bins::Int64;
     nearly_neutral::Int64 = 5,
     FWW_threshold::Float64 = 0.15,
@@ -553,6 +570,13 @@ function grapes(
     fixed_param::String = "",
 )
 
+    if any(0 .∈ divergence)
+        throw(
+            ArgumentError(
+                "Your SFS contains 0 values at the selected DACs or the divergence is 0. Please consider to bin the SFS and re-estimate the rates using the selected bin as sample the new sample size.",
+            ),
+        )
+    end
     grapes_bin = CondaPkg.which("grapes")
 
     if (isnothing(grapes_bin))
@@ -570,29 +594,24 @@ function grapes(
         "all",
     ] "Please select a valid model: GammaZero GammaExpo GammaGamma DisplGamma ScaledBeta FGMBesselK all"
 
-    sfs = reduce_sfs.(sfs, bins)
+    sfs_r = reduce_sfs.(sfs, bins)
 
-    pn = map(x -> permutedims(x[:, 2]), sfs)
-    ps = map(x -> permutedims(x[:, 3]), sfs)
+    pn = map(x -> permutedims(x[:, 2]), sfs_r)
+    ps = map(x -> permutedims(x[:, 3]), sfs_r)
 
-    dn = map(x -> x[1], divergence)
-    ds = map(x -> x[2], divergence)
+    dn = map(x -> [x[1]], divergence)
+    ds = map(x -> [x[2]], divergence)
+    ln = map(x -> [x[3]], divergence)
+    ls = map(x -> [x[4]], divergence)
 
-    mn = map(x -> x[1], m)
-    ms = map(x -> x[2], m)
-
-    idx = string.(collect(1:length(sfs)))
-
-    # Temporal function to broadcast pol and div data
-    function f(pn, ps, dn, ds, mn, ms, w)
-        DataFrame(hcat("dofe_" * string(w), bins, mn, pn, ms, ps, mn, dn, ms, ds...), :auto)
-    end
+    idx = string.(collect(1:length(sfs_r)))
 
     @info "Converting SFS to dofe file"
-    dofe = @. f(pn, ps, dn, ds, mn, ms, idx)
-    h = fill(DataFrame(["" ""; "#unfolded" ""], :auto), length(sfs))
-    output_dofe = @. folder * "/dofe_" * idx * ".txt"
-    output_grapes = @. folder * "/dofe_" * idx * "." * model
+    dofe = @. sfs_to_dofe(pn, ps, dn, ds, ln, ls, idx,bins)
+    h = fill(DataFrame(["" ""; "#unfolded" ""], :auto), length(sfs_r))
+
+    output_dofe   = @. tempname() * idx
+    output_grapes = @. output_dofe * "." * model
 
     @. write_files(h, output_dofe, false)
     @. write_files(dofe, output_dofe, true)
@@ -615,7 +634,6 @@ function grapes(
         fixed_param = "-fixed_param " * fixed_param
     end
 
-
     r(
         d,
         o,
@@ -632,17 +650,41 @@ function grapes(
     )
 
     @suppress_out begin
-        ThreadsX.mapi(r, output_dofe, output_grapes, ntasks = Threads.nthreads())
+        ThreadsX.mapi((x,y) -> r(x,y), output_dofe, output_grapes; ntasks = Threads.nthreads())
     end
 
-    if model == "all"
-        df = @suppress begin
-            CSV.read.(output_grapes, DataFrame)
-        end
-    else
-        df = @suppress begin
-            CSV.read.(output_grapes, DataFrame, footerskip = 1, skipto = 3)
+    df = map((x,y) -> read_clean_grapes(x,y,model),output_dofe,output_grapes)
+    df = df[.!isnothing.(df)]
+
+    return (vcat(df...))
+end
+
+function sfs_to_dofe(pn, ps, dn, ds, ln, ls, w, bins)
+    return(DataFrame(hcat("dofe_" * string(w), bins, ln, pn, ls, ps, ln, dn, ls, ds...), :auto))
+end
+
+function read_clean_grapes(dofe::String,grapes_file::String,model::String)
+    # Try to open file if grapes executed properly
+    output = @suppress_err begin
+        try
+            if model == "all"
+                df = CSV.read(grapes_file, DataFrame)
+            else
+                df = CSV.read(grapes_file, DataFrame, footerskip = 1, skipto = 3)
+            end
+
+            rm(dofe)
+            rm(grapes_file)
+            rm(grapes_file * ".profile")
+            rm(grapes_file * ".messages")
+
+            df
+
+        catch
+            @warn "$dofe did not complete the Grapes estimation. Please check your data."
+            nothing
         end
     end
-    return (vcat(df...))
+
+    return(output)
 end
