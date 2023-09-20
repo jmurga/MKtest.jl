@@ -150,7 +150,7 @@ Posterior distributions statistics. The function estimates Min., 0.5% Perc., Med
  - `DataFrame`: posterior statistics.
  - `DataFrame`: chosen statistic inference.
 """
-function summary_abc(posteriors::Vector{Matrix{Float64}}; stat::String = "Mean")
+function summary_abc(posteriors::Vector{Matrix{Float64}}; stat::String = "Mode")
     @info "Computing statistics over posteriors distributions"
 
     p_min = vcat(ThreadsX.map(x -> minimum(x, dims = 1), posteriors)...)
@@ -167,6 +167,13 @@ function summary_abc(posteriors::Vector{Matrix{Float64}}; stat::String = "Mean")
         c_names = [:α_weak, :α_strong, :α,:ωₐ_weak,:ωₐ_strong,:ωₐ,:ωₙₐ,:γ₋,:β,:γ₊,:γ₊₊,:B]
     end
     if length(posteriors) == 1
+
+        quantile_string = String[]
+        for i in zip(p_lower,p_upper)
+            push!(quantile_string," [" * join(string.(round.(i,digits=3)),"-") * "]")
+        end
+        quantile_string = DataFrame(x1=vcat(quantile_string))
+
         stats = DataFrame(
             :Stats => repeat(
                 ["Min.", "2.5% Perc.", "Median", "Mean", "Mode", "97.5% Perc.", "Max"],
@@ -183,7 +190,11 @@ function summary_abc(posteriors::Vector{Matrix{Float64}}; stat::String = "Mean")
 
         @info df
 
-        return df[df.Stats.==uppercasefirst(stat), 2:end],df
+        df_quantiles = permutedims(string.(permutedims(string.(round.(df[df.Stats.==uppercasefirst(stat), 2:end],digits=3))),quantile_string))
+        rename!(df_quantiles,c_names)
+
+        return df[df.Stats.==uppercasefirst(stat), 2:end], df_quantiles, df
+
     else
         df = DataFrame[]
         for i::Int64 = 1:length(posteriors)
@@ -216,11 +227,11 @@ function summary_abc(posteriors::Vector{Matrix{Float64}}; stat::String = "Mean")
 
         df_vcat = vcat(df...)
 
-        return  df_vcat[df_vcat.Stats.==uppercasefirst(stat), 2:end],df
+        return  df_vcat[df_vcat.Stats.==uppercasefirst(stat), 2:end], df
     end
 end
 
-function summary_abc(posteriors::Vector{DataFrame}; stat::String = "Mean")
+function summary_abc(posteriors::Vector{DataFrame}; stat::String = "Mode")
     @info "Computing statistics over posteriors distributions"
 
     p_min = vcat(ThreadsX.map(x -> minimum.(eachcol(x))', posteriors)...)
@@ -236,7 +247,15 @@ function summary_abc(posteriors::Vector{DataFrame}; stat::String = "Mean")
     else
         c_names = [:α_weak, :α_strong, :α,:ωₐ_weak,:ωₐ_strong,:ωₐ,:ωₙₐ,:γ₋,:β,:γ₊,:γ₊₊,:B]
     end
+
     if length(posteriors) == 1
+
+        quantile_string = String[]
+        for i in zip(p_lower,p_upper)
+            push!(quantile_string," [" * join(string.(round.(i,digits=3)),"-") * "]")
+        end
+        quantile_string = DataFrame(x1=vcat(quantile_string))
+
         stats = DataFrame(
             :Stats => repeat(
                 ["Min.", "5% Perc.", "Median", "Mean", "Mode", "95% Perc.", "Max"],
@@ -253,7 +272,11 @@ function summary_abc(posteriors::Vector{DataFrame}; stat::String = "Mean")
 
         @info df
 
-        return df[df.Stats.==uppercasefirst(stat), 2:end], df
+        df_quantiles = permutedims(string.(permutedims(string.(round.(df[df.Stats.==uppercasefirst(stat), 2:end],digits=3))),quantile_string))
+        rename!(df_quantiles,c_names)
+
+        return df[df.Stats.==uppercasefirst(stat), 2:end], df_quantiles, df
+
     else
         df = DataFrame[]
         for i::Int64 = 1:length(posteriors)
