@@ -229,43 +229,50 @@ function imputedMK(
         pn_inter = sum(sfs_tmp[flt_inter, 2])
         ps_inter = sum(sfs_tmp[flt_inter, 3])
 
-        ratio_ps = ps_low / ps_inter
-        deleterious = pn_low - (pn_inter * ratio_ps)
-
-        if (deleterious > pn) || (deleterious < 0)
-            deleterious = 0
-            pn_neutral = round(pn - deleterious, digits = 3)
+        if (pn_inter == 0 ||  ps_inter == 0)
+            @warn "There is no polymorphic data above the cutoff on dataset $i"
+            tmp["pvalue"] = NaN
+            tmp["alpha"] = NaN
+            output[i] = tmp
         else
-            pn_neutral = round(pn - deleterious, digits = 3)
+            ratio_ps = ps_low / ps_inter
+            deleterious = pn_low - (pn_inter * ratio_ps)
+
+            if (deleterious > pn) || (deleterious < 0)
+                deleterious = 0
+                pn_neutral = round(pn - deleterious, digits = 3)
+            else
+                pn_neutral = round(pn - deleterious, digits = 3)
+            end
+
+            tmp["alpha"] = round(1 - ((pn_neutral / ps) * (ds / dn)), digits = 3)
+
+            #  method = :minlike same results R, python two.sides
+            tmp["pvalue"] =
+                pvalue(FisherExactTest(Int(ps), Int(ceil(pn_neutral)), Int(ds), Int(dn)))
+
+            if (!isnothing(m))
+                ln = m[1]
+                ls = m[2]
+                # ## Estimation of b: weakly deleterious
+                tmp["b"] = (deleterious / ps) * (ls / ln)
+
+                ## Estimation of f: neutral sites
+                tmp["f"] = (ls * pn_neutral) / (ln * ps)
+
+                ## Estimation of d, strongly deleterious sites
+                tmp["d"] = 1 - (tmp["f"] + tmp["b"])
+
+                ka = dn / ln
+                ks = ds / ls
+                tmp["omega"] = ka / ks
+
+                # Omega A and Omega D
+                tmp["omegaA"] = tmp["omega"] * tmp["alpha"]
+                tmp["omegaD"] = tmp["omega"] - tmp["omegaA"]
+            end
+            output[i] = tmp
         end
-
-        tmp["alpha"] = round(1 - ((pn_neutral / ps) * (ds / dn)), digits = 3)
-
-        #  method = :minlike same results R, python two.sides
-        tmp["pvalue"] =
-            pvalue(FisherExactTest(Int(ps), Int(ceil(pn_neutral)), Int(ds), Int(dn)))
-
-        if (!isnothing(m))
-            ln = m[1]
-            ls = m[2]
-            # ## Estimation of b: weakly deleterious
-            tmp["b"] = (deleterious / ps) * (ls / ln)
-
-            ## Estimation of f: neutral sites
-            tmp["f"] = (ls * pn_neutral) / (ln * ps)
-
-            ## Estimation of d, strongly deleterious sites
-            tmp["d"] = 1 - (tmp["f"] + tmp["b"])
-
-            ka = dn / ln
-            ks = ds / ls
-            tmp["omega"] = ka / ks
-
-            # Omega A and Omega D
-            tmp["omegaA"] = tmp["omega"] * tmp["alpha"]
-            tmp["omegaD"] = tmp["omega"] - tmp["omegaA"]
-        end
-        output[i] = tmp
     end
     return output
 end
@@ -292,6 +299,9 @@ function imputedMK(
     cutoff::Float64 = 0.15,
     m::T = nothing,
 ) where {T<:Union{Nothing,Array}}
+
+    @unpack isolines = param
+
     output = OrderedDict{String,Float64}()
 
     pn = sum(sfs[:, 2])
@@ -308,15 +318,18 @@ function imputedMK(
         param.nn
     end
 
-    sfs[:, 1] = sfs[:, 1] ./ s_size
+    sfs_tmp= deepcopy(sfs)
+    sfs_tmp[:, 1] = sfs_tmp[:, 1] ./ s_size
 
-    flt_low = (sfs[:, 1] .<= cutoff)
-    pn_low = sum(sfs[flt_low, 2])
-    ps_low = sum(sfs[flt_low, 3])
+    flt_low = (sfs_tmp[:, 1] .<= cutoff)
+    pn_low = sum(sfs_tmp[flt_low, 2])
+    ps_low = sum(sfs_tmp[flt_low, 3])
 
-    flt_inter = (sfs[:, 1] .>= cutoff) .& (sfs[:, 1] .<= 1)
-    pn_inter = sum(sfs[flt_inter, 2])
-    ps_inter = sum(sfs[flt_inter, 3])
+    flt_inter = (sfs_tmp[:, 1] .>= cutoff) .& (sfs_tmp[:, 1] .<= 1)
+    pn_inter = sum(sfs_tmp[flt_inter, 2])
+    ps_inter = sum(sfs_tmp[flt_inter, 3])
+
+    @assert pn_inter != 0 ||  ps_inter != 0 "There is no polymorphic data above the cutoff"
 
     ratio_ps = ps_low / ps_inter
     deleterious = pn_low - (pn_inter * ratio_ps)
@@ -404,23 +417,30 @@ function fwwMK(
         ps_inter = sum(sfs_tmp[flt_inter, 3])
 
 
-        tmp["alpha"] = round(1 - ((pn_inter / ps_inter) * (ds / dn)), digits = 3)
-        #  method = :minlike same results R, python two.sides
-        tmp["pvalue"] =
-            pvalue(FisherExactTest(Int(ps_inter), Int(ceil(pn_inter)), Int(ds), Int(dn)))
+        if (pn_inter == 0 ||  ps_inter == 0)
+            @warn "There is no polymorphic data above the cutoff on dataset $i"
+            tmp["pvalue"] = NaN
+            tmp["alpha"] = NaN
+            output[i] = tmp
+        else
+            tmp["alpha"] = round(1 - ((pn_inter / ps_inter) * (ds / dn)), digits = 3)
+            #  method = :minlike same results R, python two.sides
+            tmp["pvalue"] =
+                pvalue(FisherExactTest(Int(ps_inter), Int(ceil(pn_inter)), Int(ds), Int(dn)))
 
-        if (!isnothing(m))
-            ln = m[1]
-            ls = m[2]
-            ka = dn / ln
-            ks = ds / ls
-            tmp["omega"] = ka / ks
+            if (!isnothing(m))
+                ln = m[1]
+                ls = m[2]
+                ka = dn / ln
+                ks = ds / ls
+                tmp["omega"] = ka / ks
 
-            # Omega A and Omega D
-            tmp["omegaA"] = tmp["omega"] * tmp["alpha"]
-            tmp["omegaD"] = tmp["omega"] - tmp["omegaA"]
+                # Omega A and Omega D
+                tmp["omegaA"] = tmp["omega"] * tmp["alpha"]
+                tmp["omegaD"] = tmp["omega"] - tmp["omegaA"]
+            end
+            output[i] = tmp
         end
-        output[i] = tmp
     end
     return output
 end
@@ -467,6 +487,8 @@ function fwwMK(
     flt_inter = (sfs[:, 1] .>= cutoff) .& (sfs[:, 1] .<= 1)
     pn_inter = sum(sfs[flt_inter, 2])
     ps_inter = sum(sfs[flt_inter, 3])
+
+    @assert pn_inter != 0 ||  ps_inter != 0 "There is no polymorphic data above the cutoff"
 
 
     output["alpha"] = round(1 - ((pn_inter / ps_inter) * (ds / dn)), digits = 3)
