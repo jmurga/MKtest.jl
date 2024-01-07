@@ -29,40 +29,40 @@ function poisson_fixation(
 )
     observed_d, ln, ls = observed_values
 
-    ds = @. (λds / (λds + λdn)) * observed_d
-    dn = @. (λdn / (λds + λdn)) * observed_d
-    dweak = @. (λweak / (λds + λdn)) * observed_d
-    dstrong = @. (λstrong / (λds + λdn)) * observed_d
+    ds                 = @. (λds / (λds + λdn)) * (observed_d)
+    dn                 = @. (λdn / (λds + λdn)) * (observed_d)
+    dweak              = @. (λweak / (λds + λdn)) * (observed_d)
+    dstrong            = @. (λstrong / (λds + λdn)) * (observed_d)
 
-    sampled_ds = pois_rand.(ds)
-    sampled_dn = pois_rand.(dn)
-    sampled_weak = pois_rand.(dweak)
-    sampled_strong = pois_rand.(dstrong)
+    sampled_ds         = @. pois_rand(ds)
+    sampled_dn         = @. pois_rand(dn)
+    sampled_weak       = @. pois_rand(dweak)
+    sampled_strong     = @. pois_rand(dstrong)
 
-    α = @. [sampled_weak / sampled_dn sampled_strong / sampled_dn (
+    α                  = @. [sampled_weak / sampled_dn sampled_strong / sampled_dn (
         sampled_weak + sampled_strong
     ) / sampled_dn]
 
-    dₙ = @. (sampled_dn/ln)
-    dₛ = @. (sampled_ds/ls)
-    d₋ = @. (sampled_dn-sampled_strong-sampled_weak)/ln
-    D₋ = @. sampled_dn-sampled_strong-sampled_weak
-    D₊ = @. sampled_strong+sampled_weak
+    dₙ                 = @. (sampled_dn/ln)
+    dₛ                 = @. (sampled_ds/ls)
+    d₋                 = @. (sampled_dn-sampled_strong-sampled_weak)/ln
+    D₋                 = @. sampled_dn-sampled_strong-sampled_weak
+    D₊                 = @. sampled_strong+sampled_weak
 
-    # ω        = @. (sampled_dn/ln)/(sampled_ds/ls)
-    # ωₐ       = @. α *  ω
-    # ωₙ       = @. (D₋/ln) / dₛ
-    # ω_params = hcat(ωₐ,ωₙ)
+    # ω                = @. (sampled_dn/ln)/(sampled_ds/ls)
+    # ωₐ               = @. α *  ω
+    # ωₙ               = @. (D₋/ln) / dₛ
+    # ω_params         = hcat(ωₐ,ωₙ)
 
-    ω         = @. dₙ / dₛ
-    ωₙ        = @. (D₋/ln) / dₛ
-    ωₐ_weak   = @. (sampled_weak/ln) / dₛ
-    ωₐ_strong = @. (sampled_strong/ln) / dₛ
-    ωₐ        = @. ((sampled_weak+sampled_strong)/ln) / dₛ
-    ω_params  = hcat(ωₐ_weak,ωₐ_strong,ωₐ,ωₙ)
+    ω                  = @. dₙ / dₛ
+    ωₙ                 = @. (D₋/ln) / dₛ
+    ωₐ_weak            = @. (sampled_weak/ln) / dₛ
+    ωₐ_strong          = @. (sampled_strong/ln) / dₛ
+    ωₐ                 = @. ((sampled_weak+sampled_strong)/ln) / dₛ
+    ω_params           = hcat(ωₐ_weak,ωₐ_strong,ωₐ,ωₙ)
 
-    out       = α, ω_params, sampled_dn, sampled_ds
-    # out = sampled_dn, sampled_ds, dₙ./dₛ
+    out                = α, ω_params, sampled_dn, sampled_ds
+    # out              = sampled_dn, sampled_ds, dₙ./dₛ
     return  out
 end
 
@@ -95,39 +95,18 @@ function poisson_polymorphism(
     λpn::Matrix{Float64},
 )
 
+    # r = ifelse(sum(observed_values) < 1e4,fill(1000,length(observed_values)),fill(1,length(observed_values)))
     # Neutral λ;
-    λ1 = @. λps / (λps + λpn) * observed_values
+    λ1 = @. (λps / (λps + λpn)) * (observed_values)
     # Selected λ;
-    λ2 = @. λpn / (λps + λpn) * observed_values
+    λ2 = @. (λpn / (λps + λpn)) * (observed_values)
 
     # Relative rates output NaN values due to 0 divisons.
     replace!(λ1, NaN => 1)
     replace!(λ2, NaN => 1)
 
-    sampled_ps = pois_rand.(λ1)
-    sampled_pn = pois_rand.(λ2)
-
-    return (sampled_pn, sampled_ps)
-end
-
-function poisson_polymorphism(
-    observed_values::Vector{Float64},
-    l::Vector{Float64},
-    λps::Matrix{Float64},
-    λpn::Matrix{Float64},
-)
-
-    ln,ls = l;
-
-    # Neutral λ;
-    exp_pn = λpn .* ln
-    exp_ps = λps .* ls
-
-    theta = observed_values[1]./(view(exp_pn,1,:)+view(exp_ps,1,:))
-    r = observed_values./(view(exp_pn,:,:)+view(exp_ps,:,:))
-
-    sampled_ps = pois_rand.(exp_pn.*r.*theta')
-    sampled_pn = pois_rand.(exp_ps.*r.*theta')
+    sampled_ps = @. pois_rand(λ1)
+    sampled_pn = @. pois_rand(λ2)
 
     return (sampled_pn, sampled_ps)
 end
@@ -179,7 +158,6 @@ function sampling_summaries(
     ## Outputs
     α, ω, expected_dn, expected_ds = poisson_fixation(d, ds, dn, dweak, dstrong)
     # expected_dn, expected_ds, ω = poisson_fixation(d, ds, dn, dweak, dstrong)
-
     expected_pn, expected_ps = poisson_polymorphism(fs, permutedims(neut), permutedims(sel))
     # expected_pn, expected_ps = poisson_polymorphism(fs,d[2:3],permutedims(neut), permutedims(sel))
 
@@ -226,6 +204,7 @@ function summary_statistics(
 
     ## Opening files
     assertion_params(param)
+    mkpath(output_folder)
 
     α, sfs_p, divergence_p = data_to_poisson(sfs, divergence, param.dac)
 

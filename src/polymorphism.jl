@@ -266,3 +266,102 @@ function reduce_sfs(sfs_tmp::Array, bins::Int64)
 
     return (out)
 end
+
+"""
+Log of N choose k.
+
+# Arguments
+ - `N::Int64`
+ - `k::Union{Vector{Int64},Int64}`
+# Output
+ - `Vector{Float64}`
+"""
+function _lncomb(N::Int64,k::Union{Vector{Int64},Int64})
+
+    return @. loggamma(N+1) - loggamma(k+1) - loggamma(N-k+1)
+end
+
+"""
+Coefficients for projection from a different sfs size.
+
+# Arguments
+ - `proj_to::Int64`: Numper of samples to project down to.
+ - `proj_from::Int64`: Numper of samples to project from.
+ - `hits::Int64`: Number of derived alleles projecting from.
+# Output
+ - `Vector{Float64}`: projection weights.
+"""
+function _cached_projection(proj_to::Int64, proj_from::Int64, hits::Int64)
+
+    proj_hits = collect(0:proj_to)
+
+    # For large sample sizes, we need to do the calculation in logs, and it is accurate enough for small sizes as well.
+    lncontrib = _lncomb(proj_to,proj_hits)
+    lncontrib += _lncomb(proj_from-proj_to,hits.-proj_hits)
+    lncontrib = lncontrib .- _lncomb(proj_from, hits)
+    contrib = @. exp(lncontrib)
+
+    return contrib
+end
+
+"""
+Project SFS to smaller sample size following DADI and moments implementation
+
+# Arguments
+ - `sfs::Matrix{Float64}`: SFS parsed from MKtest.parse_sfs
+ - `n::Int64`: new sample sample size
+# Output:
+ - `Vector{Float64}`: projected SFS.
+"""
+function project(sfs::Matrix{Float64},n::Int64)
+    @assert size(sfs,1) > n "n is larger than the SFS. Select another sample size to project"
+
+    n *= 2;
+
+    proj_from     = size(sfs,1) + 1
+    p_fs          = zeros(n + 1,2)
+    # Assuming SFS contains freqs and only segregating sites, so not 0 and 1 frequency mutations
+    sfs_fixations = vcat([0 0],view(sfs,:,2:3),[0 0])
+
+    for hits = 1:proj_from
+        # Adjust the slice in the array we're projecting from.
+        # These are the least and most possible hits we could have in the projected fs
+        least, most = max(n - (proj_from - hits), 1), min(hits,n);
+        proj_slice = to_slice = least:most+1;
+        # The projection weights.
+        proj = _cached_projection(n, proj_from, hits)
+        @. p_fs[to_slice,1]  += sfs_fixations[hits+1,1] * proj[proj_slice]
+        @. p_fs[to_slice,2]  += sfs_fixations[hits+1,2] * proj[proj_slice]
+
+    end
+
+    p_sfs = hcat(collect(1:n-1),trunc.(@view p_fs[2:end-1,:]))
+    return p_sfs
+end
+
+function fold(sfs::Matrix{Float64})
+
+    n, m = size(sfs); n+=1;
+    u_sfs = vcat(zeros(m-1)',view(sfs,:,2:m),zeros(m-1)')
+
+    mask = 0:n .> (n / 2)
+    # Remove non-mutation values too
+    mask[1] = true;
+
+    reversed = mask .* u_sfs
+    reversed[.!mask,:] .= 0
+
+    f_sfs = view(u_sfs,.!mask,:)
+
+
+    return(hcat(view(sfs,1:size(f_sfs,1)),f_sfs))
+
+end
+
+function fold(sfs::Vector{Matrix{Float64}})
+    return ThreadsX.mapi(fold,sfs)
+end
+
+
+
+

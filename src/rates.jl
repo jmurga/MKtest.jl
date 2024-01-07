@@ -29,10 +29,10 @@ function solve_model!(
     @unpack B, dac, nn = param
 
     assertion_params(param)
-    m = zeros(length(B_bins), 8)
+    m    = zeros(length(B_bins), 8)
     r_ps = zeros(length(B_bins), length(dac))
     r_pn = zeros(length(B_bins), length(dac))
-    r_f = zeros(length(B_bins), 4)
+    r_f  = zeros(length(B_bins), 4)
 
     # Solving θ on non-coding region and probabilites to get α value without BGS
     param.B = 0.999
@@ -53,10 +53,10 @@ function solve_model!(
                 zeros(size(r_pn, 2)),
                 zeros(size(r_pf, 2))
             end
-            @inbounds view(m,j, :) .= analytical_m
+            @inbounds view(m,j, :)    .= analytical_m
             @inbounds view(r_ps,j, :) .= analytical_ps
             @inbounds view(r_pn,j, :) .= analytical_pn
-            @inbounds view(r_f,j, :) .= analytical_f
+            @inbounds view(r_f,j, :)  .= analytical_f
         end
         return (m, r_ps, r_pn, r_f)
     catch
@@ -90,23 +90,23 @@ function solve_rates(param::parameters, binom::SparseMatrixCSC{Float64,Int64})
     dac = param;
 
     # Fixation
-    f_n = B * fix_neut(param)
-    f_neg = B * fix_neg(param, 0.5 * ppos_h + 0.5 * ppos_l)
+    f_n     = B * fix_neut(param)
+    f_neg   = B * fix_neg(param, 0.5 * ppos_h + 0.5 * ppos_l)
     f_pos_l = fix_pos_sim(param, gL, 0.5 * ppos_l)
     f_pos_h = fix_pos_sim(param, gH, 0.5 * ppos_h)
 
-    ds = f_n
-    dn = f_neg + f_pos_l + f_pos_h
+    ds      = f_n
+    dn      = f_neg + f_pos_l + f_pos_h
 
     ## Polymorphism
-    neut::Vector{Float64} = sfs_neut(param, binom)
+    neut::Vector{Float64}  = sfs_neut(param, binom)
     sel_h::Vector{Float64} = if isinf(exp(gH * 2))
         sfs_pos_float(param, gH, ppos_h, binom)
     else
         sfs_pos(param, gH, ppos_h, binom)
     end
 
-    sel_l::Vector{Float64} = sfs_pos(param, gL, ppos_l, binom)
+    sel_l::Vector{Float64}   = sfs_pos(param, gL, ppos_l, binom)
     sel_neg::Vector{Float64} = sfs_neg(param, ppos_l + ppos_h, binom)
 
     cumulative_vector!(neut);
@@ -119,11 +119,11 @@ function solve_rates(param::parameters, binom::SparseMatrixCSC{Float64,Int64})
     ##########
     # Output #
     ##########
-    analytical_m::Vector{Float64} =
+    analytical_m::Vector{Float64}  =
         vcat(B*1000, al_low, al_tot, gam_flanking, gL, gH, shape, -(shape / scale))
     analytical_ps::Vector{Float64} = view(neut,dac)
     analytical_pn::Vector{Float64} = view(sel,dac)
-    analytical_f::Vector{Float64} = vcat(ds, dn, f_pos_l, f_pos_h)
+    analytical_f::Vector{Float64}  = vcat(ds, dn, f_pos_l, f_pos_h)
 
     return (analytical_m, analytical_ps, analytical_pn, analytical_f)
 end

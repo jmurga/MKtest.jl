@@ -46,7 +46,7 @@ function ABCreg(;
     end
      
     # List alphas and summstat files
-    a_file = filter(x -> occursin("alphas", x), readdir(output_folder, join = true))
+    a_file   = filter(x -> occursin("alphas", x), readdir(output_folder, join = true))
     sum_file = filter(x -> occursin("summstat", x), readdir(output_folder, join = true))
 
     # Change P if omega was not estimated
@@ -145,7 +145,6 @@ Posterior distributions statistics. The function estimates Min., 0.5% Perc., Med
 # Arguments
  - `posterior::Matrix{Float64}` : posterior distribution.
  - `stat::String`: output estimation.
- - `plot_path{String,Nothing}`: path to save posterior plot.
 # Output
  - `DataFrame`: posterior statistics.
  - `DataFrame`: chosen statistic inference.
@@ -312,6 +311,7 @@ function summary_abc(posteriors::Vector{DataFrame}; stat::String = "Mode")
         return df_vcat[df_vcat.Stats.==uppercasefirst(stat), 2:end], df
     end
 end
+
 #############
 
 
@@ -353,7 +353,6 @@ function abc(; output_folder::String,
     if rm_summaries
         rm.(filter(x -> occursin("summstat", x) || occursin("alphas_", x), readdir(output_folder, join = true)))
     end
-
 
     set_num_threads(nthreads_og)
 

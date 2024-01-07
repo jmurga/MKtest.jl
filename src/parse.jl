@@ -151,10 +151,9 @@ function get_pol_div(
     return (α, sfs_flt, hcat([Dn Ds], l))
 end
 
-
 function data_to_poisson(
     sfs::Vector{Matrix{Float64}},
-    divergence::Vector{Matrix{Float64}},
+    divergence::Vector,
     dac::Vector{Int64}
 )
     scumu = cumulative_sfs.(sfs)
@@ -164,7 +163,11 @@ function data_to_poisson(
         s_poisson[i] = map(z -> sum(sf[sf[:, 1] .== z, 2:3]), dac)
     end
 
-    d_poisson = map(x -> [sum(x[1:2]), x[3], x[4]], divergence);
+    d_poisson = try
+        map(x -> [sum(x[1:2]), x[3], x[4]], divergence);
+    catch
+        map(x -> [sum(x[1:2])], divergence);
+    end
 
     α_observed = fill(zeros(1,length(dac)),length(sfs))
     for (i, sf) in enumerate(scumu)
@@ -174,6 +177,7 @@ function data_to_poisson(
 
     return (α_observed, s_poisson, d_poisson)
 end
+
 
 """
 	bootstrap_data!(sfs,divergence,bootstrap)
@@ -188,17 +192,16 @@ Bootstrap data following polyDFE manual.
  - `sfs::Vector{Matrix{Float64}}`: boostrapped sfs.
  - `divergence::Vector{Matrix{Float64}}`: divergence data.
 """
-function bootstrap_data!(
+function bootstrap_data(
     sfs::Matrix{Float64},
     divergence::Matrix{Float64},
     bootstrap::Int64,
 )
     pr(x::Matrix{Float64}) = hcat(x[:, 1], pois_rand.(x[:, 2:end]))
 
-    sfs = repeat(sfs, bootstrap)
-    divergence = repeat(divergence, bootstrap)
-    sfs[2:end] .= pr.(sfs[2:end])
+    sfs_b = fill(sfs, bootstrap)
+    divergence = fill(divergence, bootstrap)
+    sfs_b .= pr.(sfs_b)
 
-    return sfs, divergence
+    return sfs_b, divergence
 end
-
