@@ -351,7 +351,7 @@ function fold(sfs::Matrix{Float64})
     reversed = mask .* u_sfs
     reversed[.!mask,:] .= 0
 
-    f_sfs = view(u_sfs,.!mask,:)
+    f_sfs = view(u_sfs + reverse(reversed,dims=1),.!mask,:)
 
 
     return(hcat(view(sfs,1:size(f_sfs,1)),f_sfs))

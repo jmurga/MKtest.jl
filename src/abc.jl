@@ -74,7 +74,7 @@ function ABCreg(;
     # Move from CSV.read to readdlm, bug when threads enable in node server.
     # open(x) = Array(CSV.read(x, DataFrame))
     # Control outlier inference. 2Nes non negative values
-    posteriors = @. read_gz(out)
+    posteriors = read_gz(out)
     # Remove is some file wasnt computed
     posteriors = posteriors[@. !iszero(posteriors)]
 
@@ -85,6 +85,7 @@ function ABCreg(;
     end
 
     posteriors = map(x -> DataFrame(x,c_names),posteriors)
+
     # Remove summstat files
     if rm_summaries
         rm.(
@@ -129,14 +130,17 @@ end
 # read gz since CSV.read is bugged at node server
 function read_gz(out_file::String)
     try
-        x = readdlm(open(out_file), '\t', header = false)
-        # x = x[(x[:, 4].>0).&(x[:, 1].>0).&(x[:, 2].>0).&(x[:, 3].>0), :]
-        return x
+        return readdlm(open(out_file),'\t', Float64,header = false)
     catch
         @warn "$out_file is empty"
-        return zeros(1, 5)
+        return zeros(1, 12)
     end
 end
+
+function read_gz(out_file::Vector{String})
+    return ThreadsX.mapi(x->MKtest.read_gz(x),out_file)
+end
+
 
 """
 	summary_abc(posteriors,stat)
