@@ -335,8 +335,13 @@ function project(sfs::Matrix{Float64},n::Int64)
 
     end
 
-    p_sfs = hcat(collect(1:n-1),trunc.(@view p_fs[2:end-1,:]))
+    # p_sfs = hcat(collect(1:n-1),trunc.(@view p_fs[2:end-1,:]))
+    p_sfs = hcat(collect(1:n-1),@view p_fs[2:end-1,:])
     return p_sfs
+end
+
+function project(sfs::Vector{Matrix{Float64}},n::Int64)
+    return ThreadsX.mapi(x -> project(x,n),sfs)
 end
 
 function fold(sfs::Matrix{Float64})
@@ -362,6 +367,46 @@ function fold(sfs::Vector{Matrix{Float64}})
     return ThreadsX.mapi(fold,sfs)
 end
 
+"""
+Get standard Kingman SFS.
+
+# Arguments
+ - n: sample size
+# Output
+ - Expected SFS
+"""
+function standard_kingman(n::Int64)
+    return 1 ./ collect(1:n)
+end
+
+"""
+Calculate site-wise theta using Watterson's estimator.
+
+"""
+function θ(sfs::Matrix,divergence::Matrix)
+    n_polymorphic = sum(@view sfs[:,3])
+    n_sites = n_polymorphic + divergence[4]
+    return n_polymorphic / sum(1 ./ collect(1:size(sfs,1))) / n_sites
+end
 
 
+function rᵢ!(sfs::Matrix,divergence::Matrix)
 
+    # sfs_adjusted = copy(sfs)
+
+    # normalized counts of the standard coalescent
+    counts_kingman = standard_kingman(size(sfs,1)) * θ(sfs,divergence) * (sum(sfs[:,3])+divergence[4])
+
+    # These counts transform the standard Kingman case to the observed
+    # neutral SFS when multiplied and thus account for demography as we assume
+    # the distortion in counts_neut to be due to demography only.
+    # r = counts_kingman ./ sfs_adjusted[:,3]
+    r = counts_kingman ./ sfs[:,3]
+
+    # adjust for demography and polarization error
+    # sfs_adjusted[:,2] .= r .*  @view sfs[:,2]
+    sfs[:,2] .= r .*  @view sfs[:,2]
+
+    return sfs
+    # return sfs_adjusted
+end

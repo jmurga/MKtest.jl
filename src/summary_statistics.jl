@@ -21,7 +21,7 @@ Divergence sampling from Poisson distribution. The expected neutral and selected
 
 """
 function poisson_fixation(
-    observed_values::Vector{Float64},
+    observed_values::Vector,
     λds::SubArray,
     λdn::SubArray,
     λweak::SubArray,
@@ -90,7 +90,7 @@ The success rate managing the Poisson distribution by the observed count each fr
 
 """
 function poisson_polymorphism(
-    observed_values::Vector{Float64},
+    observed_values::Vector,
     λps::Matrix{Float64},
     λpn::Matrix{Float64},
 )
@@ -138,8 +138,8 @@ Ouput the expected values from the Poisson sampling process. Please check [`pois
 """
 function sampling_summaries(
     models::SharedMatrix,
-    fs::Vector{Float64},
-    d::Vector{Float64},
+    fs::Vector,
+    d::Vector,
     neut::SharedMatrix,
     sel::SharedMatrix,
     dsdn::SharedMatrix,

@@ -34,6 +34,7 @@ function parse_sfs(
     div_columns::Vector{Int64} = [6, 7],
     l_columns::Vector{Int64} = [8, 9],
     bins::Union{Nothing,Int64} = nothing,
+    r_nuisance::Bool = false,
 ) where {S<:AbstractString}
     @unpack n, cutoff, isolines = param
 
@@ -104,6 +105,7 @@ function get_pol_div(
     div_columns::Vector{Int64},
     l_columns::Vector{Int64},
     bins::Union{Nothing,Int64},
+    r_nuisance::Bool = false,
 )::Tuple{Vector{Float64}, Matrix{Float64}, Matrix{Float64}}
 
     pn, ps  = eachcol(view(df_subset,:, sfs_columns))
@@ -115,11 +117,11 @@ function get_pol_div(
     ps = view(ps,ps.!=0);
 
     # Round SFS frequencies to the lowest floating value of the dataset independtly of the sample size. Needed to countmap and merge.
+    dgts = ifelse(s_size >= 100,4,3)
+    freq = OrderedDict(round.(collect(1:(s_size-1)) / s_size, digits = dgts) .=> 0)
 
-    freq = OrderedDict(round.(collect(1:(s_size-1)) / s_size, digits = 4) .=> 0)
-
-    c_pn = sort(countmap(round.(pn, digits = 4)))
-    c_ps = sort(countmap(round.(ps, digits = 4)))
+    c_pn = sort(countmap(round.(pn, digits = dgts)))
+    c_ps = sort(countmap(round.(ps, digits = dgts)))
 
     # Dn, Ds, Pn, Ps, sfs
     Dn = sum(view(df_subset,:, div_columns[1]))
@@ -137,6 +139,10 @@ function get_pol_div(
 
     # Filtering SFS and changing frequency to DAC
     sfs_flt = sfs[view(sfs,:, 1).>=cutoff[1] .&& view(sfs,:, 1) .<=cutoff[2], [4, 2, 3]];
+
+    if r_nuisance
+        rᵢ!(sfs_flt)
+    end
 
     scumu = cumulative_sfs(sfs_flt);
 
