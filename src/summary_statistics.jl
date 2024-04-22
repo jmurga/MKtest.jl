@@ -202,6 +202,8 @@ function summary_statistics(
     B_bins::Union{Nothing,Vector{Float64}} = nothing
 )
 
+    @assert 1 ∉ param.dac "Please exclude singletons from the inference"
+
     ## Opening files
     assertion_params(param)
     mkpath(output_folder)

@@ -159,7 +159,7 @@ function sfs_neg(param::parameters, p::Float64, binom::SparseMatrixCSC{Float64,I
     xa1 = 0:NN2
     xa2 = @. xa1 / NN2
 
-    function z(x::Float64, p::Float64 = p)
+    function z(x::Float64, p::Float64 = p,shape::Float64 = param.shape,beta::Float64=beta)
         (1.0 - p) *
         (2.0^-param.shape) *
         (beta^param.shape) *
@@ -381,7 +381,6 @@ end
 
 """
 Calculate site-wise theta using Watterson's estimator.
-
 """
 function θ(sfs::Matrix,divergence::Matrix)
     n_polymorphic = sum(@view sfs[:,3])

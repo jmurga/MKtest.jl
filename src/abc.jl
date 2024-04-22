@@ -156,13 +156,13 @@ Posterior distributions statistics. The function estimates Min., 0.5% Perc., Med
 function summary_abc(posteriors::Vector{Matrix{Float64}}; stat::String = "Mode")
     @info "Computing statistics over posteriors distributions"
 
-    p_min = vcat(ThreadsX.map(x -> minimum(x, dims = 1), posteriors)...)
-    p_max = vcat(ThreadsX.map(x -> maximum(x, dims = 1), posteriors)...)
-    p_mean = vcat(ThreadsX.map(x -> mean(x, dims = 1), posteriors)...)
+    p_min    = vcat(ThreadsX.map(x -> minimum(x, dims = 1), posteriors)...)
+    p_max    = vcat(ThreadsX.map(x -> maximum(x, dims = 1), posteriors)...)
+    p_mean   = vcat(ThreadsX.map(x -> mean(x, dims = 1), posteriors)...)
     p_median = vcat(ThreadsX.map(x -> median(x, dims = 1), posteriors)...)
-    p_mode = vcat(ThreadsX.map(get_mode, posteriors)...)
-    p_lower = vcat(ThreadsX.map(x -> mapslices(q_lower, x, dims = 1), posteriors)...)
-    p_upper = vcat(ThreadsX.map(x -> mapslices(q_upper, x, dims = 1), posteriors)...)
+    p_mode   = vcat(ThreadsX.map(get_mode, posteriors)...)
+    p_lower  = vcat(ThreadsX.map(x -> mapslices(q_lower, x, dims = 1), posteriors)...)
+    p_upper  = vcat(ThreadsX.map(x -> mapslices(q_upper, x, dims = 1), posteriors)...)
 
     if size(p_mean,2) != 12
         c_names = [:α_weak, :α_strong, :α, :γ₋, :β,:γ₊,:γ₊₊,:B]
@@ -360,7 +360,7 @@ function abc(; output_folder::String,
 
     set_num_threads(nthreads_og)
 
-    return posteriors, posteriors_adjusted
+    return Dict("rejection"=>posteriors, "loclinear"=>posteriors_adjusted)
 end
 
 function normalise(x::Union{SubArray,Float64},y::SubArray)
