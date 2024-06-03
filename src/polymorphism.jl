@@ -193,8 +193,8 @@ Changing SFS considering all values above a frequency *x*. The original aMK appr
  - `freqs::Bool`: true/false wheter the input SFS vector containing a first columns with the frequencies.
 # Output 
  - `Vector{Float64}`: SFS vector.
-"""#=
-function cumulative_sfs!(sfs_tmp::Matrix{Float64},freqs::Bool=true)
+"""
+#=function cumulative_sfs!(sfs_tmp::Matrix{Float64},freqs::Bool=true)
 
     idx = ifelse(freqs, 2, 1)
 
@@ -203,8 +203,8 @@ function cumulative_sfs!(sfs_tmp::Matrix{Float64},freqs::Bool=true)
     end
 
     return sfs_tmp
-end
-=#
+end=#
+
 function cumulative_vector!(v::Union{SubArray,Vector{T}}) where {T<:Number}
     n = length(v)
     @inbounds for i = 1:n
@@ -335,8 +335,8 @@ function project(sfs::Matrix{Float64},n::Int64)
 
     end
 
-    # p_sfs = hcat(collect(1:n-1),trunc.(@view p_fs[2:end-1,:]))
-    p_sfs = hcat(collect(1:n-1),@view p_fs[2:end-1,:])
+    p_sfs = hcat(collect(1:n-1),trunc.(@view p_fs[2:end-1,:]))
+    # p_sfs = hcat(collect(1:n-1),@view p_fs[2:end-1,:])
     return p_sfs
 end
 

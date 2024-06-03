@@ -44,25 +44,7 @@ Function to estimate α(x).
  - `Vector{Float64}: α(x) estimations.
 """
 function α_x(sfs::Vector, divergence::Vector; cutoff::Vector{Float64}=[0.0,1.0],cumulative::Bool = true)
-
-    output = Vector{Vector}(undef, length(sfs))
-    sfs_tmp = deepcopy(sfs)
-
-    Threads.@threads for i in eachindex(sfs)
-        @show
-        n = size(sfs_tmp[i],1) + 1
-        sfs_tmp[i][:,1] .= collect(1:n-1)/n
-
-        if cumulative
-            sfs_tmp[i] = sfs_tmp[i][(sfs_tmp[i][:,1] .>= cutoff[1]) .& (sfs_tmp[i][:,1] .<= cutoff[2]),:]
-            sfs_tmp[i] .= cumulative_sfs(sfs_tmp[i])
-        else
-            sfs_tmp[i] = sfs_tmp[i][(sfs_tmp[i][:,1] .>= cutoff[1]) .& (sfs_tmp[i][:,1] .<= cutoff[2]),:]
-        end
-
-        output[i] = @. 1 - (sfs_tmp[i][:, 2] / sfs_tmp[i][:, 3] * divergence[i][2] / divergence[i][1])
-    end
-    return (output)
+    return ThreadsX.mapi((x,y) -> MKtest.α_x(x,y,cutoff=cutoff,cumulative=cumulative),sfs,divergence)
 end
 
 """
@@ -159,54 +141,12 @@ function aMK(
     divergence::Vector;
     cumulative::Bool=true,
     dac_rm::Bool = false,
-    na_rm::Bool = false
+    na_rm::Bool = false,
 )
-
-    output = Vector{Tuple}(undef, length(sfs))
-    f = Vector{Vector{Float64}}(undef, length(sfs))
-
-    @unpack nn, dac, cutoff = param
-
-    α_i = α_x(sfs,divergence,cutoff=cutoff,cumulative=cumulative)
-
-    for i ∈ eachindex(α_i)
-        tmp = collect(1:length(α_i[i])) / nn
-
-        if dac_rm
-            tmp = dac / nn
-            α_i[i] = α_i[i][dac]
-        end
-
-        if na_rm
-            flt = .!isnan.(α_i[i]) .&& .!isinf.(α_i[i]) .&& α_i[i] .!= 1
-            α_i[i] = α_i[i][flt]
-            tmp = tmp[flt]
-        end
-        f[i] = tmp
-    end
-
-    # Model
-    model(x, p) = @. p[1] + p[2] * exp(-x * p[3])
-
-    # Fit values
-    amk_v = Vector{Float64}(undef, length(sfs))
-    model_params = Vector{Vector{Float64}}(undef, length(sfs))
-    ci_v = Vector{Tuple{Float64,Float64}}(undef,length(sfs))
-    fitted1 = ThreadsX.mapi((x,y) -> curve_fit(model,x,y,[-1.0, -1.0, 1.0];lower = [-1.0, -1.0, 1.0],upper = [1.0, 1.0, 10.0]),f,α_i)
-    fitted2 = ThreadsX.mapi((x,y,z) -> curve_fit(model,x,y,z.param),f,α_i,fitted1)
-
-    for (i,v) ∈ enumerate(fitted2)
-        amk_v[i] = model(1, v.param)
-        model_params[i] = v.param
-        try
-            ci_v[i] = confidence_interval(v)[1]
-        catch
-            [0.0,0.0]
-        end
-    end
-
-    return DataFrame(hcat(amk_v,hcat(collect.(ci_v)...)',hcat(model_params...)'),[:amk,:ci_low,:ci_high,:a,:b,:c])
+    return vcat(ThreadsX.mapi((x,y)-> aMK(param,x,y,cumulative=cumulative,dac_rm=dac_rm,na_rm=na_rm),sfs,divergence)...)
 end
+
+
 
 """
     imputedMK(param,sfs,divergence;m,cutoff)
@@ -222,106 +162,6 @@ Function to estimate the imputedMK (https://doi.org/10.1093/g3journal/jkac206).
 # Returns
  - `DataFrame`
 """
-
-function imputedMK(
-    param::parameters,
-    sfs::Vector,
-    divergence::Vector;
-    threshold::Float64 = 0.15
-)
-
-    alpha   = Vector{Float64}(undef, length(sfs))
-    p_value = Vector{Float64}(undef, length(sfs))
-
-    b       = Vector{Float64}(undef, length(sfs))
-    f       = Vector{Float64}(undef, length(sfs))
-    d       = Vector{Float64}(undef, length(sfs))
-    omega   = Vector{Float64}(undef, length(sfs))
-    omega_a = Vector{Float64}(undef, length(sfs))
-    omega_d = Vector{Float64}(undef, length(sfs))
-
-    @unpack isolines, n, nn, cutoff = param
-    sfs_tmp = deepcopy(sfs)
-
-    for i ∈ eachindex(sfs)
-        if(sfs_tmp[i][1,1] >= 1)
-            s_size = ifelse(isolines,n,nn)
-            freqs = collect(1:s_size-1) ./ s_size
-            sfs_tmp[i][:,1] .= freqs[(freqs .>= cutoff[1]) .& (freqs .<= cutoff[2])]
-        end
-
-        pn = sum(sfs_tmp[i][:, 2])
-        ps = sum(sfs_tmp[i][:, 3])
-        dn = divergence[i][1]
-        ds = divergence[i][2]
-
-        deleterious = 0
-
-        flt_low = (sfs_tmp[i][:, 1] .<= threshold)
-        pn_low = sum(sfs_tmp[i][flt_low, 2])
-        ps_low = sum(sfs_tmp[i][flt_low, 3])
-
-        flt_inter = (sfs_tmp[i][:, 1] .> threshold) .& (sfs_tmp[i][:, 1] .<= 1)
-        pn_inter = sum(sfs_tmp[i][flt_inter, 2])
-        ps_inter = sum(sfs_tmp[i][flt_inter, 3])
-
-        ratio_ps = ps_low / ps_inter
-        deleterious = pn_low - (pn_inter * ratio_ps)
-
-        if (deleterious > pn) || (deleterious < 0)
-            deleterious = 0
-            pn_neutral = round(pn - deleterious, digits = 3)
-        else
-            pn_neutral = round(pn - deleterious, digits = 3)
-        end
-
-        alpha[i] = round(1 - ((pn_neutral / ps) * (ds / dn)), digits = 3)
-
-        #  method = :minlike same results R, python two.sides
-        p_value[i] =
-            pvalue(FisherExactTest(Int(ceil(ps)), Int(ceil(pn_neutral)), Int(ds), Int(dn)))
-
-        if size(divergence[i],2) > 2
-            ln = divergence[i][3]
-            ls = divergence[i][4]
-
-            # ## Estimation of b: weakly deleterious
-            b[i] = (deleterious / ps) * (ls / ln)
-
-            ## Estimation of f: neutral sites
-            f[i] = (ls * pn_neutral) / (ln * ps)
-
-            ## Estimation of d, strongly deleterious sites
-            d[i] = 1 - (f[i] + b[i])
-
-            ka = dn / ln
-            ks = ds / ls
-            omega[i] = ka / ks
-
-            # omega_a and omega_d
-            omega_a[i] = omega[i] * alpha[i]
-            omega_d[i] = omega[i] - omega_a[i]
-        end
-    end
-
-    return DataFrame(:alpha => alpha, :p_value => p_value, :b=>b, :f=>f, :d=>d, :omega=>omega, :omega_a=>omega_a, :omega_d=>omega_d)
-end
-
-"""
-    imputedMK(param,sfs,divergence;m,cutoff)
-
-Function to estimate the imputedMK (https://doi.org/10.1093/g3journal/jkac206).
-
-# Arguments
- - `param::parameters`: mutable structure containing the variables required to solve the model.
- - `sfs::Matrix{Float64}`: SFS data parsed from parse_sfs().
- - `divergence::Matrix{Int64}`: divergence data from parse_sfs().
- - `threshold{Float64}`: frequency cutoff to perform imputedMK.
-
-# Returns
- - `DataFrame`
-"""
-
 function imputedMK(
     param::parameters,
     sfs::Matrix,
@@ -395,6 +235,30 @@ function imputedMK(
 end
 
 """
+    imputedMK(param,sfs,divergence;m,cutoff)
+
+Function to estimate the imputedMK (https://doi.org/10.1093/g3journal/jkac206).
+
+# Arguments
+ - `param::parameters`: mutable structure containing the variables required to solve the model.
+ - `sfs::Matrix{Float64}`: SFS data parsed from parse_sfs().
+ - `divergence::Matrix{Int64}`: divergence data from parse_sfs().
+ - `threshold{Float64}`: frequency cutoff to perform imputedMK.
+
+# Returns
+ - `DataFrame`
+"""
+function imputedMK(
+    param::parameters,
+    sfs::Vector,
+    divergence::Vector;
+    threshold::Float64 = 0.15,
+)
+    return vcat(ThreadsX.mapi((x,y) -> imputedMK(param,x,y,threshold=threshold),sfs,divergence))
+end
+
+
+"""
     fwwMK(param,sfs,divergence;m,cutoff)
 
 Function to estimate the fwwMK (https://doi.org/10.1038/4151024a).
@@ -404,76 +268,6 @@ Function to estimate the fwwMK (https://doi.org/10.1038/4151024a).
  - `sfs::Vector`: SFS data parsed from parse_sfs().
  - `divergence::Vector`: divergence data from parse_sfs().
  - `threshold{Float64}`: frequency cutoff to perform fwwMK.
-# Returns
- - `DataFrame`
-"""
-function fwwMK(
-    param::parameters,
-    sfs::Vector,
-    divergence::Vector;
-    threshold::Float64 = 0.15,
-)
-
-    alpha   = Vector{Float64}(undef, length(sfs))
-    p_value = Vector{Float64}(undef, length(sfs))
-
-    omega   = Vector{Float64}(undef, length(sfs))
-    omega_a = Vector{Float64}(undef, length(sfs))
-    omega_d = Vector{Float64}(undef, length(sfs))
-
-    @unpack isolines,n,nn,cutoff = param;
-    sfs_tmp = deepcopy(sfs)
-
-    for i ∈ eachindex(sfs_tmp)
-        if(sfs_tmp[i][1,1] >= 1)
-            s_size = ifelse(isolines,n,nn)
-            freqs = collect(1:s_size-1) ./ s_size
-            sfs_tmp[i][:,1] .= freqs[(freqs .>= cutoff[1]) .& (freqs .<= cutoff[2])]
-        end
-
-        ps = sum(sfs_tmp[i][:, 2])
-        pn = sum(sfs_tmp[i][:, 3])
-        dn = divergence[i][1]
-        ds = divergence[i][2]
-
-        ### Estimating slightly deleterious with pn/ps ratio
-        flt_inter = (sfs_tmp[i][:, 1] .>= threshold) .& (sfs_tmp[i][:, 1] .<= 1)
-        pn_inter = sum(sfs_tmp[i][flt_inter, 2])
-        ps_inter = sum(sfs_tmp[i][flt_inter, 3])
-
-
-        alpha[i] = round(1 - ((pn_inter / ps_inter) * (ds / dn)), digits = 3)
-        #  method = :minlike same results R, python two.sides
-        p_value[i] =
-            pvalue(FisherExactTest(Int(ceil(ps_inter)), Int(ceil(pn_inter)), Int(ds), Int(dn)))
-
-        if size(divergence[i],2) > 2
-            ln = divergence[i][3]
-            ls = divergence[i][4]
-            ka = dn / ln
-            ks = ds / ls
-
-            omega[i] = ka / ks
-            # omega_a and omega_d
-            omega_a[i] = omega[i] * alpha[i]
-            omega_d[i] = omega[i] - omega_a[i]
-        end
-    end
-
-    return DataFrame(:alpha => alpha, :p_value => p_value, :omega => omega, :omega_a => omega_a, :omega_d => omega_d)
-end
-
-"""
-    fwwMK(param,sfs,divergence;m,cutoff)
-
-Function to estimate the fwwMK (https://doi.org/10.1038/4151024a).
-
-# Arguments
- - `param::parameters`: mutable structure containing the variables required to solve the model.
- - `sfs::Matrix`: SFS data parsed from parse_sfs().
- - `divergence::Matrix`: divergence data from parse_sfs().
- - `threshold{Float64}`: frequency cutoff to perform fwwMK.
-
 # Returns
  - `DataFrame`
 """
@@ -531,63 +325,30 @@ function fwwMK(
 end
 
 """
-	standardMK(sfs,divergence;m)
+    fwwMK(param,sfs,divergence;m,cutoff)
 
-Function to estimate the original α value.
+Function to estimate the fwwMK (https://doi.org/10.1038/4151024a).
 
 # Arguments
- - `sfs::Matrix{Float64}`: SFS array
- - `divergence::Array`: divegence count array
+ - `param::parameters`: mutable structure containing the variables required to solve the model.
+ - `sfs::Matrix`: SFS data parsed from parse_sfs().
+ - `divergence::Matrix`: divergence data from parse_sfs().
+ - `threshold{Float64}`: frequency cutoff to perform fwwMK.
 
-# Output
+# Returns
  - `DataFrame`
 """
-function standardMK(
+function fwwMK(
+    param::parameters,
     sfs::Vector,
     divergence::Vector;
+    threshold::Float64 = 0.15,
 )
-
-    alpha   = Vector{Float64}(undef, length(sfs))
-    p_value = Vector{Float64}(undef, length(sfs))
-
-    omega   = Vector{Float64}(undef, length(sfs))
-    omega_a = Vector{Float64}(undef, length(sfs))
-    omega_d = Vector{Float64}(undef, length(sfs))
-    sfs_tmp = deepcopy(sfs)
-
-    for i ∈ eachindex(sfs)
-        # DAC to freqs
-        if(sfs[i][1,1] > 1)
-            nn = size(view(sfs[i],:,1),1)
-            sfs[i][:,1] .= collect(1:nn) ./ (nn + 1)
-        end
-        pn = sum(sfs_tmp[i][:, 2])
-        ps = sum(sfs_tmp[i][:, 3])
-        dn = divergence[i][1]
-        ds = divergence[i][2]
-
-        alpha[i] = round(1 - ((pn / ps) * (ds / dn)), digits = 3)
-        #  method = :lnnlike same results R, python two.sides
-        p_value = pvalue(FisherExactTest(Int(ceil(ps)), Int(ceil(pn)), Int(ds), Int(dn)))
-
-        if size(divergence[i],2) > 2
-            ln = divergence[i][3]
-            ls = divergence[i][4]
-
-            ka = dn / ln
-            ks = ds / ls
-            omega[i] = ka / ks
-
-            # omega_a and omega_d
-            omega_a[i] = omega[i] * alpha[i]
-            omega_d[i] = omega[i] - omega_a[i]
-        end
-    end
-    return DataFrame(:alpha => alpha, :p_value => p_value, :omega=>omega, :omega_a=>omega_a, :omega_d=>omega_d)
+    return vcat(ThreadsX.mapi((x,y) -> fwwMK(param,x,y,threshold=threshold),sfs,divergence))
 end
 
 """
-    standardMK(sfs,divergence;m)
+	standardMK(sfs,divergence;m)
 
 Function to estimate the original α value.
 
@@ -631,6 +392,25 @@ function standardMK(
         omega_d = omega - omega_a
     end
     return DataFrame(:alpha => alpha, :p_value => p_value, :omega=>omega, :omega_a=>omega_a, :omega_d=>omega_d)
+end
+
+"""
+    standardMK(sfs,divergence;m)
+
+Function to estimate the original α value.
+
+# Arguments
+ - `sfs::Matrix{Float64}`: SFS array
+ - `divergence::Array`: divegence count array
+
+# Output
+ - `DataFrame`
+"""
+function standardMK(
+    sfs::Vector,
+    divergence::Vector;
+)
+    return vcat(ThreadsX.mapi((x,y) -> standardMK(x,y),sfs,divergence)...)
 end
 
 """
@@ -704,6 +484,7 @@ function grapes(
     # Reduce to n-1 to input in Grapes as SFS = n - 1 entries
     if n != 0
         sfs_r = project.(sfs, n)
+        n *= 2
     else
         sfs_r = sfs
         n     = size.(sfs,1) .+ 1
@@ -784,6 +565,10 @@ function read_clean_grapes(dofe::String,grapes_file::String,model::String)
                 df = CSV.read(grapes_file, DataFrame)
             else
                 df = CSV.read(grapes_file, DataFrame, footerskip = 1, skipto = 3)
+
+                idx_1 = findall(occursin.(model,names(df)))
+                idx_2 = findfirst(occursin.("theta",names(df)))
+                df = hcat(df[:,1:20],df[:,idx_1],df[:,idx_2:end])
             end
 
             rm(dofe)
@@ -800,4 +585,34 @@ function read_clean_grapes(dofe::String,grapes_file::String,model::String)
     end
 
     return(output)
+end
+
+
+function abcmk(
+    param::parameters,
+    sfs::Vector,
+    divergence::Vector;
+    h5_file::String,
+    summstat_size::Int64,
+    output_folder::String,
+    alpha::Union{Nothing,Vector{Float64}} = nothing,
+    B_bins::Union{Nothing,Vector{Float64}} = nothing,
+    tol::Int64=1000,
+    abc_method::String="abcreg",
+    rm_summaries::Bool=true,
+    stat::String="mode",
+)
+
+    summ_stats = summary_statistics(param,sfs,divergence,h5_file=h5_file,output_folder=output_folder,summstat_size=summstat_size,alpha=alpha,B_bins=B_bins);
+
+    if lowercase(abc_method) == "abcreg"
+        posteriors = ABCreg(output_folder=output_folder,S=length(param.dac),tol=tol/summstat_size,rm_summaries=true);
+    else
+        posteriors_adj_unadj = abc(output_folder=output_folder,S=length(param.dac),tol=tol/summstat_size,rm_summaries=true);
+        posteriors = posteriors_adj_unadj["loclinear"]
+    end
+
+    df_abcmk = summary_abc(posteriors,stat="mode")
+
+    return df_abcmk
 end

@@ -152,7 +152,38 @@ function set_ppos!(param::parameters)
         F[2] = alpha_exp_sim_low(param, x[1], x[2]) - param.al_low
     end
 
-    ppos_l, ppos_h = nlsolve(f!, [0.0; 0.0]).zero
+    ppos_l, ppos_h = nlsolve(f!, [0.0,0.0]).zero
+
+
+    if ppos_l < 0.0
+        ppos_l = 0.0
+    end
+    if ppos_h < 0.0
+        ppos_h = 0.0
+    end
+
+
+    if iszero(ppos_h) || iszero(ppos_l)
+        for i ∈ [[0.001,0.001],[0,0.001]]
+            ppos_l, ppos_h = set_ppos!(param,i)
+            if !iszero(ppos_h) && !iszero(ppos_l)
+                break
+            end
+        end
+    end
+
+    param.ppos_l, param.ppos_h = ppos_l, ppos_h
+end
+
+function set_ppos!(param::parameters,s::Vector{Float64})
+
+    function f!(F, x, param = param)
+        F[1] = alpha_exp_sim_tot(param, x[1], x[2]) - param.al_tot
+        F[2] = alpha_exp_sim_low(param, x[1], x[2]) - param.al_low
+    end
+
+    ppos_l, ppos_h = nlsolve(f!, s).zero
+
 
     if ppos_l < 0.0
         ppos_l = 0.0
@@ -163,6 +194,7 @@ function set_ppos!(param::parameters)
 
     param.ppos_l, param.ppos_h = ppos_l, ppos_h
 end
+
 
 """
 	binom_op(param)

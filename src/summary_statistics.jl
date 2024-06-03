@@ -55,14 +55,14 @@ function poisson_fixation(
     # ω_params         = hcat(ωₐ,ωₙ)
 
     ω                  = @. dₙ / dₛ
-    ωₙ                 = @. (D₋/ln) / dₛ
+    ωₙₐ                 = @. d₋ / dₛ
     ωₐ_weak            = @. (sampled_weak/ln) / dₛ
     ωₐ_strong          = @. (sampled_strong/ln) / dₛ
     ωₐ                 = @. ((sampled_weak+sampled_strong)/ln) / dₛ
-    ω_params           = hcat(ωₐ_weak,ωₐ_strong,ωₐ,ωₙ)
+    ω_params           = hcat(ωₐ_weak,ωₐ_strong,ωₐ,ωₙₐ)
 
     out                = α, ω_params, sampled_dn, sampled_ds
-    # out              = sampled_dn, sampled_ds, dₙ./dₛ
+
     return  out
 end
 
@@ -163,13 +163,11 @@ function sampling_summaries(
 
     ## Alpha from expected values. Used as summary statistics
     α_summaries = @. round(1 - ((expected_ds / expected_dn) * (expected_pn / expected_ps)'), digits = 5)
+
+    # if length(d) == 1
     if any(isnan.(ω))
         expected_values = hcat(round.(α, digits = 5), gn, sh, gH, gL, B, α_summaries)
     else
-        # α = hcat(view(models,:,2),view(models,:,3).-view(models,:,2),view(models,:,3))
-        # ωₐ = α .* ω
-        # ωₙ = ω .- view(ωₐ,:,3)
-        # ω = hcat(ωₐ,ωₙ)
         expected_values = hcat(round.(α, digits = 5),round.(ω, digits = 5), gn, sh, gL, gH, B, α_summaries)
     end
 
@@ -247,12 +245,6 @@ function summary_statistics(
 
     sampled_idx = sample(idx,summstat_size;replace=true)
 
-    #=# Compute the weights for each value in the vector
-    ws = (1/(alpha[end]-alpha[1])) * (length(idx)/summstat_size) * ones(length(idx))
-
-    # Sample N values from the vector with weights. Uniform prior alpha
-    sampled_idx = sample(idx, Weights(ws), summstat_size;replace=true)=#
-
     @assert length(sampled_idx) >= summstat_size "Check the filters or increase the number of rates solutions"
 
     # Convert random models to solve to a SharedMatrix. Only reading shouldn't generate race-condition
@@ -274,7 +266,6 @@ function summary_statistics(
         sel[:,i] .= view(tmp["sel"][v],sampled_idx,:)
     end
 
-
     # Making summaries
     summ_output = output_folder .* "/summstat_" .* string.(1:size(sfs_p, 1)) .* ".txt"
 
@@ -293,11 +284,11 @@ function summary_statistics(
     @. write_files(α, α_output)
 end
 
-
 function filter_expected(x::Matrix{Float64})
     replace!(x, -Inf => NaN)
     x = @view x[vec(.!any(isnan.(x), dims = 2)), :]
-
+    x = @view x[x[:,3].< 1,:]
+    x = @view x[x[:,3] .> 0,:]
     return (Matrix(x))
 end
 

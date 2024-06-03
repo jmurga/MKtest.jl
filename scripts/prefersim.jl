@@ -2,9 +2,9 @@ using GSL, LinkedLists, Parameters, StaticArrays, Printf, QuadGK, ProgressMeter,
 
 @with_kw struct recipe
 	epochs::Array{Int64,1} = [1000]
-	N::Array{Int64,1} = [8000]
+	N::Array{Int64,1} = [10000]
 
-	θ::Float64=2000
+	θ::Float64=8
 	h::Float64=0.5
 	
 	s₋::Float64=-457.0
@@ -65,6 +65,7 @@ function relax_selection!(mutation_list::LinkedList{mutation}, new_s, sel_thresh
 
 		# Index to delete node
 		node=mutation_list.node.next;
+
 		while (node.next != mutation_list.node.next)
 			item        = node.data;
 
@@ -91,33 +92,31 @@ function freq_inbreed(sel::Float64,freq::Float64,h::Float64,F::Float64)
 	return (((1.0 - s) * (freq * freq + F * freq * (1.0 - freq))) + ((1.0 - h * s) * freq * (1.0 - freq) * (1.0 - F))) / (((1.0 - freq) * (1.0 - freq) + (1.0 - freq) * F * freq) + ((1.0 - h * s) * 2.0 * freq * (1.0 - freq) * (1.0 - F)) + ((1.0 - s) * (freq * freq + F * freq * (1.0 - freq))))
 end
 
-function add_mutation!(mutation_list::LinkedList{mutation},r::Ptr{gsl_rng},N::Float64,h::Float64,s::Float64,θ::Float64,freq::Float64,dfe::String,param_one::Float64,param_two::Float64,s_mult::Float64,n_anc::Int64,age::Int64,trajectories::Array{Int64,1},relax::Bool=false) 
+function add_mutation!(mutation_list::LinkedList{mutation},r::Ptr{gsl_rng},N::Float64,h::Float64,s::Float64,θ::Float64,freq::Float64,dfe::String,param_one::Float64,param_two::Float64,s_mult::Float64,n_anc::Int64,age::Int64,trajectories::Array{Int64,1},relax::Bool)
 
-	num_mut::Float64 = ran_poisson(r,θ/2.0)
+	num_mut::Int64 = Int(ran_poisson(r,θ/2.0))
 	count_mut::Int64 = length(mutation_list)
 
-	for x::Int64=1:num_mut
-
+	local s_value::Float64 = 0.0
+	@inbounds for x::Int64=1:num_mut
 		if dfe == "point"
-			s = s;
+			s_value = s;
 		elseif dfe == "gamma"
 			##Use this for gamma distribution in Boyko 2008:
 			gamma = ran_gamma(r, param_one, param_two * s_mult);
 			# note, this is scale for a Nanc=1000, using the boyko params
-			s = - gamma / (n_anc * 2);
+			s_value = - gamma / (n_anc * 2);
 		elseif dfe == "beta"
-			##Use this for gamma distribution in Boyko 2008:
 			gamma = ran_beta(r, param_one, param_two * s_mult);
-			# note, this is scale for a Nanc=1000, using the boyko params
-			s = - gamma / (n_anc * 2);
+			s_value = - gamma / (n_anc * 2);
 		end
 
-        count_mut += 1;
-        mut        = mutation(frequency = freq, h = h, s = s*2, count_samp = 0.0, age = age, num = count_mut, type=1)
+		count_mut += 1;
+		mut        = mutation(frequency = freq, h = h, s = s_value*2, count_samp = 0.0, age = age, num = count_mut, type=1)
 		push!(mutation_list,mut);
 		
 		if(!isempty(trajectories) && count_mut in trajectories)
-			i = findfirst(isequal(count_mut),trajectories);
+			i::Int64 = findfirst(isequal(count_mut),trajectories);
 			@printf(io, "%d\t%lf\n", trajectories[i], (1.0/N));
 		end
 	end
@@ -184,19 +183,37 @@ function burnin(param::recipe,r::Ptr{gsl_rng})
 	theoretical_sfs     = zeros(n_size,2);
 	number_of_mutations = 0;
 	
-	mutation_list = LinkedList{mutation}()
-
-	f(x=Float64,j=Int64) = f_of_q_lambda(x,j,n_size,s_size,sel,θ*2)
-	@time @inbounds for j::Int64=2:n_size
-		m = LinkedList{mutation}()
-		
-		res,err = quadgk(x->f(x,j),0,1)
+	mutation_list_burnin = LinkedList{mutation}()
+	# f_integral(x::Float64,j::Int64) = f_of_q_lambda(x,j,n_size,s_size,sel,θ*2)
+	@inbounds for j::Int64=2:n_size
+		#res,err = quadgk(x->f_of_q_lambda(x,j,n_size,s_size,sel,θ*2),0.0,1.0)
 		age = n_size * 10;
-		add_mutation!(mutation_list,r,Float64(n_size),h,s,θ,j/n_size,dfe,param_one,param_two,sel,n_anc,age,trajectories,relax);
-		# append!(mutation_list,m);
+		add_mutation!(mutation_list_burnin,r,Float64(n_size),h,sel,res,j/n_size,dfe,param_one,param_two,s_mult[1],n_anc,age,trajectories,relax);
 	end
 
-	return(mutation_list);
+	return(mutation_list_burnin);
+end
+
+function burnin(param::recipe, r::Ptr{gsl_rng})
+
+    @unpack N, θ, s, h, dfe, param_one, param_two, s_mult, n_anc, trajectories, relax = param
+
+    n_size::Int64 = N[1] - 1
+    s_size::Int64 = N[1] - 1
+    sel::Float64 = s[1]
+
+    theoretical_sfs = zeros(Float64, n_size, 2)
+    number_of_mutations::Int64 = 0
+
+    mutation_list_burnin = LinkedList{mutation}()
+
+    @inbounds for j::Int64 = 2:n_size
+        res, err = quadgk(x -> f_of_q_lambda(x, j, n_size, s_size, sel, θ * 2), 0.0, 1.0)
+        age::Int64 = n_size * 10
+        add_mutation!(mutation_list_burnin, r, Float64(n_size), h, sel, res, j / n_size, dfe, param_one, param_two, s_mult[1], n_anc, age, trajectories, relax)
+    end
+
+    return mutation_list_burnin
 end
 
 function f_of_q_lambda(x::Float64,j::Int64,N_burnin::Int64,sample_size::Int64,point_sel::Float64,theta::Float64)
@@ -209,6 +226,7 @@ function f_of_q_lambda(x::Float64,j::Int64,N_burnin::Int64,sample_size::Int64,po
 		sfs_function_term_two::Float64 = (2/(x*(1-x)));
 
 		binomial_value::Float64 = ran_binomial_pdf(j,x,sample_size);
+		# binomial_value::Float64 = pdf(Binomial(sample_size,x), j);
 
 		f = theta/2 * sfs_function_term_one * sfs_function_term_two * binomial_value;
 
@@ -218,7 +236,7 @@ function f_of_q_lambda(x::Float64,j::Int64,N_burnin::Int64,sample_size::Int64,po
 	return  f;
 end
 
-function sfs(mutation_list::LinkedList{mutation},r::Ptr{gsl_rng},sample_size::Int64)
+function fs(mutation_list::LinkedList{mutation},r::Ptr{gsl_rng},sample_size::Int64)
 
 	if(!isempty(mutation_list))
 
@@ -238,6 +256,7 @@ function sfs(mutation_list::LinkedList{mutation},r::Ptr{gsl_rng},sample_size::In
 			s           = item.s;
 
 			h           = item.h;
+
 			#samp_count = rand(Binomial(sample_size,freq));
 			samp_count = ran_binomial(r,freq,sample_size);
 			samp_freq = samp_count/sample_size;
@@ -309,17 +328,14 @@ function simulate(param::recipe, sample_size::Int64)
 		s_mult = s_mult;
 	end
 	
-	if nprocs() == 1
+	if Threads.nthreads() == 1
 		@printf "Demographic History (%i epochs)\n\n" events;
 		for e=1:events
 			@printf "Ne = %i\tgenerations = %i\tF = %lf\n" N[e] epochs[e] param.F[e];
 		end
 	end
 
-	mutation_list = LinkedList{mutation}();
-
-	if !burnin_period
-		# mutation_list = burnin(mutation_list,param);
+	if burnin_period
 		mutation_list = burnin(param,r);
 	else
 		mutation_list = LinkedList{mutation}();
@@ -333,14 +349,13 @@ function simulate(param::recipe, sample_size::Int64)
 		# Inbreeding Ne
 
 		N_F = N[e] / (1.0 + F[e]); 
-		if nprocs() == 0
+		if Threads.nthreads() == 1
 			@printf "Currently in epoch = %i ; Mutations before epoch's beginning = %i\n"  e length(mutation_list);
 		end
 
 		if epoch_relaxation[e]
-			if nprocs() == 0
-				printf("Relaxation in Epoch %i\n"
-					, e);
+			if Threads.nthreads() == 1
+				printf("Relaxation in Epoch %i\n", e);
 			end
 
 			relax_selection!(mutation_list, s_relaxation, s_relaxation_threshold, relaxation_type);
@@ -370,7 +385,7 @@ function simulate(param::recipe, sample_size::Int64)
 		close(io)
 	end
 
-	out = sfs(mutation_list,r,sample_size);
+	out = fs(mutation_list,r,sample_size);
 
 	return(out,hcat(l,f))
 end

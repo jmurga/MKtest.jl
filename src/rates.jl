@@ -146,18 +146,6 @@ Function to solve randomly *N* scenarios. The function will create *N* models, d
  - `DataFrame`: models solved.
  - `Output_file`: HDF5 file containing models solved and rates.
 """
-#=function rates(
-    param::parameters;
-    gH::Int64,
-    gL::Int64,
-    gam_flanking::Int64,
-    gam_dfe::Int64,
-    alpha::Vector{Float64} = [0.0, 0.9],
-    B_bins::Vector{Float64} = vcat(collect(0.1:0.025:0.975), 0.999),
-    iterations::Int64,
-    output::String,
-    basesize::Int64=10
-)=#
 function rates(
     param::parameters;
     gH::Vector{Int64},
@@ -183,20 +171,6 @@ function rates(
     @info "Creating priors distributions"
 
     # Parameters ranges
-    #=u_gh = gH[1]:gH[end]
-    u_gl = gL[1]:gL[end]
-    u_gam_flanking = gam_flanking[1]:gam_flanking[end]
-    u_gam_dfe = gam_dfe[1]:gam_dfe[end]
-    afac = -2:0.05:2
-    u_tot = alpha[1]:0.01:alpha[end]
-    u_low = 0.0:0.05:0.9
-
-    u_gh = Normal(gH,abs(gH/10))
-    u_gl = Normal(gL,abs(gL/10))
-    u_gam_flanking = Normal(gam_flanking,abs(gam_flanking/10))
-    u_gam_dfe = Normal(gam_dfe,abs(gam_dfe/10))
-    =#
-
     u_gh = Uniform(gH[1],gH[end])
     u_gl = Uniform(gL[1],gL[end])
     u_gam_flanking = Uniform(gam_flanking[1],gam_flanking[end])
@@ -204,32 +178,6 @@ function rates(
     afac  = Uniform(param.shape * 2^-2,param.shape * 2^2)
     u_tot = Uniform(alpha[1],alpha[end])
     u_low = ifelse(weak,0.0:0.05:1,[0])
-    # Parameters ranges
-
-    # u_gh = gH[1]:gH[end]
-    # u_gl = gL[1]:gL[end]
-    # u_gam_flanking = gam_flanking[1]:gam_flanking[end]
-    # u_gam_dfe = gam_dfe[1]:gam_dfe[end]
-    # afac = -2:0.05:2
-    # u_tot = alpha[1]:0.01:alpha[end]
-    # u_low = 0.0:0.05:1.0
-
-    # Priors
-    # priors = Vector{Float64}[]
-    # for i::Int64 = 1:iterations
-    #     push!(
-    #         priors,
-    #         [
-    #             rand(u_gh),
-    #             rand(u_gl),
-    #             rand(u_gam_flanking),
-    #             rand(u_gam_dfe),
-    #             shape * 2^rand(afac),
-    #             rand(u_tot),
-    #             rand(u_low),
-    #         ],
-    #     )
-    # end
 
     priors = Vector{Float64}[]
     for i::Int64 = 1:iterations

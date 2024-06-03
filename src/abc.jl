@@ -138,7 +138,7 @@ function read_gz(out_file::String)
 end
 
 function read_gz(out_file::Vector{String})
-    return ThreadsX.mapi(x->MKtest.read_gz(x),out_file)
+    return ThreadsX.mapi(x->read_gz(x),out_file)
 end
 
 
@@ -196,7 +196,8 @@ function summary_abc(posteriors::Vector{Matrix{Float64}}; stat::String = "Mode")
         df_quantiles = permutedims(string.(permutedims(string.(round.(df[df.Stats.==uppercasefirst(stat), 2:end],digits=3))),quantile_string))
         rename!(df_quantiles,c_names)
 
-        return df[df.Stats.==uppercasefirst(stat), 2:end], df_quantiles, df
+        # return df[df.Stats.==uppercasefirst(stat), 2:end], df_quantiles, df
+        return OrderedDict(:inference=>df[df.Stats.==uppercasefirst(stat), 2:end],:quantiles=>df_quantiles,:stats=>df)
 
     else
         df = DataFrame[]
@@ -230,20 +231,22 @@ function summary_abc(posteriors::Vector{Matrix{Float64}}; stat::String = "Mode")
 
         df_vcat = vcat(df...)
 
-        return  df_vcat[df_vcat.Stats.==uppercasefirst(stat), 2:end], df
+        # return  df_vcat[df_vcat.Stats.==uppercasefirst(stat), 2:end], df
+        return OrderedDict(:inference=>df[df.Stats.==uppercasefirst(stat), 2:end],:quantiles=> df_quantiles,:stats=>df)
+
     end
 end
 
 function summary_abc(posteriors::Vector{DataFrame}; stat::String = "Mode")
     @info "Computing statistics over posteriors distributions"
 
-    p_min = vcat(ThreadsX.map(x -> minimum.(eachcol(x))', posteriors)...)
-    p_max = vcat(ThreadsX.map(x -> maximum.(eachcol(x))', posteriors)...)
-    p_mean = vcat(ThreadsX.map(x -> mean.(eachcol(x))', posteriors)...)
+    p_min    = vcat(ThreadsX.map(x -> minimum.(eachcol(x))', posteriors)...)
+    p_max    = vcat(ThreadsX.map(x -> maximum.(eachcol(x))', posteriors)...)
+    p_mean   = vcat(ThreadsX.map(x -> mean.(eachcol(x))', posteriors)...)
     p_median = vcat(ThreadsX.map(x -> median.(eachcol(x))', posteriors)...)
-    p_mode = vcat(ThreadsX.map(get_mode, posteriors)...)
-    p_lower = vcat(ThreadsX.map(x -> hcat(q_lower.(eachcol(x))...), posteriors)...)
-    p_upper = vcat(ThreadsX.map(x -> hcat(q_upper.(eachcol(x))...), posteriors)...)
+    p_mode   = vcat(ThreadsX.map(get_mode, posteriors)...)
+    p_lower  = vcat(ThreadsX.map(x -> hcat(q_lower.(eachcol(x))...), posteriors)...)
+    p_upper  = vcat(ThreadsX.map(x -> hcat(q_upper.(eachcol(x))...), posteriors)...)
 
     if size(p_mean,2) != 12
         c_names = [:α_weak, :α_strong, :α, :γ₋, :β,:γ₊,:γ₊₊,:B]
@@ -278,7 +281,8 @@ function summary_abc(posteriors::Vector{DataFrame}; stat::String = "Mode")
         df_quantiles = permutedims(string.(permutedims(string.(round.(df[df.Stats.==uppercasefirst(stat), 2:end],digits=3))),quantile_string))
         rename!(df_quantiles,c_names)
 
-        return df[df.Stats.==uppercasefirst(stat), 2:end], df_quantiles, df
+        return OrderedDict(:inference=>df[df.Stats.==uppercasefirst(stat), 2:end],:quantiles=>df_quantiles,:stats=>df)
+        # return df[df.Stats.==uppercasefirst(stat), 2:end], df_quantiles, df
 
     else
         df = DataFrame[]
@@ -304,15 +308,15 @@ function summary_abc(posteriors::Vector{DataFrame}; stat::String = "Mode")
                     p_mode[i, :],
                     p_upper[i, :],
                     p_max[i, :],
-                )',
-        c_names
+                )',c_names
             )
             push!(df, hcat(stats, tmp))
         end
 
         df_vcat = vcat(df...)
 
-        return df_vcat[df_vcat.Stats.==uppercasefirst(stat), 2:end], df
+        return OrderedDict(:inference=>df_vcat[df_vcat.Stats.==uppercasefirst(stat), 2:end],:stats=>df_vcat)
+        # return df_vcat[df_vcat.Stats.==uppercasefirst(stat), 2:end], df
     end
 end
 
@@ -360,7 +364,7 @@ function abc(; output_folder::String,
 
     set_num_threads(nthreads_og)
 
-    return Dict("rejection"=>posteriors, "loclinear"=>posteriors_adjusted)
+    return OrderedDict("rejection"=>posteriors, "loclinear"=>posteriors_adjusted)
 end
 
 function normalise(x::Union{SubArray,Float64},y::SubArray)
