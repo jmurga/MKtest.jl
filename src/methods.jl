@@ -587,7 +587,39 @@ function read_clean_grapes(dofe::String,grapes_file::String,model::String)
     return(output)
 end
 
+"""
+    abcmk(param::parameters,
+          sfs::Vector,
+          divergence::Vector;
+          h5_file::String,
+          summstat_size::Int64,
+          output_folder::String,
+          alpha::Union{Nothing,Vector{Float64}} = nothing,
+          B_bins::Union{Nothing,Vector{Float64}} = nothing,
+          tol::Int64=1000,
+          abc_method::String="abcreg",
+          rm_summaries::Bool=true,
+          stat::String="mode") -> DataFrame
 
+Performs Approximate Bayesian Computation (ABC) using either regression adjustment (ABCreg) or a basic ABC method and returns a summary of the posterior distributions.
+
+# Arguments
+- `param::parameters`: The model parameters.
+- `sfs::Vector`: Site frequency spectrum data.
+- `divergence::Vector`: Divergence data.
+- `h5_file::String`: Path to the HDF5 file containing the data.
+- `summstat_size::Int64`: Size of the summary statistics.
+- `output_folder::String`: Folder where outputs will be stored.
+- `alpha::Union{Nothing,Vector{Float64}}`: Optional alpha values for the summary statistics function. Default is `nothing`.
+- `B_bins::Union{Nothing,Vector{Float64}}`: Optional B bins for the summary statistics function. Default is `nothing`.
+- `tol::Int64`: Number of reatained values in ABC. Defining the olerance level for the ABC method. Default is `1000`.
+- `abc_method::String`: Method to use for ABC, either "abcreg" or another method. Default is `"abcreg"`.
+- `rm_summaries::Bool`: Whether to remove summaries after computation. Default is `true`.
+- `stat::String`: The statistic to summarize the posteriors, such as "mode". Default is `"mode"`.
+
+# Returns
+- `DataFrame`: A DataFrame summarizing the posterior distributions.
+"""
 function abcmk(
     param::parameters,
     sfs::Vector,
@@ -606,13 +638,16 @@ function abcmk(
     summ_stats = summary_statistics(param,sfs,divergence,h5_file=h5_file,output_folder=output_folder,summstat_size=summstat_size,alpha=alpha,B_bins=B_bins);
 
     if lowercase(abc_method) == "abcreg"
-        posteriors = ABCreg(output_folder=output_folder,S=length(param.dac),tol=tol/summstat_size,rm_summaries=true);
+        posteriors = ABCreg(output_folder=output_folder,S=length(param.dac),tol=tol,rm_summaries=true);
     else
-        posteriors_adj_unadj = abc(output_folder=output_folder,S=length(param.dac),tol=tol/summstat_size,rm_summaries=true);
+        posteriors_adj_unadj = MKtest.abc(output_folder=output_folder,S=length(param.dac),tol=tol,rm_summaries=true);
         posteriors = posteriors_adj_unadj["loclinear"]
+        if all(isnan.(posteriors[1][:,1]))
+            @. replace!(posteriors, NaN=>0)
+        end
     end
 
-    df_abcmk = summary_abc(posteriors,stat="mode")
+    df_abcmk = summary_abc(posteriors,stat=stat)
 
     return df_abcmk
 end

@@ -32,7 +32,7 @@ function ABCreg(;
     output_folder::String,
     S::Int64,
     P::Int64 = 12,
-    tol::Float64,
+    tol::Int64,
     rm_summaries::Bool = false,
     abcreg::Union{Nothing,String}=nothing,
     T::Bool=false,
@@ -56,14 +56,15 @@ function ABCreg(;
 
     # Creating output names
     out = output_folder .* "/out_" .* sort!(string.(1:size(a_file, 1)))
-
+    tol_abcreg = tol./countlines.(sum_file)
     @info "Running ABCreg"
     # Using mapi instead map to limit tasks. Bash interaction not working as expected
     ThreadsX.mapi(
-        (x, y, z) -> run(`$abcreg -d $x -p $y -P $P -S $S -t $tol -b $z`),
+        (x, y, z, t) -> run(`$abcreg -d $x -p $y -P $P -S $S -t $t -b $z`),
         a_file,
         sum_file,
         out,
+        tol_abcreg,
         ntasks = Threads.nthreads(),
     )
 
@@ -326,7 +327,7 @@ end
 function abc(; output_folder::String,
     S::Int64,
     P::Int64 = 12,
-    tol::Float64,
+    tol::Int64,
     transformation::String = "none",
     kernel::String = "epanechnikov",
     rm_summaries::Bool = false
@@ -440,7 +441,7 @@ function undo_tangent_transfromation(x::Float64, minval::Float64, maxval::Float6
     return (minval - 1e-4) + (2 / π) * ((maxval + 1e-4) - (minval - 1e-4)) * atan(exp(y))
 end
 
-function abc_loclinear(target_file::String,param_summaries_file::String;P::Int64,tol::Float64,transformation::String="none",kernel::String= "epanechnikov")
+function abc_loclinear(target_file::String,param_summaries_file::String;P::Int64,tol::Int64,transformation::String="none",kernel::String= "epanechnikov")
 
     # Reading into matrix using Tables.matrix
     target = vec(CSV.read(target_file,matrix,ntasks=1,header=false))
@@ -466,7 +467,7 @@ function abc_loclinear(target_file::String,param_summaries_file::String;P::Int64
 
     ## Scale and euclidean distance
     ## #########################
-    target_scaled, sumstat_accepted, sumstat_scaled, param_accepted, dist_accepted, wts = rejection(vec(target),sumstat,param,tol,kernel)
+    target_scaled, sumstat_accepted, sumstat_scaled, param_accepted, dist_accepted, wts = rejection(vec(target),sumstat,param,tol/size(summaries,1),kernel)
     num_accepted = size(sumstat_accepted,1)
 
     ## Transform parameters
