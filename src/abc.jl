@@ -91,7 +91,7 @@ function ABCreg(;
     if rm_summaries
         rm.(
             filter(
-                x -> occursin("summstat", x) || occursin("alphas_", x),
+                x -> occursin("summstat", x) || occursin("alphas_", x) || occursin("out_", x),
                 readdir(output_folder, join = true),
             )
         )
@@ -351,7 +351,7 @@ function abc(; output_folder::String,
 
     @info "Running ABC"
     # Using mapi instead of map to limit tasks. Bash interaction not working as expected
-    posteriors, posteriors_adjusted = unzip(ThreadsX.map((x, y) -> MKtest.abc_loclinear(x,y, P=P, tol=tol, transformation=transformation, kernel=kernel), targets, param_summaries))
+    posteriors, posteriors_adjusted = unzip(ThreadsX.map((x, y) -> abc_loclinear(x,y, P=P, tol=tol, transformation=transformation, kernel=kernel), targets, param_summaries))
 
     @info "Filtering posterior distributions"
     # Remove if some file wasn't computed

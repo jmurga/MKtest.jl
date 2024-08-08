@@ -638,9 +638,9 @@ function abcmk(
     summ_stats = summary_statistics(param,sfs,divergence,h5_file=h5_file,output_folder=output_folder,summstat_size=summstat_size,alpha=alpha,B_bins=B_bins);
 
     if lowercase(abc_method) == "abcreg"
-        posteriors = ABCreg(output_folder=output_folder,S=length(param.dac),tol=tol,rm_summaries=true);
+        posteriors = ABCreg(output_folder=output_folder,S=length(param.dac),tol=tol,rm_summaries=rm_summaries);
     else
-        posteriors_adj_unadj = abc(output_folder=output_folder,S=length(param.dac),tol=tol,rm_summaries=true);
+        posteriors_adj_unadj = abc(output_folder=output_folder,S=length(param.dac),tol=tol,rm_summaries=rm_summaries);
         posteriors = posteriors_adj_unadj["loclinear"]
         if all(isnan.(posteriors[1][:,1]))
             @. replace!(posteriors, NaN=>0)
