@@ -100,13 +100,16 @@ function solve_rates(param::parameters, binom::SparseMatrixCSC{Float64,Int64})
 
     ## Polymorphism
     neut::Vector{Float64}  = sfs_neut(param, binom)
-    sel_h::Vector{Float64} = if isinf(exp(gH * 2))
-        sfs_pos_float(param, gH, ppos_h, binom)
-    else
-        sfs_pos(param, gH, ppos_h, binom)
-    end
+    sel_h::Vector{Float64} = sfs_pos(param, gH, ppos_h, binom)
+    sel_l::Vector{Float64} = sfs_pos(param, gL, ppos_l, binom)
 
-    sel_l::Vector{Float64}   = sfs_pos(param, gL, ppos_l, binom)
+    # sel_h::Vector{Float64} = if isinf(exp(gH * 2))
+    #     sfs_pos_float(param, gH, ppos_h, binom)
+    # else
+    #     sfs_pos(param, gH, ppos_h, binom)
+    # end
+
+    # sel_l::Vector{Float64}   = sfs_pos(param, gL, ppos_l, binom)
     sel_neg::Vector{Float64} = sfs_neg(param, ppos_l + ppos_h, binom)
 
     cumulative_vector!(neut);

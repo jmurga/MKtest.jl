@@ -44,7 +44,7 @@ Function to estimate α(x).
  - `Vector{Float64}: α(x) estimations.
 """
 function α_x(sfs::Vector, divergence::Vector; cutoff::Vector{Float64}=[0.0,1.0],cumulative::Bool = true)
-    return ThreadsX.mapi((x,y) -> MKtest.α_x(x,y,cutoff=cutoff,cumulative=cumulative),sfs,divergence)
+    return ThreadsX.mapi((x,y) -> α_x(x,y,cutoff=cutoff,cumulative=cumulative),sfs,divergence)
 end
 
 """
@@ -281,14 +281,14 @@ function fwwMK(
     @unpack isolines,n,nn,cutoff= param;
 
     # DAC to freqs
-    if(sfs_tmp[1,1] >= 1)
+    if(sfs[1,1] >= 1)
         s_size = ifelse(isolines,n,nn)
         freqs = collect(1:s_size-1) ./ s_size
-        sfs_tmp[:,1] .= freqs[(freqs .>= cutoff[1]) .& (freqs .<= cutoff[2])]
+        sfs[:,1] .= freqs
     end
 
-    ps = sum(sfs_tmp[:, 2])
-    pn = sum(sfs_tmp[:, 3])
+    ps = sum(sfs[:, 2])
+    pn = sum(sfs[:, 3])
     dn = divergence[1]
     ds = divergence[2]
 
@@ -296,10 +296,9 @@ function fwwMK(
     ### Estimating slightly deleterious with pn/ps ratio
     s_size = ifelse(isolines,n,nn)
 
-    sfs_tmp[:, 1] = sfs_tmp[:, 1] ./ s_size
-    flt_inter = (sfs_tmp[:, 1] .>= threshold) .& (sfs_tmp[:, 1] .<= 1)
-    pn_inter = sum(sfs_tmp[flt_inter, 2])
-    ps_inter = sum(sfs_tmp[flt_inter, 3])
+    flt_inter = (sfs[:, 1] .>= threshold) .& (sfs[:, 1] .<= 1)
+    pn_inter = sum(sfs[flt_inter, 2])
+    ps_inter = sum(sfs[flt_inter, 3])
 
 
     alpha = round(1 - ((pn_inter / ps_inter) * (ds / dn)), digits = 3)
@@ -634,13 +633,14 @@ function abcmk(
     rm_summaries::Bool=true,
     stat::String="mode",
 )
+    @assert abc_method ∈ ["abcreg","abc"] "Please select ABCreg or abc from R package"
 
     summ_stats = summary_statistics(param,sfs,divergence,h5_file=h5_file,output_folder=output_folder,summstat_size=summstat_size,alpha=alpha,B_bins=B_bins);
 
     if lowercase(abc_method) == "abcreg"
         posteriors = ABCreg(output_folder=output_folder,S=length(param.dac),tol=tol,rm_summaries=true);
     else
-        posteriors_adj_unadj = MKtest.abc(output_folder=output_folder,S=length(param.dac),tol=tol,rm_summaries=true);
+        posteriors_adj_unadj = abc(output_folder=output_folder,S=length(param.dac),tol=tol,rm_summaries=true);
         posteriors = posteriors_adj_unadj["loclinear"]
         if all(isnan.(posteriors[1][:,1]))
             @. replace!(posteriors, NaN=>0)

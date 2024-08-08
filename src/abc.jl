@@ -351,7 +351,7 @@ function abc(; output_folder::String,
 
     @info "Running ABC"
     # Using mapi instead of map to limit tasks. Bash interaction not working as expected
-    posteriors, posteriors_adjusted = unzip(ThreadsX.map((x, y) -> abc_loclinear(x,y, P=P, tol=tol, transformation=transformation, kernel=kernel), targets, param_summaries))
+    posteriors, posteriors_adjusted = unzip(ThreadsX.map((x, y) -> MKtest.abc_loclinear(x,y, P=P, tol=tol, transformation=transformation, kernel=kernel), targets, param_summaries))
 
     @info "Filtering posterior distributions"
     # Remove if some file wasn't computed
@@ -364,6 +364,15 @@ function abc(; output_folder::String,
     end
 
     set_num_threads(nthreads_og)
+
+    if P != 12
+        c_names = [:α_weak, :α_strong, :α, :γ₋, :β,:γ₊,:γ₊₊,:B]
+    else
+        c_names = [:α_weak, :α_strong, :α,:ωₐ_weak,:ωₐ_strong,:ωₐ,:ωₙₐ,:γ₋,:β,:γ₊,:γ₊₊,:B]
+    end
+
+    posteriors = map(x -> DataFrame(x,c_names),posteriors)
+    posteriors_adjusted = map(x -> DataFrame(x,c_names),posteriors_adjusted)
 
     return OrderedDict("rejection"=>posteriors, "loclinear"=>posteriors_adjusted)
 end

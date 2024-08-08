@@ -51,6 +51,7 @@ Expected rate of positive selected allele frequency reduce by background selecti
 # Return:
  - `Array{Float64}`: expected positive selected alleles frequencies.
 """
+#
 function sfs_pos(
     param::parameters,
     s::Int64,
@@ -68,26 +69,11 @@ function sfs_pos(
         xa1 = 0:NN2
         xa2 = @. xa1 / NN2
 
-        # Solving float precision performance using exponential rule. Only one BigFloat estimation.
-        s_corrected = s * param.B
-
-        s_exp1 = exp(s_corrected * 2)
-        s_exp2 = exp(s_corrected * -2)
-
-        function positive_sfs(
-            i::Float64,
-            g1::Float64 = s_exp1,
-            g2::Float64 = s_exp2,
-            p::Float64 = p,
-        )
-            Float64(p * 0.5 * (g1 * (1 - g2^(1.0 - i)) / ((g1 - 1.0) * i * (1.0 - i))))
-        end
-
+        # Solving float precision performance using exponential rule.
         # Original
         # p*0.5*(ℯ^(2*s_corrected)*(1-ℯ^(-2.0*s_corrected*(1.0-i)))/((ℯ^(2*s_corrected)-1.0)*i*(1.0-i)))
-
         # Allocating outputs
-        solved_positive_sfs::Vector{Float64} = (1.0 / (NN2)) * (positive_sfs.(xa2))
+        solved_positive_sfs::Vector{Float64} = @. (1.0 / (NN2)) * (p * 0.5 * positive_sfs(xa2,s))
         replace!(solved_positive_sfs, NaN => 0.0)
 
         out::Vector{Float64} =
@@ -97,47 +83,109 @@ function sfs_pos(
     return out
 end
 
-function sfs_pos_float(
-    param::parameters,
-    s::Int64,
-    p::Float64,
-    binom::SparseMatrixCSC{Float64,Int64},
-)
-    if p == 0.0
-        out = zeros(Float64, param.nn + 1)
-        out = out[2:(end-1)]
+function positive_sfs(x::Float64, gam::Int64)
+
+    if isinf(exp(gam * 2))
+        # For large gam, approximate to avoid overflow
+        numerator = 1 - exp(-2 * gam * (1 - x))
+        denominator = x * (1 - x)
+        return (numerator / denominator)
     else
-        red_plus = Φ(param, s)
-
-        # Solving sfs
-        NN2 = ceil(Int,param.NN * param.B)
-        xa1 = 0:NN2
-        xa2 = @. xa1 / NN2
-
-        s_corrected = s * param.B
-        s_exp1::Quadmath.Float128 = exp(Quadmath.Float128(s_corrected * 2))
-        s_exp2::Quadmath.Float128 = exp(Quadmath.Float128(s_corrected * -2))
-
-        function positive_sfs(
-            i::Float64,
-            g1::Quadmath.Float128 = s_exp1,
-            g2::Quadmath.Float128 = s_exp2,
-            p::Float64 = p,
-        )
-            Float64(p * 0.5 * (g1 * (1 - g2^(1.0 - i)) / ((g1 - 1.0) * i * (1.0 - i))))
-        end
-
-        # Allocating outputs
-        solved_positive_sfs::Vector{Float64} = (1.0 / (NN2)) * (positive_sfs.(xa2))
-        replace!(solved_positive_sfs, NaN => 0.0)
-        out::Vector{Float64} =
-            (param.θ_coding) * red_plus * 0.75 * (binom * solved_positive_sfs)
-        # out = out[2:end-1]
-
+        exp_2gam = exp(2 * gam)
+        numerator = exp_2gam * (1 - exp(-2 * gam * (1 - x)))
+        denominator = (exp_2gam - 1) * x * (1 - x)
+        return (numerator / denominator)
     end
-
-    return out
 end
+
+
+# function sfs_pos(
+#     param::parameters,
+#     s::Int64,
+#     p::Float64,
+#     binom::SparseMatrixCSC{Float64,Int64},
+# )
+#     if p == 0.0
+#         out = zeros(Float64, param.nn + 1)
+#         out = out[2:(end-1)]
+#     else
+#         red_plus = Φ(param, s)
+
+#         # Solving sfs
+#         NN2 = ceil(Int,param.NN * param.B)
+#         xa1 = 0:NN2
+#         xa2 = @. xa1 / NN2
+
+#         # Solving float precision performance using exponential rule. Only one BigFloat estimation.
+#         s_corrected = s * param.B
+
+#         s_exp1 = exp(s_corrected * 2)
+#         s_exp2 = exp(s_corrected * -2)
+
+#         function positive_sfs(
+#             i::Float64,
+#             g1::Float64 = s_exp1,
+#             g2::Float64 = s_exp2,
+#             p::Float64 = p,
+#         )
+#             Float64(p * 0.5 * (g1 * (1 - g2^(1.0 - i)) / ((g1 - 1.0) * i * (1.0 - i))))
+#         end
+
+#         # Original
+#         # p*0.5*(ℯ^(2*s_corrected)*(1-ℯ^(-2.0*s_corrected*(1.0-i)))/((ℯ^(2*s_corrected)-1.0)*i*(1.0-i)))
+
+#         # Allocating outputs
+#         solved_positive_sfs::Vector{Float64} = (1.0 / (NN2)) * (positive_sfs.(xa2))
+#         replace!(solved_positive_sfs, NaN => 0.0)
+
+#         out::Vector{Float64} =
+#             (param.θ_coding) * red_plus * 0.75 * (binom * solved_positive_sfs)
+#     end
+
+#     return out
+# end
+
+# function sfs_pos_float(
+#     param::parameters,
+#     s::Int64,
+#     p::Float64,
+#     binom::SparseMatrixCSC{Float64,Int64},
+# )
+#     if p == 0.0
+#         out = zeros(Float64, param.nn + 1)
+#         out = out[2:(end-1)]
+#     else
+#         red_plus = Φ(param, s)
+
+#         # Solving sfs
+#         NN2 = ceil(Int,param.NN * param.B)
+#         xa1 = 0:NN2
+#         xa2 = @. xa1 / NN2
+
+#         s_corrected = s * param.B
+#         s_exp1::Quadmath.Float128 = exp(Quadmath.Float128(s_corrected * 2))
+#         s_exp2::Quadmath.Float128 = exp(Quadmath.Float128(s_corrected * -2))
+
+#         function positive_sfs(
+#             i::Float64,
+#             g1::Quadmath.Float128 = s_exp1,
+#             g2::Quadmath.Float128 = s_exp2,
+#             p::Float64 = p,
+#         )
+#             Float64(p * 0.5 * (g1 * (1 - g2^(1.0 - i)) / ((g1 - 1.0) * i * (1.0 - i))))
+#         end
+
+#         # Allocating outputs
+#         solved_positive_sfs::Vector{Float64} = (1.0 / (NN2)) * (positive_sfs.(xa2))
+#         replace!(solved_positive_sfs, NaN => 0.0)
+#         out::Vector{Float64} =
+#             (param.θ_coding) * red_plus * 0.75 * (binom * solved_positive_sfs)
+#         # out = out[2:end-1]
+
+#     end
+
+#     return out
+# end
 
 ######Slightly deleterious######
 """
@@ -308,7 +356,7 @@ end
 Project SFS to smaller sample size following DADI and moments implementation
 
 # Arguments
- - `sfs::Matrix{Float64}`: SFS parsed from MKtest.parse_sfs
+ - `sfs::Matrix{Float64}`: SFS parsed from parse_sfs
  - `n::Int64`: new sample sample size
 # Output:
  - `Vector{Float64}`: projected SFS.
