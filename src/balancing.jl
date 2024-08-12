@@ -46,13 +46,18 @@ function parse_private_share(param::parameters;
             push!(out, tmp)
         end
 
-        rₙ, rₛ = unzip(map(i -> get_r_s(i,cutoff,private_columns),out))
-        sₙ, sₛ = unzip(map(i -> get_r_s(i,cutoff,shared_columns),out))
+        private = map(i -> get_r_s(i,cutoff,private_columns),out)
+        shared = map(i -> get_r_s(i,cutoff,shared_columns),out)
+        r_s = Vector{Vector{Int64}}(undef, size(gene_matrix, 1))
+        for i=1:size(gene_matrix,1)
+            r_s[i] = vcat(private[i],shared[i])
+        end
     else
-        rₙ, rₛ  = get_r_s(df, cutoff, private_columns)
-        sₙ, sₛ  = get_r_s(df, cutoff, shared_columns)
+        rₙ, rₛ  =   get_r_s(df, cutoff, private_columns)
+        sₙ, sₛ  =   get_r_s(df, cutoff, shared_columns)
+        r_s = [rₙ,rₛ,sₙ,sₛ]
     end
-    return ([rₙ,rₛ,sₙ,sₛ])
+    return (r_s)
 end
 
 function get_r_s(
@@ -67,17 +72,17 @@ function get_r_s(
     pn = vcat(g.(tmp[:, 1])...)
     ps = vcat(g.(tmp[:, 2])...)
 
-    pn = pn[pn.!=0]
-    ps = ps[ps.!=0]
+    # pn = pn[pn.!=0]
+    # ps = ps[ps.!=0]
     
     
     pn = @. ifelse(pn > 0.5, 1 - pn, pn)
     ps = @. ifelse(ps > 0.5, 1 - ps, ps)
 
-    pn = sum((pn.>=cutoff[1]) .& (pn.<=cutoff[2]))
-    ps = sum((ps.>=cutoff[1]) .& (ps.<=cutoff[2]))
+    pn = sum((pn.> cutoff[1]) .& (pn.<=cutoff[2]))
+    ps = sum((ps.> cutoff[1]) .& (ps.<=cutoff[2]))
 
-    return(pn,ps)
+    return [pn,ps]
 end
 
 """
@@ -105,30 +110,20 @@ end
 """
     α_b estimation from Vivak et al. (2022)
 """
-function α_b(r_s::Vector)
-    
-    rₙ,rₛ,sₙ,sₛ = r_s
+function α_b(r_s::Vector{Int64})
 
-    Z = z.(rₙ,rₛ,sₙ,sₛ)
+    out = ThreadsX.map(x -> α_b(x),r_s)
+    out = vcat(out...)
+    return out
 
-    ci = ThreadsX.map((x,y,z,v) -> bootstrapper(x,y,z,v) ,rₙ,rₛ,sₙ,sₛ)
-    ci = vcat(ci...)
-
-    αᵦ = @. ifelse(Z > 1, 1 - (1 / Z), 0)
-    α_low = @. ifelse(ci.CI_low > 1, 1 - (1 / ci.CI_low), 0)
-    α_high = @. ifelse(ci.CI_high > 1, 1 - (1 / ci.CI_high), 0)
-
-    pnᵦ = @. ifelse(αᵦ != 0, αᵦ * sₙ, 0)
-
-    out = DataFrame(:Z=>Z,:Z_low=>ci.CI_low,:Z_high=>ci.CI_high,:αᵦ=>αᵦ,:α_low=>α_low,:α_high=>α_high,:pnᵦ=>pnᵦ,:rₙ=>rₙ,:rₛ=>rₛ,:sₙ=>sₙ,:sₛ=>sₛ,:variance=>ci.variance)
-    return(out)
 end
+
 
 """
     Z estimation from Vivak et al. (2022)
 """
-function z(rₙ::Int64,rₛ::Int64,sₙ::Int64,sₛ::Int64)
-
+function z(r_s::Vector{Int64})
+    rₙ,rₛ,sₙ,sₛ = r_s
     z = if (sₛ>0) & (rₙ>0) & (rₛ>0)
         (sₙ/sₛ)/(rₙ/rₛ)
     else
@@ -138,12 +133,10 @@ function z(rₙ::Int64,rₛ::Int64,sₙ::Int64,sₛ::Int64)
     return(z)
 end
 
-"""
-    Bootstrap z
-"""
-function bootstrapper(rₙ::Int64,rₛ::Int64,sₙ::Int64,sₛ::Int64)
+function bootstrapper(r_s::Vector{Int64})
 
-    total_snps=rₙ+rₛ+sₙ+sₛ
+    rₙ,rₛ,sₙ,sₛ = r_s
+    total_snps=sum(r_s)
 
     b_z_list = zeros(1000)
 
@@ -162,9 +155,9 @@ function bootstrapper(rₙ::Int64,rₛ::Int64,sₙ::Int64,sₛ::Int64)
     end
 
     sort!(b_z_list)
-    lp = (b_z_list[250])
-    up = (b_z_list[750])
-    v  = (var(b_z_list))
+    lp = b_z_list[250]
+    up = b_z_list[750]
+    v  = var(b_z_list)
 
     out = DataFrame(:variance=>v,:CI_low=>lp,:CI_high=>up)
     return(out)
