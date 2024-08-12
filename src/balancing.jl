@@ -55,7 +55,7 @@ function parse_private_share(param::parameters;
     else
         rₙ, rₛ  =   get_r_s(df, cutoff, private_columns)
         sₙ, sₛ  =   get_r_s(df, cutoff, shared_columns)
-        r_s = [[rₙ,rₛ,sₙ,sₛ]]
+        r_s = [rₙ,rₛ,sₙ,sₛ]
     end
     return (r_s)
 end
@@ -90,18 +90,20 @@ end
 """
 function α_b(r_s::Vector{Int64})
     
-    @info "Estimating αᵦ"
-    Z = z.(r_s)
-    @info "Estimating confidence intervals"
-    ci = bootstrapper.(r_s)
+    rₙ,rₛ,sₙ,sₛ = r_s
 
-    αᵦ = @. ifelse(Z > 1, 1 - (1 / Z), 0)
-    α_low = @. ifelse(ci.CI_low > 1, 1 - (1 / ci.CI_low), 0)
-    α_high = @. ifelse(ci.CI_high > 1, 1 - (1 / ci.CI_high), 0)
+    @info "Estimating αᵦ"
+    Z = z(r_s)
+    @info "Estimating confidence intervals"
+    ci = bootstrapper(r_s)
+
+    αᵦ = ifelse(Z > 1, 1 - (1 / Z), 0)
+    α_low = ifelse(ci[2] > 1, 1 - (1 / ci[2]), 0)
+    α_high = ifelse(ci[end] > 1, 1 - (1 / ci[end]), 0)
 
     pnᵦ = @. ifelse(αᵦ != 0, αᵦ * sₙ, 0)
 
-    out = DataFrame(:Z=>Z,:αᵦ=>αᵦ,:α_low=>α_low,:α_high=>α_high,:pnᵦ=>pnᵦ,:rₙ=>rₙ,:rₛ=>rₛ,:sₙ=>sₙ,:sₛ=>sₛ,:variance=>ci.variance)
+    out = DataFrame(:Z=>Z,:αᵦ=>αᵦ,:α_low=>α_low,:α_high=>α_high,:pnᵦ=>pnᵦ,:rₙ=>rₙ,:rₛ=>rₛ,:sₙ=>sₙ,:sₛ=>sₛ,:variance=>ci[1])
     return(out)
 end
 
@@ -157,6 +159,7 @@ function bootstrapper(r_s::Vector{Int64})
     up = b_z_list[750]
     v  = var(b_z_list)
 
-    out = DataFrame(:variance=>v,:CI_low=>lp,:CI_high=>up)
+    # out = DataFrame(:variance=>v,:CI_low=>lp,:CI_high=>up)
+    out = vcat(v,lp,up)
     return(out)
 end
