@@ -112,7 +112,10 @@ end
 """
 function α_b(r_s::Vector)
 
-    out = ThreadsX.map(x -> α_b(x),r_s)
+    @info "Estimating αᵦ"
+    @suppress begin
+        out = ThreadsX.map(x -> MKtest.α_b(x),r_s)
+    end
     out = vcat(out...)
     return out
 
