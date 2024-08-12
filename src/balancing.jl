@@ -55,7 +55,7 @@ function parse_private_share(param::parameters;
     else
         rₙ, rₛ  =   get_r_s(df, cutoff, private_columns)
         sₙ, sₛ  =   get_r_s(df, cutoff, shared_columns)
-        r_s = [rₙ,rₛ,sₙ,sₛ]
+        r_s = [[rₙ,rₛ,sₙ,sₛ]]
     end
     return (r_s)
 end
@@ -90,12 +90,10 @@ end
 """
 function α_b(r_s::Vector{Int64})
     
-    rₙ,rₛ,sₙ,sₛ = r_s
-
     @info "Estimating αᵦ"
-    Z = z.(rₙ,rₛ,sₙ,sₛ)
+    Z = z.(r_s)
     @info "Estimating confidence intervals"
-    ci = bootstrapper(rₙ,rₛ,sₙ,sₛ)
+    ci = bootstrapper.(r_s)
 
     αᵦ = @. ifelse(Z > 1, 1 - (1 / Z), 0)
     α_low = @. ifelse(ci.CI_low > 1, 1 - (1 / ci.CI_low), 0)
