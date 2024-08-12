@@ -113,8 +113,8 @@ end
 function α_b(r_s::Vector)
 
     @info "Estimating αᵦ"
-    @suppress begin
-        out = ThreadsX.map(x -> MKtest.α_b(x),r_s)
+    out = @suppress begin
+        ThreadsX.map(x -> MKtest.α_b(x),r_s[1:10])
     end
     out = vcat(out...)
     return out
