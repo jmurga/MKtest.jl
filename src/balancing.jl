@@ -110,7 +110,7 @@ end
 """
     α_b estimation from Vivak et al. (2022)
 """
-function α_b(r_s::Vector{Int64})
+function α_b(r_s::Vector)
 
     out = ThreadsX.map(x -> α_b(x),r_s)
     out = vcat(out...)
