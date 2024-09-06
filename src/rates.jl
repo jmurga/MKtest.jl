@@ -178,7 +178,11 @@ function rates(
     u_gl = Uniform(gL[1],gL[end])
     u_gam_flanking = Uniform(gam_flanking[1],gam_flanking[end])
     u_gam_dfe = Uniform(gam_dfe[1],gam_dfe[end])
-    afac  = Uniform(param.shape * 2^-2,param.shape * 2^2)
+
+    afac  = Uniform(0.5 * 2^-4,0.5 * 2^4)
+
+    # afac  = Uniform(0.5,4)
+
     u_tot = Uniform(alpha[1],alpha[end])
     u_low = ifelse(weak,0.0:0.05:1,[0])
 

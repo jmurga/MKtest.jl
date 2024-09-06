@@ -144,6 +144,7 @@ function sampling_summaries(
     sel::SharedMatrix,
     dsdn::SharedMatrix,
     output::String,
+    summstat_size::Int64,
 )
     ds = @view dsdn[:, 1]
     dn = @view dsdn[:, 2]
@@ -161,19 +162,28 @@ function sampling_summaries(
     expected_pn, expected_ps = poisson_polymorphism(fs, permutedims(neut), permutedims(sel))
     # expected_pn, expected_ps = poisson_polymorphism(fs,d[2:3],permutedims(neut), permutedims(sel))
 
+    pn_ps = expected_pn' ./ expected_ps'
+
     ## Alpha from expected values. Used as summary statistics
     α_summaries = @. round(1 - ((expected_ds / expected_dn) * (expected_pn / expected_ps)'), digits = 5)
 
     # if length(d) == 1
     if any(isnan.(ω))
-        expected_values = hcat(round.(α, digits = 5), gn, sh, gH, gL, B, α_summaries)
+        expected_values = hcat(round.(α, digits = 5), gn, sh, gL, gH, B, α_summaries)
     else
         expected_values = hcat(round.(α, digits = 5),round.(ω, digits = 5), gn, sh, gL, gH, B, α_summaries)
     end
 
     expected_values = filter_expected(expected_values)
 
+    # @show size(expected_values,1)
+    # @show size(models,1)
+    if size(expected_values,1) > summstat_size
+        expected_values = @view expected_values[sample(axes(expected_values,1),summstat_size),:]
+    end
+    # @show size(expected_values,1)
     write_files(expected_values, output)
+
 end
 
 """
@@ -220,7 +230,7 @@ function summary_statistics(
     end
 
     # Open rates
-    @info "Opening and random sampling $summstat_size expected SFS and fixation rates"
+    @info "Opening and random sampling expected SFS and fixation rates"
     string_cutoff =
         "cutoff=[" * string(param.cutoff[1]) * "," * string(param.cutoff[end]) * "]"
     h = jldopen(h5_file)
@@ -243,23 +253,19 @@ function summary_statistics(
 
     @assert length(idx) >= summstat_size "Check the filters or increase the number of rates solutions"
 
-    sampled_idx = sample(idx,summstat_size;replace=true)
+    # Increasing manually the summstat_size to ensure we retrieved the input summaries size
+    increased_summstat = 1 * summstat_size
 
-    @assert length(sampled_idx) >= summstat_size "Check the filters or increase the number of rates solutions"
+    sampled_idx = sample(idx, increased_summstat;replace=true)
+
+    @assert length(sampled_idx) >=  increased_summstat "Check the filters or increase the number of rates solutions"
 
     # Convert random models to solve to a SharedMatrix. Only reading shouldn't generate race-condition
     models = SharedMatrix(Array(view(tmp["models"], sampled_idx, :)))
     dsdn   = SharedMatrix(tmp["dsdn"][sampled_idx, :])
 
-    # Filtering polymorphic rate by dac
-    #=n = hcat(map(x -> view(tmp["neut"][x], :), param.dac)...)
-    s = hcat(map(x -> view(tmp["sel"][x], :), param.dac)...)
-
-    neut = SharedMatrix(n[sampled_idx, :])
-    sel = SharedMatrix(s[sampled_idx, :])=#
-
-    neut = SharedMatrix(zeros(summstat_size,length(param.dac)))
-    sel = SharedMatrix(zeros(summstat_size,length(param.dac)))
+    neut = SharedMatrix(zeros(increased_summstat,length(param.dac)))
+    sel = SharedMatrix(zeros(increased_summstat,length(param.dac)))
 
     for (i,v) in enumerate(param.dac)
         neut[:,i] .= view(tmp["neut"][v],sampled_idx,:)
@@ -269,11 +275,11 @@ function summary_statistics(
     # Making summaries
     summ_output = output_folder .* "/summstat_" .* string.(1:size(sfs_p, 1)) .* ".txt"
 
-    @info "Sampling and writting summary statistics at $output_folder"
+    @info "Estimating and writting summary statistics at $output_folder"
 
     # 20 threads: case + control ~ 25GB
     expected_values = ThreadsX.map(
-        (x, y, z) -> sampling_summaries(models, x, y, neut, sel, dsdn, z),
+        (x, y, z) -> sampling_summaries(models, x, y, neut, sel, dsdn, z, summstat_size),
         sfs_p,
         divergence_p,
         summ_output

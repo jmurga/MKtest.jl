@@ -10,6 +10,10 @@ function write_files(x::Matrix{Float64}, name::String)
     CSV.write(name, Tables.table(x), delim = '\t', header = false)
 end;
 
+function write_files(x::SubArray, name::String)
+    CSV.write(name, Tables.table(x), delim = '\t', header = false)
+end;
+
 function write_files(x::DataFrame, name::String, newfile::Bool)
     CSV.write(name, x, delim = '\t', header = false, append = newfile)
 end;
@@ -57,7 +61,7 @@ function ABCreg(;
     # Creating output names
     out = output_folder .* "/out_" .* sort!(string.(1:size(a_file, 1)))
     tol_abcreg = tol./countlines.(sum_file)
-    @info "Running ABCreg"
+    @info "Running ABCreg. Please cite https://doi.org/10.1186/1471-2156-10-35"
     # Using mapi instead map to limit tasks. Bash interaction not working as expected
     ThreadsX.mapi(
         (x, y, z, t) -> run(`$abcreg -d $x -p $y -P $P -S $S -t $t -b $z`),
@@ -277,7 +281,7 @@ function summary_abc(posteriors::Vector{DataFrame}; stat::String = "Mode")
 
         df = hcat(stats, tmp)
 
-        @info df
+        # @info df
 
         df_quantiles = permutedims(string.(permutedims(string.(round.(df[df.Stats.==uppercasefirst(stat), 2:end],digits=3))),quantile_string))
         rename!(df_quantiles,c_names)
@@ -450,7 +454,8 @@ function undo_tangent_transfromation(x::Float64, minval::Float64, maxval::Float6
     return (minval - 1e-4) + (2 / π) * ((maxval + 1e-4) - (minval - 1e-4)) * atan(exp(y))
 end
 
-function abc_loclinear(target_file::String,param_summaries_file::String;P::Int64,tol::Int64,transformation::String="none",kernel::String= "epanechnikov")
+function
+    (target_file::String,param_summaries_file::String;P::Int64,tol::Int64,transformation::String="none",kernel::String= "epanechnikov")
 
     # Reading into matrix using Tables.matrix
     target = vec(CSV.read(target_file,matrix,ntasks=1,header=false))
