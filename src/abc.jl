@@ -454,8 +454,7 @@ function undo_tangent_transfromation(x::Float64, minval::Float64, maxval::Float6
     return (minval - 1e-4) + (2 / π) * ((maxval + 1e-4) - (minval - 1e-4)) * atan(exp(y))
 end
 
-function
-    (target_file::String,param_summaries_file::String;P::Int64,tol::Int64,transformation::String="none",kernel::String= "epanechnikov")
+function abc_loclinear(target_file::String,param_summaries_file::String;P::Int64,tol::Int64,transformation::String="none",kernel::String= "epanechnikov")
 
     # Reading into matrix using Tables.matrix
     target = vec(CSV.read(target_file,matrix,ntasks=1,header=false))
