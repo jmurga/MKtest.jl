@@ -313,8 +313,6 @@ function pol_correction!(
 end
 
 
-
-
 # if any(data_filter)
 #     sfs_p = sfs_p[.!data_filter]
 #     divergence_p = divergence_p[.!data_filter]
