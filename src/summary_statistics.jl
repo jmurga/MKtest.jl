@@ -39,9 +39,11 @@ function poisson_fixation(
     sampled_weak       = @. pois_rand(dweak)
     sampled_strong     = @. pois_rand(dstrong)
 
-    α                  = @. [sampled_weak / sampled_dn sampled_strong / sampled_dn (
-        sampled_weak + sampled_strong
-    ) / sampled_dn]
+    α_weak             = @. sampled_weak / sampled_dn
+    α_total            = @. (sampled_weak + sampled_strong
+    ) / sampled_dn
+    α_strong           = @. α_total - α_weak
+    α                  = [α_weak α_strong α_total]
 
     dₙ                 = @. (sampled_dn/ln)
     dₛ                 = @. (sampled_ds/ls)
