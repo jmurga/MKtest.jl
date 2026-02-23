@@ -24,7 +24,7 @@ Expected neutral fixations rate reduce by B value.
 """
 function fix_neut(param::parameters)
     # Synonymous probabilty * (fixation probabilty corrected by BGS value)
-    out::Float64 = 0.25 * (1.0 / (param.B * param.NN))
+    out::Float64 = (param.syn_nonsyn_ratio) * (1.0 / (param.B * param.NN))
     return out
 end
 
@@ -50,7 +50,7 @@ Expected fixation rate from negative DFE.
 function fix_neg(param::parameters, ppos::Float64)
     # Non-synonymous proportion * negative alleles probability * fixation probability from gamma distribution
     out::Float64 =
-        0.75 *
+        (1 - param.syn_nonsyn_ratio) *
         (1 - ppos) *
         (2^(-param.shape)) *
         (param.B^(-param.shape)) *
@@ -125,6 +125,6 @@ Expected positive fixations rate reduced due to the impact of background selecti
 function fix_pos_sim(param::parameters, gamma::Int64, ppos::Float64)
     red_plus = Φ(param, gamma)
     # Non-synonymous * positive alleles probability * B reduction * fixation probility
-    out::Float64 = 0.75 * ppos * red_plus * p_fix(param, gamma)
+    out::Float64 = (1 - param.syn_nonsyn_ratio) * ppos * red_plus * p_fix(param, gamma)
     return out
 end

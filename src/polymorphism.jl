@@ -30,7 +30,7 @@ function sfs_neut(param::parameters, binom::SparseMatrixCSC{Float64,Int64})
     solved_neutral_sfs = 1 ./ x
     replace!(solved_neutral_sfs, Inf => 0.0)
 
-    out::Vector{Float64} = param.B * (param.θ_coding) * 0.25 * (binom * solved_neutral_sfs)
+    out::Vector{Float64} = param.B * (param.θ_coding) * param.syn_nonsyn_ratio * (binom * solved_neutral_sfs)
 
     return out
 end
@@ -77,7 +77,7 @@ function sfs_pos(
         replace!(solved_positive_sfs, NaN => 0.0)
 
         out::Vector{Float64} =
-            (param.θ_coding) * red_plus * 0.75 * (binom * solved_positive_sfs)
+            (param.θ_coding) * red_plus * (1 - param.syn_nonsyn_ratio) * (binom * solved_positive_sfs)
     end
 
     return out
@@ -226,7 +226,7 @@ function sfs_neg(param::parameters, p::Float64, binom::SparseMatrixCSC{Float64,I
 
     solved_negative = 1.0 / (NN2 + 0.0) .* solve_z
 
-    out = param.B * (param.θ_coding) * 0.75 * (binom * solved_negative)
+    out = param.B * (param.θ_coding) * (1 - param.syn_nonsyn_ratio) * (binom * solved_negative)
 
     return out
 end

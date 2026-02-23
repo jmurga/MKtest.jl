@@ -306,6 +306,112 @@ function get_bootstrap(
     end
 end
 
+
+function get_bootstrap_noalloc(
+    case_set::Vector{String},
+    control_set::Vector{String};
+    factors_raw::Matrix,
+    max_reps::Int64,
+    tolerance::Float64,
+)
+
+
+    case_number    = length(case_set)
+    control_number = length(control_set)
+
+    case_avg, factors, factors_dict, used_number =
+        get_factors(case_set, control_set, factors_raw)
+    control_avg                 = vec(mean(factors, dims = 1))
+    high_low, inf_sup           = check_limits(case_avg, tolerance)
+    flt_avg                     = case_avg .> control_avg
+    high_low[flt_avg]  .= "higher"
+    high_low[.!flt_avg] .= "lower"
+
+    lim      = size(factors, 2)
+    max_frac = max_reps / case_number
+
+    # CHANGED: reserve capacity upfront for pushes
+    N_fake   = 100
+    N_target = N_fake + (10 + 100)*case_number
+    good_control = Vector{String}()
+    # CHANGED: sizehint to avoid reallocs
+    sizehint!(good_control, N_target)
+
+    #  CHANGED: pre-allocate/reuse scratch buffers outside the loop
+    current_factors = copy(case_avg)             # holds the evolving control-avg
+    direction       = fill("start", lim)         # initial directions
+    test_value_1    = similar(case_avg)          # buffer for new avg w/ fake seed
+    test_value_2    = similar(case_avg)          # buffer for new avg w/o fake seed
+    test_dir        = similar(direction)         # buffer for per-factor direction
+
+    prev_len  = 0
+    same_ctr  = 0
+
+    #  main loop
+    while length(good_control) < N_target
+        # pick two distinct controls
+        g1 = rand(control_set)
+        g2 = rand(control_set)
+        while g2 === g1
+            g2 = rand(control_set)
+        end
+
+        v1 = factors_dict[g1]
+        v2 = factors_dict[g2]
+        sc_t = length(good_control)
+
+        # CHANGED: in-place vector math via @. to avoid temporaries
+        @. test_value_1 = (N_fake*case_avg + sc_t*current_factors + v1 + v2) / (N_fake + sc_t + 2)
+        @. test_value_2 = (sc_t*current_factors + v1 + v2) / (sc_t + 2)
+
+        # CHANGED: manual loop for matching instead of array ops
+        matches = 0
+        for i in 1:lim
+            matches += (test_value_1[i] ≥ inf_sup[i,1] && test_value_1[i] ≤ inf_sup[i,2])
+        end
+
+        if matches ≥ lim
+            #  CHANGED: in-place fill of test_dir, no Boolean temporary
+            for i in 1:lim
+                test_dir[i] = test_value_1[i] ≥ current_factors[i] ? "more" : "less"
+            end
+
+            #  CHANGED: lazy zip+count instead of non-existent count(!=,…)
+            other_dir = count(t -> t[1] != t[2], zip(test_dir, direction))
+
+            next_len  = sc_t + 1
+
+            if other_dir ≥ 0 &&
+               used_number[g1]/next_len ≤ max_frac &&
+               used_number[g2]/next_len ≤ max_frac
+
+                if N_fake > 0
+                    N_fake -= 1
+                end
+
+                # CHANGED: single push! of both genes, no reallocs due to hint
+                push!(good_control, g1, g2)
+                used_number[g1] += 1
+                used_number[g2] += 1
+
+                # CHANGED: update in-place, reuse buffers
+                copy!(current_factors, test_value_1)
+                copy!(direction, test_dir)
+            end
+        end
+
+        # break-out to avoid infinite loop
+        cur_len = length(good_control)
+        same_ctr = (cur_len == prev_len) ? same_ctr+1 : 0
+        prev_len = cur_len
+        if same_ctr ≥ 5_000_000
+            break
+        end
+    end
+
+    return length(good_control) < 1000 ? String[] : good_control
+end
+
 function bootstrap(param::bootstrap_parameters)
     @unpack data, annotations, distance, max_reps, tolerance, iterations, confounding_factors, output, filter_hla_hist = param
 
@@ -355,7 +461,7 @@ function bootstrap(param::bootstrap_parameters)
 
     @info "Running bootstrap"
     good_control = ThreadsX.map(
-        (x, y) -> get_bootstrap(
+        (x, y) -> get_bootstrap_noalloc(
             x,
             y,
             factors_raw = factors_raw,
