@@ -5,7 +5,6 @@ using Parameters,
     CSV,
     JLD2,
     DataFrames,
-    Quadmath,
     StatsBase,
     Unzip,
     ThreadsX,
@@ -14,11 +13,9 @@ using Parameters,
     Random,
     Distributions,
     KernelDensity,
-    SharedArrays,
     GLM
 
 # Analytical solutions
-import Roots: find_zero
 import NLsolve: nlsolve
 import SpecialFunctions: polygamma, zeta, loggamma
 import PoissonRandom: pois_rand
