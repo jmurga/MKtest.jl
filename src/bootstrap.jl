@@ -41,7 +41,7 @@ end
     Filtering case and intersect with control.
     The function will also filter by hla_dist and factors_raw (variables)
 """
-function get_valid(x::Vector{String15}, y::Vector{String15}, distance::Vector{String15})
+function get_valid(x::Vector{<:AbstractString}, y::Vector{<:AbstractString}, distance::Vector{<:AbstractString})
 
     y_control = intersect(x,intersect(y, distance))
 
