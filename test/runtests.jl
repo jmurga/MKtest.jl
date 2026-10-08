@@ -334,6 +334,43 @@ using DelimitedFiles: readdlm
         end
     end
 
+    # --- parse_sfs ---------------------------------------------------------------
+    @testset "parse_sfs" begin
+        tgp = joinpath(@__DIR__, "..", "data", "tgp.txt")
+        sfs, d, a = MKtest.parse_sfs(tgp; sample_size = 661)
+        @test size(sfs) == (1321, 3) && sfs[:, 1] == 1:1321
+        @test length(d) == 4                          # Dn, Ds, Ln, Ls
+        @test size(a) == (1321, 3) && a[:, 2] ≈ a[:, 1] ./ 1322
+        # a cutoff removes rows but keeps the true DAC and frequency
+        sfs7, _, a7 = MKtest.parse_sfs(tgp; sample_size = 661, cutoff = [0.0, 0.7])
+        @test sfs7[end, 1] == 925 && a7[end, 2] ≈ 925 / 1322
+
+        # control sets (several genes per row) give what get_pol_div gives for the same
+        # genes, also below 2n = 100 where frequencies are rounded to 3 digits
+        rng = MersenneTwister(1)
+        daf(nn, k; d = 4) = "," * join(string.(round.(rand(rng, 1:(nn - 1), k) ./ nn, digits = d)), ",") * ","
+        tables = Dict(
+            1322 => MKtest.CSV.read(tgp, MKtest.DataFrame; header = false, delim = '\t')[1:30, :],
+            60   => MKtest.DataFrame(Column1 = ["g$i" for i in 1:30], Column2 = fill(5, 30),
+                                     Column3 = [daf(60, 5; d = 3) for _ in 1:30], Column4 = fill(5, 30),
+                                     Column5 = [daf(60, 5; d = 3) for _ in 1:30],
+                                     Column6 = rand(rng, 1:9, 30), Column7 = rand(rng, 1:9, 30)))
+        for (nn, df) in tables
+            genes = string.(df[:, 1])
+            rows = [genes[1:10], genes[11:20], genes[21:30]]
+            gl = joinpath(mktempdir(), "control.txt")
+            write(gl, join(join.(rows, " "), "\n") * "\n")
+            s_c, d_c, a_c = MKtest.parse_sfs(df; sample_size = nn, ploidy = 1, gene_list = gl)
+            for (i, r) in enumerate(rows)
+                sub = df[in(r).(string.(df[:, 1])), :]
+                a_r, s_r, d_r = MKtest.get_pol_div(sub, nn, [0.0, 1.0], [3, 5], [6, 7], [8, 9])
+                @test s_c[i] == s_r
+                @test d_c[i] == d_r
+                @test isequal(a_c[i], a_r)
+            end
+        end
+    end
+
     # --- ABC output order --------------------------------------------------------
     # Posteriors must come back in the order of the input datasets. `readdir` sorts names
     # as text, so without explicit ordering dataset 10 came second.
