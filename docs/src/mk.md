@@ -8,13 +8,12 @@ If all mutations are either strongly deleterious or neutral, then $Di/D0$ is exp
 
 $\alpha = 1 - (\frac{P_N}{P_S}\cdot\frac{D_S}{D_N})$
 
-Please check [`MKtest.standardMK`](@ref) to obtain more info.
+Please check [`MKtest.standard_mk`](@ref) to obtain more info.
 
 ```julia
-adap = MKtest.parameters(n=661,cutoff=[0.0,1.0])
-alpha, sfs, divergence, m= MKtest.parse_sfs(adap, data = "mktest/tgp.txt")
+sfs, divergence, alpha = MKtest.parse_sfs("mktest/tgp.txt"; sample_size = 661)
 
-mk = MKtest.standardMK(sfs[1],divergence[1])
+mk = MKtest.standard_mk(sfs, divergence)
 ```
 
 ## Fay, Waycoff and Wu MK extension
@@ -22,10 +21,10 @@ mk = MKtest.standardMK(sfs[1],divergence[1])
 
 $\alpha = 1 - (\frac{P_{N (j>15\%)}}{P_{S (j>15\%)}\cdot\frac{D_S}{D_N})$
 
-Please check [`MKtest.fwwMK`](@ref) to obtain more info.
+Please check [`MKtest.fww_mk`](@ref) to obtain more info.
 
 ```julia
-fww = MKtest.fwwMK(adap,sfs[1],divergence[1],cutoff=0.15)
+fww = MKtest.fww_mk(sfs, divergence; cutoff = 0.15)
 ```
 
 ## imputed MKT (in preparation)
@@ -37,10 +36,10 @@ where $P_{wd}$ is
 
 $P_{wd} \approx P_{wd (j < 15\%)} = P_{N (j<15\%)} - \frac{P_{N (j>15\%) } \cdot P_{S (j<15\%)}}{P_{S (j>15\%)}}$
 
-Please check [`MKtest.imputedMK`](@ref) to obtain more info.
+Please check [`MKtest.imputed_mk`](@ref) to obtain more info.
 
 ```julia
-imputed = MKtest.imputedMK(adap,sfs[1],divergence[1],cutoff=0.15)
+imputed = MKtest.imputed_mk(sfs, divergence; cutoff = 0.15)
 ```
 
 ## Asymptotic MKT
@@ -48,10 +47,15 @@ Proposed by Messer and Petrov (2013). This extension is robust to the presence o
 
 $\alpha_{fit(x)} = a+b \cdot e^{-cx}$
 
-Please check [`MKtest.aMK`](@ref) to obtain more info.
+The model is chosen with `model`: `ExponentialFit()` (default) or `LinearFit()` ($\alpha_{fit(x)} = a + b \cdot x$). Only that model is fitted; if the fit fails the result is `NaN`. The confidence interval is the 95% interval of the asymptote. Please check [`MKtest.asymptotic_mk`](@ref) to obtain more info.
 
 ```julia
-amk, ci, model = MKtest.aMK(adap,alpha[1])
+amk = MKtest.asymptotic_mk(sfs, divergence)
+amk_linear = MKtest.asymptotic_mk(alpha; model = MKtest.LinearFit())
+
+using Plots
+MKtest.plot_asymptotic_mk(amk)
+MKtest.plot_α_x(alpha)
 ```
 
 ## Grapes

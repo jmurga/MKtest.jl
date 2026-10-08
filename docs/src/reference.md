@@ -6,7 +6,7 @@
 MKtest.parameters
 MKtest.analytical_alpha
 MKtest.Br
-MKtest.set_θ
+MKtest.set_θ!
 MKtest.binom_op
 MKtest.Φ
 ```
@@ -35,9 +35,9 @@ MKtest.rates
 ```
 ## Summary statistics
 ```@docs
-MKtest.poisson_fixation
-MKtest.poisson_polymorphism
-MKtest.sampling_summaries
+MKtest.poisson_fixation!
+MKtest.poisson_polymorphism!
+MKtest.sampling_summaries!
 MKtest.summary_statistics
 ```
 
@@ -50,9 +50,23 @@ MKtest.summary_abc
 
 ## MKtest
 ```@docs
-MKtest.aMK
-MKtest.imputedMK
-MKtest.fwwMK
-MKtest.standardMK
+MKtest.α_x
+MKtest.asymptotic_mk
+MKtest.AbstractAsymptoticModel
+MKtest.ExponentialFit
+MKtest.LinearFit
+MKtest.imputed_mk
+MKtest.fww_mk
+MKtest.standard_mk
+MKtest.ni
+MKtest.ni_cmh
+MKtest.dos
 MKtest.grapes
+```
+
+## Plotting
+Available after `using Plots`.
+```@docs
+MKtest.plot_α_x
+MKtest.plot_asymptotic_mk
 ```

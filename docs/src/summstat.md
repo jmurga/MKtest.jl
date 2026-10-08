@@ -21,8 +21,7 @@ Once you have downloaded the files, you can use the function ```MKtest.parse_sfs
 
 download("https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/tgp.txt","mktest/tgp.txt")
 
-adap = MKtest.parameters(n=661,cutoff=[0.0,1.0])
-alpha, sfs, divergence, m= MKtest.parse_sfs(adap, data = "mktest/tgp.txt")
+sfs, divergence, alpha = MKtest.parse_sfs("mktest/tgp.txt"; sample_size = 661)
 ```
 
 It is possible to directly subset genes IDs using the same ids deposited at you data. You can use a (column list file)[https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/ensembl_list.txt] or (CSV-like file)[https://raw.githubusercontent.com/jmurga/MKtest.jl/main/data/test_nonVIPs.txt] to subset the file list. If you use CSV-like each row will be parsed independtly.
@@ -30,14 +29,14 @@ It is possible to directly subset genes IDs using the same ids deposited at you 
 ```julia
 download("https://raw.githubusercontent.com/jmurga/MKtest.jl/master/data/ensembl_list.txt","mktest/ensembl_list.txt")
 
-alpha, sfs, divergence = MKtest.parse_sfs(adap, data = "mktest/tgp.txt",gene_list = "mktest/ensembl_list.txt")
+sfs, divergence, alpha = MKtest.parse_sfs("mktest/tgp.txt"; sample_size = 661, gene_list = "mktest/ensembl_list.txt")
 ```
 
 ```julia
 download("https://raw.githubusercontent.com/jmurga/MKtest.jl/main/data/example_bootstrap.txt","mktest/example_bootstrap.txt")
 
 # In our case, eachrow is a bootstrapped set
-alpha, sfs, divergence, m = MKtest.parse_sfs(adap, data = "mktest/tgp.txt",gene_list = "mktest/example_bootstrap.txt")
+sfs, divergence, alpha = MKtest.parse_sfs("mktest/tgp.txt"; sample_size = 661, gene_list = "mktest/example_bootstrap.txt")
 ```
 
 ## Estimating summary statistics
@@ -90,7 +89,8 @@ h5["1000/661/dac"]
 The function ```MKtest.summary_statistics``` will produce the simulated (summary statistics) and obversed data to run the ABC inference
 
 ```julia
-@time df = MKtest.summary_statistics(adap,h5_file="mktest/rates.jld2",sfs=sfs,divergence=divergence,analysis_folder="mktest/",summstat_size=10^5);
+# a single gene set is a Matrix and a Vector: wrap them as [sfs], [divergence]
+@time df = MKtest.summary_statistics(adap, [sfs], [divergence]; h5_file = "mktest/rates.jld2", output_folder = "mktest/", summstat_size = 10^5);
 ```
 The function will create $N$ summary statistic files and the observed data files depending on the length of variables `sfs` and `divergence` parsed with `MKtest.parse_sfs` function (*summaries_N.txt* and *alpha_N.txt* respectively, see [Data](data.md)). Both files will be used to perform the ABC inference.
 
@@ -99,9 +99,9 @@ You can also read any SFS and divergence files using the packages `CSV` and `Dat
 ```
 using CSV, DataFrames
 sfs = CSV.read("/path/to/sfs_file.txt", header=false, DataFrame) |> Matrix
-divergence = CSV.read("/path/to/divergence_file.txt", header=false, DataFrame) |> Matrix
+divergence = vec(CSV.read("/path/to/divergence_file.txt", header=false, DataFrame) |> Matrix)
 
 # Note we modified both variables into a Vector using square braces ([]) comprehesion
-@time df = MKtest.summary_statistics(adap,h5_file="mktest/rates.jld2",sfs=[sfs],divergence=[divergence],analysis_folder="mktest/",summstat_size=10^5);
+@time df = MKtest.summary_statistics(adap, [sfs], [divergence]; h5_file = "mktest/rates.jld2", output_folder = "mktest/", summstat_size = 10^5);
 ```
 

@@ -73,13 +73,15 @@ Estimate summary statistics using observed data and analytical rates.
     end
 
     @info "Parsing $data"
-    alpha, sfs, divergence = MKtest.parse_sfs(adap, data = data, gene_list = genes)
+    sfs, divergence, alpha = MKtest.parse_sfs(data; sample_size = samples, cutoff = cutoff,
+                                              gene_list = genes)
+    if sfs isa Matrix
+        sfs, divergence = [sfs], [divergence]
+    end
 
-    summstat = MKtest.summary_statistics(adap,
-                                         sfs = sfs,
-                                         divergence = divergence,
+    summstat = MKtest.summary_statistics(adap, sfs, divergence;
                                          h5_file = rates,
-                                         analysis_folder = folder,
+                                         output_folder = folder,
                                          summstat_size = summsize)
 end
 
