@@ -17,8 +17,8 @@ using DelimitedFiles: readdlm
         MKtest.set_θ!(adap)
         MKtest.set_ppos!(adap)
 
-        # 0.00020733640485526956 under the pre-2026 Φ (no factor 2); the published Φ
-        # moves the root by 1.1e-4 relative. Regression pin, not an oracle.
+        # 0.00020733640485526956 with the previous Φ (no factor 2 on s). Regression
+        # value, not an independent check.
         @test adap.ppos_h ≈ 0.00020731419036651257
         @test adap.θ_flanking ≈ 3.001501000750676e-6
     end
@@ -259,12 +259,11 @@ using DelimitedFiles: readdlm
         @test maximum(out2[:models].shape) > hi
     end
 
-    # --- oracle: the development branch at the commit that produced the evidence ----
-    # test/fixtures/abcmk_best_model.jld2 pins the forward model and the default sampler
-    # (frozen on the development branch, reproduced there at 8c68fa35);
-    # test/fixtures/abcmk_des.jld2 pins a ρ-drawn table and RjSampling
-    # (generated at 8c68fa35 by test/fixtures/make_des_fixture.jl). This branch must
-    # reproduce both bit for bit at one thread.
+    # --- reference outputs ----------------------------------------------------
+    # The fixtures were produced by the code (commit 8c68fa35) that RjSampling was
+    # tested with: abcmk_best_model.jld2 for the forward model and the default sampler,
+    # abcmk_des.jld2 for a ρ-drawn table and RjSampling (make_des_fixture.jl). Both must
+    # be reproduced exactly at one thread.
     function check_table(r, fx, DAC)
         @test Matrix(r.models) == fx["models"]
         @test names(r.models) == fx["model_names"]

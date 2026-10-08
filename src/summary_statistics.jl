@@ -2,19 +2,10 @@
 ###    Summary statistics    ###
 ################################
 
-################################################################################
-# Inference-layer buffer struct + in-place Poisson samplers                    #
-#                                                                              #
-# Every intermediate is fused into a single per-element loop that writes into  #
-# preallocated `SamplingBuffers` fields.                                       #
-#                                                                              #
-# Layout convention:                                                           #
-#   neut, sel       : (n_dac × N) -- pre-transposed                            #
-#   sampled_pn, ps  : (n_dac × N) -- written in place                          #
-#   α_mat, ω_mat    : (N × 3) / (N × 4)                                        #
-#   α_summaries     : (N × n_dac)                                              #
-#   expected_values : (N × (12 + n_dac)) -- header reserves max width          #
-################################################################################
+# The Poisson samplers write into preallocated `SamplingBuffers` in single loops instead
+# of allocating intermediate arrays, which makes `summary_statistics` faster.
+# Layout: neut, sel, sampled_pn, sampled_ps are (n_dac × N); α_mat, ω_mat are (N × 3) and
+# (N × 4); α_summaries is (N × n_dac).
 
 """
     SamplingBuffers(N, n_dac)
@@ -50,24 +41,23 @@ function SamplingBuffers(N::Int, n_dac::Int)
     )
 end
 
-################################################################################
-# Poisson sampling dispatch                                                    #
-################################################################################
+################################
+######  Poisson sampling  ######
+################################
 
 """
     AbstractPoissonSampling
 
 How `sampling_summaries!` draws the Poisson realisations that become the ABC summary
-statistics. Shipped: [`IndependentSampling`](@ref) (**the default**) and
-[`RjSampling`](@ref), which adds a demographic nuisance to the
-polymorphism composition.
+statistics: [`IndependentSampling`](@ref) (the default) or [`RjSampling`](@ref), which
+accounts for demography in the polymorphism.
 """
 abstract type AbstractPoissonSampling end
 
 """
     IndependentSampling()
 
-Every class drawn as its own independent Poisson. **The default.**
+Every class drawn as an independent Poisson. The default.
 
 Let `O_k` be the observed polymorphisms at DAC >= k (Pn + Ps) and `D` the observed
 divergence. Per table row, with tail rates `λps_k`, `λpn_k` and fixation rates `λds`,
@@ -208,7 +198,7 @@ _prepare_sampling(sampling::AbstractPoissonSampling, sfs::AbstractMatrix, dac::V
 
 `IndependentSampling` with a demographic nuisance on the polymorphism composition:
 GRAPES' r_j, normalised on an anchor band, with the nonsynonymous class distorted by
-r_j^w (formerly `DemographyExponentSampling`).
+r_j^w.
 
 Per observed dataset, the synonymous distortion per interval `i` between consecutive DACs
 of `param.dac` (the last interval runs to the top of the spectrum) is measured against each
@@ -452,11 +442,8 @@ function sampling_summaries!(
         col += 1
     end
 
-    # Validity filter ONLY: a row is dropped when a value cannot be written to the prior
-    # file (ABCreg exits 1 on any non-finite entry), and NEVER because of where the
-    # sampled parameter landed. `ev[i, 3]` is α_total as realised by `poisson_fixation!`,
-    # i.e. a Poisson draw of the very quantity the regression adjusts; discarding rows on
-    # it would condition on the regressand and bias the adjustment toward (0, 1).
+    # Drop only rows with non-finite values (ABCreg fails on them). Rows are not filtered
+    # on the sampled α: that would bias the regression adjustment toward (0, 1).
     n_kept = 0
     @inbounds for i in 1:N
         keep = true
@@ -552,8 +539,8 @@ function summary_statistics(
     tmp = _read_rates(h5_file, param)
     @info "rates built with: " * tmp.options
 
-    # The run's own provenance, written where the summaries go. `Base.open`: this module
-    # imports `GZip.open`.
+    # Record how the summaries were made. `Base.open`, since this module imports
+    # `GZip.open`.
     Base.open(joinpath(output_folder, "provenance.txt"), "w") do io
         println(io, "rates_file  = ", h5_file)
         println(io, "rates_opts  = ", tmp.options)
@@ -625,7 +612,7 @@ function summary_statistics(
         end
     end
 
-    # Model columns by POSITION, which every table shares (8, 9 or 10 columns):
+    # Model columns by position, the same in old (8 columns) and new (10) rates files:
     # B, al_low, al_tot, gam_flanking, gL, gH, shape, gam_dfe[, rho, ne_ratio].
     gn = abs.(view(models, :, 8))                  # |gam_dfe|
     sh = round.(view(models, :, 7), digits=5)      # shape (rounded)
@@ -638,8 +625,7 @@ function summary_statistics(
 
     @info "Estimating and writting summary statistics at $output_folder"
 
-    # Per-dataset sampler: IndependentSampling returns itself; RjSampling
-    # gets a copy filled with this dataset's observed Ps.
+    # One sampler per dataset: RjSampling needs each dataset's observed Ps.
     samplers = [_prepare_sampling(sampling, sfs[i], param.dac, param.nn) for i in eachindex(sfs)]
 
     # One SamplingBuffers per dataset; the threaded loop only mutates its own buffer.

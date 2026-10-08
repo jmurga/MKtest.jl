@@ -23,15 +23,13 @@ Expected rate of neutral allele frequency reduce by background selection. The sp
  - `Vector{Float64}`: expected rate of neutral alleles frequencies.
 """
 function sfs_neut(param::parameters, binom::SparseMatrixCSC{Float64,Int64})
-    # Key on actual binom dimensions, not param.nn, to avoid mismatches when
-    # binom and param.nn are out of sync (e.g. stale cache or mismatched call).
+    # binom * (1/j) is cached by binom_op; computed here if it is missing.
     binom_nn = size(binom, 1)  # = nn - 1 rows
     neut_key = (param.NN, binom_nn, param.B)
     if haskey(_NEUT_CACHE, neut_key)
         return param.B * param.θ_coding * param.syn_nonsyn_ratio .* _NEUT_CACHE[neut_key]
     end
 
-    # Fallback: compute and cache (when called without binom_op having run first)
     NN2 = ceil(Int, param.NN * param.B)
     x = 0:NN2
     solved_neutral_sfs = 1 ./ x
@@ -47,11 +45,9 @@ end
 
 	sfs_pos(param,s,p,binom)
 
-Expected beneficial SFS under background selection (full spectrum, all sample counts).
-The model is the paper's "replace N with Ne in formulae for the frequency spectra" with
-`Ne = B·N`: the level carries `B` (like `sfs_neut`/`sfs_neg`) and the sojourn is evaluated
-at `γ·B`. `Φ` (the published eq. 9, a fixation-probability reduction) enters as one
-scalar. See the `dev` branch, `docs/abcmk_method.md` sections 1-2.
+Expected beneficial SFS under background selection. Background selection reduces Ne to
+`B·N`: the spectrum is scaled by `B`, like `sfs_neut` and `sfs_neg`, and the sojourn time
+is evaluated at `γ·B`. `Φ` (eq. 9 of the paper) multiplies the whole spectrum.
 
 # Arguments
  - `param::parameters`: mutable structure containing the model.
@@ -104,23 +100,16 @@ function positive_sfs(x::Float64, gam::Real)
 end
 
 
-################################################################################
-# Pre-projection source vectors                                                #
-#                                                                              #
-# `_src_pos!` / `_src_neg!` build the population-frequency vector that the SFS #
-# is the binomial projection OF -- everything up to but not including the      #
-# mat-vec, and not including the trailing scalar `factor`.                     #
-#                                                                              #
-# The TailWeight projection in rates.jl applies its weights to them. Keep the   #
-# arithmetic order: the best-model fixture (test/fixtures) pins it bit for bit. #
-################################################################################
+# Population-frequency vectors for rates(): sfs_pos and sfs_neg before the binomial
+# projection and the scalar factor. rates() applies `TailWeights` to them. Keep the
+# arithmetic order: test/fixtures pins the results bit for bit.
 
 """
     _src_pos!(scratch, param, g, p, ncols) -> view
 
-Positive-selection source vector, length `ncols = NN2 + 1`, written into the
-front of `scratch`. Returns the view. Caller applies the mat-vec and the
-`B * θ_coding * Φ(param, s) * (1 - syn_nonsyn_ratio)` factor. `g` is the SOJOURN coefficient, `s·B`.
+Beneficial source vector of length `ncols = NN2 + 1`, written into `scratch`. `g` is the
+coefficient of the sojourn time, `s·B`. The caller applies the projection and the factor
+`B * θ_coding * Φ(param, s) * (1 - syn_nonsyn_ratio)`.
 """
 function _src_pos!(
     scratch::AbstractVector{Float64},
@@ -137,8 +126,7 @@ function _src_pos!(
         fill!(src, 0.0)
         return src
     end
-    # Boundaries: i=1 (x=0) and i=NN2+1 (x=1) are the NaN/Inf points the
-    # original code masked with `replace!(.., NaN => 0.0)`. Explicit zeros.
+    # x = 0 and x = 1 are zero, as in sfs_pos.
     @inbounds src[1] = 0.0
     @inbounds src[ncols] = 0.0
     @inbounds for i in 2:NN2
@@ -151,16 +139,9 @@ end
 """
     _src_neg!(scratch, param, p, ncols) -> view
 
-Slightly-deleterious source vector, length `ncols = NN2 + 1`. Same contract as
-`_src_pos!`; caller applies the mat-vec and the `B * θ_coding * (1 - syn_nonsyn_ratio)` factor.
-The `* inv_NN2` is a separate pass on purpose -- see the header above.
-
-The peak-tracking `break` is retained verbatim from the inline version so this
-stays byte-for-byte equivalent. It is dead in practice -- it fired in 0 of 36
-parameter combinations drawn from the `rates()` priors, because the integrand is
-U-shaped (`1/((x-1)x)` diverges again as `x -> 1`) rather than decaying after its
-peak. See the `dev` branch, `docs/abcmk_performance.md` section 4. It is kept so the table stays identical
-to the full-spectrum `sfs_neg` rather than equal-by-measurement.
+Deleterious source vector of length `ncols = NN2 + 1`, as `_src_pos!`. The caller applies
+the projection and the factor `B * θ_coding * (1 - syn_nonsyn_ratio)`. The loop matches
+`sfs_neg`, including its early stop, so both give the same values.
 """
 function _src_neg!(
     scratch::AbstractVector{Float64},
@@ -233,17 +214,15 @@ function sfs_neg(param::parameters, p::Float64, binom::SparseMatrixCSC{Float64,I
               ((-1.0 + x) * x)
         solve_z[i] = val
 
-        # Track the peak value
+        # Stop once a term falls below 1e-12 of the peak.
         abs_val = abs(val)
         if abs_val > peak
             peak = abs_val
         elseif peak > 0.0 && abs_val < tol * peak
-            # z(x) is monotonically decaying after its peak near x~0
-            # Once we drop below tolerance * peak, remaining terms are negligible
             break
         end
     end
-    # solve_z[1] and solve_z[end] stay 0.0 (boundary terms, were Inf/NaN anyway)
+    # x = 0 and x = 1 stay zero.
 
     solved_negative = (1.0 / NN2) .* solve_z
 

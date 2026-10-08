@@ -57,11 +57,8 @@ end
 """
     copy_param(p::parameters)
 
-Lightweight copy of the parameters struct. Copies all scalar fields directly
-and shallow-copies the three small arrays (cutoff, dac). Avoids the overhead
-of `deepcopy`, which uses reflection and is ~10-50x slower for simple structs.
-
-Thread-safe: each thread gets its own mutable struct with independent arrays.
+Copy of the parameters struct, with its own `cutoff` and `dac` vectors. Faster than
+`deepcopy`; `rates()` gives each task its own copy.
 """
 function copy_param(p::parameters)
     parameters(
@@ -105,9 +102,8 @@ function assertion_params(param::parameters)
 
     @assert all(in(freq_dac[:, 2]).(param.dac)) "Please select a DAC according to your frequency cutoff"
 
-    # Ascending order is load-bearing, not cosmetic: `summary_statistics` fills the
-    # neut/sel rows positionally from `enumerate(param.dac)`, and
-    # `RjSampling` splits consecutive tail sums into DAC intervals.
+    # `summary_statistics` fills rows in `dac` order and `RjSampling` splits consecutive
+    # tail sums into DAC intervals, so `dac` must be ascending.
     @assert issorted(param.dac) "param.dac must be in ascending order, got $(param.dac)"
 
 end
@@ -160,9 +156,8 @@ Find the mutation rate `θ_flanking` such that `Br(param, θ_flanking) == param.
 θ_flanking = -log(B) · (Lf·ρ - gam_flanking) / (2·Lf)
 ```
 
-This closed form replaces the previous `Roots.find_zero` call -- exact to float epsilon
-(verified ≤ 2e-16 relative error vs the root-finder across B ∈ [0.1, 0.999]) and
-allocation-free, eliminating ~40 root-finder allocations per model in `rates()`.
+The closed form gives the same value as the previous root search (`Roots.find_zero`)
+to float precision, without allocations, which makes `rates()` faster.
 
 # Returns
  - mutates `param.θ_flanking`.
@@ -212,8 +207,8 @@ so the model's FIXATION alpha equals `param.al_tot` and its weak share `param.al
 Tries `warm_start`, then `[0.001, 0.001]`, `[0, 0.001]`, `[0.001, 0]`, and accepts the
 first root whose residuals are `<= atol`. A zero component is accepted when it satisfies
 the system (it is the correct root when `al_low == 0` or `al_low == al_tot`). If no start
-reaches the tolerance the model is **refused** by throwing, so `simulate_models!` drops the
-row instead of writing an unsatisfied root into the reference table (dev docs/abcmk_validation_archive.md 4f).
+reaches the tolerance it throws, and `simulate_models!` drops the model instead of
+writing a row whose alpha label does not match its fixations.
 """
 function set_ppos!(param::parameters; warm_start::Vector{Float64} = [0.0, 0.0],
                    atol::Float64 = 1e-6)
@@ -246,44 +241,35 @@ function set_ppos!(param::parameters; warm_start::Vector{Float64} = [0.0, 0.0],
     param.ppos_l, param.ppos_h = best_l, best_h
 end
 
-# Caches for binom_op: keyed by (NN, nn, hash(B_bins)) and (NN, nn, B) respectively.
-# Avoids recomputing O(NN × nn) binomial PDF matrices when N, n, B_bins are unchanged.
+# Binomial matrices from binom_op, so they are built once per (N, n, B).
 const _BINOM_CACHE = Dict{Tuple{Int,Int,UInt64},Dict{Float64,SparseMatrixCSC{Float64,Int64}}}()
 const _BINOM_CACHE_SINGLE = Dict{Tuple{Int,Int,Float64},SparseMatrixCSC{Float64,Int64}}()
 
-# Cache for binom * harmonic_vector (neutral SFS base vector), keyed by (NN, nn, B).
-# The vector 1/j for j=0..NN2 is fixed for a given B, so binom*harmonic is constant
-# across all model iterations with the same population parameters.
-# sfs_neut then only needs a scalar multiply: B * θ_coding * syn_nonsyn_ratio * _NEUT_CACHE[key]
+# binom * (1/j) for each (N, n, B). It does not depend on the model, so sfs_neut only
+# scales it by B * θ_coding * syn_nonsyn_ratio.
 const _NEUT_CACHE = Dict{Tuple{Int,Int,Float64},Vector{Float64}}()
 
 """
     TailWeights
 
-Per-B_bin operator for the tail-weight projection (see `_sfs_dac!` in `src/abcmk/rates.jl`).
+Projection weights used by `rates()` (see `_sfs_dac!` in `src/rates.jl`).
 
-`solve_rates!` only ever reads the `dac` entries of the tail-cumulated SFS, so the
-`(nn-1) x (NN2+1)` binomial projection followed by `cumulative_vector!` collapses to
-`n_dac` dot products against
+`rates()` only needs the cumulative SFS at the `dac` values, so the binomial projection
+followed by `cumulative_vector!` reduces to one dot product per DAC against
 
 ```
 W[k, j] = sum_{i >= dac[k]} binom[i, j]
 ```
 
-`neut_tail[k]` is the same reduction applied to the cached `binom * harmonic` vector
-(`_NEUT_CACHE`), which is model-independent, so the neutral SFS needs no mat-vec at all --
-just `B * θ_coding * syn_nonsyn_ratio * neut_tail[k]`.
-
-Both fields are dense. `W` is `n_dac x (NN2+1)`, ~128 KiB at n=661, against ~4 MiB for the
-sparse `binom` it replaces.
+`neut_tail[k]` is the same sum for the neutral SFS, which does not depend on the model.
+This is faster than projecting the full spectrum and gives the same values.
 """
 struct TailWeights
     W::Matrix{Float64}
     neut_tail::Vector{Float64}
 end
 
-# Keyed by (NN, nn, B, hash(dac)). The dac MUST be in the key: W depends on it, and a
-# second call with a different DAC would otherwise silently reuse the wrong table.
+# Keyed by (NN, nn, B, hash(dac)): W depends on the DACs.
 const _TAIL_CACHE = Dict{Tuple{Int,Int,Float64,UInt64},TailWeights}()
 
 """
@@ -302,11 +288,8 @@ end
 """
     _tail_weights(binom, neut_base, dac) -> TailWeights
 
-Build the tail-summed weight matrix from a binomial projection matrix.
-
-Walks the rows of `binom` from the bottom up, accumulating a running column-wise tail sum,
-and snapshots it at each `dac` row. `O(nnz)` once per `(B, dac)`; the transpose is taken so
-the row walk is over contiguous CSC columns.
+Build `TailWeights` from a binomial matrix: sum the rows of `binom` from the bottom up
+and keep the running sum at each `dac` row.
 """
 function _tail_weights(
     binom::SparseMatrixCSC{Float64,Int64},
@@ -342,9 +325,7 @@ end
 """
     tail_weights_op(param, binom, B_bins) -> Dict{Float64,TailWeights}
 
-`binom_op`'s tail-weight counterpart: one `TailWeights` per B value,
-cached on `(NN, nn, B, hash(dac))`. `binom` is the dict `binom_op` returned, and
-`_NEUT_CACHE` must already be populated for each B -- `binom_op` does that.
+One cached `TailWeights` per B value, from the matrices `binom_op` returned.
 """
 function tail_weights_op(
     param::parameters,
@@ -412,8 +393,7 @@ function binom_op(param::parameters, B_bins::Vector{Float64})
         out_sparse = SparseArrays.dropzeros(SparseArrays.sparse(out))
         bn[b] = out_sparse
 
-        # Precompute binom * harmonic once -- reused by sfs_neut on every model iteration.
-        # Key on size(out_sparse,1) (actual binom rows) not param.nn, matching sfs_neut lookup.
+        # binom * (1/j), reused by sfs_neut for every model.
         neut_key = (param.NN, size(out_sparse, 1), b)
         if !haskey(_NEUT_CACHE, neut_key)
             _NEUT_CACHE[neut_key] = out_sparse * neutral_sfs
@@ -445,7 +425,7 @@ function binom_op(param)
 
     _BINOM_CACHE_SINGLE[key] = out_sparse
 
-    # Precompute binom * harmonic once -- key on actual binom rows, matching sfs_neut lookup.
+    # binom * (1/j), reused by sfs_neut.
     neut_key = (NN, size(out_sparse, 1), B)
     if !haskey(_NEUT_CACHE, neut_key)
         _NEUT_CACHE[neut_key] = out_sparse * neutral_sfs
@@ -482,9 +462,9 @@ Multiplying across all deleterious linkes sites, we find:
  - `gamma::Int64`: selection coefficient.
 
 The expression is Uricchio et al. 2019 Supplementary eqn. 14 / Murga-Moreno et al. 2024
-(G3) eqn. 9, with the factor of two on the beneficial coefficient. The pre-2026 code
-omitted it (and the `r +` inside the first polygamma, ~1e-5), which inflates `κ_H` 2.2x
-where `Φ = B^κ`; see the `dev` branch, `docs/abcmk_validation_archive.md`.
+(G3) eqn. 9. Previous versions omitted the factor of two on the beneficial coefficient
+(and the `r +` in the first polygamma), which made the reduction of strongly beneficial
+fixations about twice too large.
 
 # Returns
  - `Float64`: expected rate of positive fixations under background selection.

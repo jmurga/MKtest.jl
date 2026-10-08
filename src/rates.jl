@@ -1,18 +1,13 @@
-################################################################################
-# SFS projection: tail weights                                                 #
-#                                                                              #
-# The per-DAC cumulative sample SFS is projected straight from the population- #
-# frequency source vector with precomputed tail-summed binomial weights        #
-# `W[k,j] = sum_{i >= dac[k]} binom[i,j]` (`TailWeights`, parameters.jl). It is #
-# the full binomial projection + `cumulative_vector!` + indexing at `dac`,     #
-# reassociated: agreement 3-4e-15 (dev docs/abcmk_performance.md), ~3x faster.#
-################################################################################
+################################
+######   SFS projection   ######
+################################
+# The cumulative SFS at each DAC is projected with `TailWeights` (parameters.jl) instead
+# of the full binomial projection: the same values, about 3x faster.
 
 """
     _tail_ops(param, binom, B_bins) -> Vector{TailWeights}
 
-One `TailWeights` per B bin, positionally aligned to `B_bins` (no Float64 hash in the
-inner loop).
+One `TailWeights` per B bin, in `B_bins` order.
 """
 function _tail_ops(param::parameters,
                    binom::Dict{Float64,SparseMatrixCSC{Float64,Int64}},
@@ -21,29 +16,25 @@ function _tail_ops(param::parameters,
     return TailWeights[tw[b] for b in B_bins]
 end
 
-################################################################################
-# Recombination-rate prior                                                     #
-################################################################################
+################################
+###### Recombination prior ######
+################################
 
 """
     _rho_prior(rho, param) -> (u_rho, rho_fixed)
 
-Resolve the `rho` keyword of `rates()` into either a `Uniform`
-distribution to draw from (one draw per model) or a fixed scalar.
+Turn the `rho` keyword of `rates()` into a `Uniform` prior (one draw per model) or a
+fixed value.
 
 | `rho`                  | result                                        |
 |------------------------|-----------------------------------------------|
-| `nothing` (default)    | `(nothing, param.ρ)` -- today's behaviour     |
+| `nothing` (default)    | `(nothing, param.ρ)`                          |
 | `0.002::Real`          | `(nothing, 0.002)`                            |
 | `[1e-4, 5e-3]::Vector` | `(Uniform(1e-4, 5e-3), NaN)`                  |
 | `[0.001]` (length 1)   | `(nothing, 0.001)`                            |
 
-`rho[1]` / `rho[end]` are used for the bounds, mirroring how the `gH`, `gL`,
-`gam_flanking` and `gam_dfe` ranges are read.
-
-When the first element is `nothing` the caller must NOT consume any RNG, so that
-a seeded `rates(...; rho = nothing)` reproduces the pre-`rho` random stream
-bit-for-bit.
+The bounds are `rho[1]` and `rho[end]`, as for the other ranges. A fixed value draws no
+random numbers, so a seeded run with a fixed `rho` gives the same models as before.
 """
 _rho_prior(::Nothing, param::parameters) = (nothing, param.ρ)
 
@@ -63,18 +54,18 @@ function _rho_prior(rho::AbstractVector{<:Real}, param::parameters)
     return (Uniform(lo, hi), NaN)
 end
 
-################################################################################
-# Provenance and storage                                                       #
-################################################################################
+################################
+######     Rates file     ######
+################################
 
-# What `_read_rates` reports when a file predates option provenance.
+# Reported by `_read_rates` for files that do not record their model.
 const _NO_PROVENANCE = "unrecorded (file predates option provenance)"
 
 """
     _rates_options() -> String
 
-One-line record of the forward model a rates table was built under, stored in the file
-next to the table. A table without it was built by an earlier MKtest (a different model).
+Description of the forward model, stored in the rates file next to the table. Tables
+without it were built by earlier versions of MKtest, with a different model.
 """
 _rates_options() = "model=best-2026-09-28 (Phi published (eq 9); beneficial SFS at B level with sojourn at gamma*B; Phi flat on the SFS; guarded ppos solve); projection=TailWeight"
 
@@ -85,7 +76,7 @@ _jld2_group_key(N::Int, n::Int, cutoff_lo, cutoff_hi) =
     _read_rates(input_file, param) -> NamedTuple
 
 `(; models, neut, sel, dsdn, dac, options)` of the `(N, n, cutoff)` block of a rates file.
-Reads tables written by this and earlier versions; `options` says which model built them.
+Reads files written by this and earlier versions.
 """
 function _read_rates(input_file::String, param::parameters)
     grp = _jld2_group_key(param.N, param.n, param.cutoff[1], param.cutoff[end])
@@ -102,35 +93,24 @@ function _read_rates(input_file::String, param::parameters)
     end
 end
 
-################################################################################
-# Buffered hot path (S-tier #1 + #2)                                           #
-#                                                                              #
-# `SolveRatesBuffers` holds the four SFS output vectors + a scratch buffer     #
-# (sized for the largest NN2 across B_bins). `solve_rates!` reuses them across #
-# all 40 B-bins per model and writes results directly into preallocated row    #
-# views of the global result matrices (`m_view`, `ps_view`, `pn_view`,         #
-# `f_view`). This eliminates per-iteration SFS vector allocations, the         #
-# `cumulative_vector!` intermediates, and the `vcat(m...)` reduction at the    #
-# end of `rates()`.                                                            #
-#                                                                              #
-################################################################################
+################################
+######   Solving models   ######
+################################
+# Each task reuses one `SolveRatesBuffers` for all its models and B bins, and writes the
+# results straight into the output matrices, so `rates()` barely allocates and runs faster.
 
 """
     SolveRatesBuffers(binom, n_dac)
 
-Preallocated work buffers for the ABC forward model. Sized once per task; reused across
-the whole B-bin loop and every iteration assigned to that task. `scratch` holds the
-population-frequency source vector (sized for the largest `NN2` in `binom`); `acc_tmp`
-receives each `mul!(., W, src)` and `acc_sel` sums the selected components.
+Work buffers for one task of `rates()`. `scratch` holds the source vectors of
+`_src_pos!`/`_src_neg!`, `acc_tmp` each projection and `acc_sel` their sum.
 """
 struct SolveRatesBuffers
     scratch::Vector{Float64}
     acc_sel::Vector{Float64}
     acc_tmp::Vector{Float64}
-    # Warm-start cache for `set_ppos!` -- `prev_ppos = [ppos_l, ppos_h]` from the
-    # previous successful iteration in this task's chunk. nlsolve converges
-    # noticeably faster (~2-3 Newton steps vs ~10 from cold start) when the
-    # previous prior draw is similar to the next.
+    # ppos of the previous model of this task: the first starting point of set_ppos!,
+    # which then needs fewer iterations.
     prev_ppos::Vector{Float64}
 end
 
@@ -159,14 +139,13 @@ function _sfs_dac!(ps_row::AbstractVector, pn_row::AbstractVector,
     ncols = size(W, 2)
     nd = length(dac)
 
-    # Neutral: no mat-vec, the tail sum is model-independent and precomputed.
+    # Neutral: precomputed, it does not depend on the model.
     nsc = param.B * param.θ_coding * param.syn_nonsyn_ratio
     @inbounds @simd for k in 1:nd
         ps_row[k] = nsc * op.neut_tail[k]
     end
 
-    # Selected, summed as (sel_h + sel_l) + sel_neg. Beneficial classes: B level, sojourn
-    # at γ·B, Φ as one scalar (see `sfs_pos`).
+    # Selected: (sel_h + sel_l) + sel_neg, the beneficial classes as in `sfs_pos`.
     acc = buf.acc_sel
     fill!(acc, 0.0)
     if has_h
@@ -202,9 +181,8 @@ end
 """
     solve_rates!(m_row, ps_row, pn_row, f_row, buf, param, op)
 
-Writes the 10-element model row, the per-DAC neutral & selected rows, and the 4-element
-fixation row for one B bin directly into the caller-provided views. No allocations on
-the hot path (buffers are reused).
+Write the model row, the neutral and selected SFS at each DAC, and the fixation rates of
+one B bin into the given rows, without allocating.
 """
 function solve_rates!(
     m_row::AbstractVector,
@@ -229,7 +207,6 @@ function solve_rates!(
 
     _sfs_dac!(ps_row, pn_row, buf, param, op)
 
-    # Write directly into preallocated output row views
     @inbounds m_row[1] = B * 1000
     @inbounds m_row[2] = al_low
     @inbounds m_row[3] = al_tot
@@ -239,8 +216,7 @@ function solve_rates!(
     @inbounds m_row[7] = shape
     @inbounds m_row[8] = -(shape / scale)
     @inbounds m_row[9] = param.ρ
-    # Column 10 is the divergence/polymorphism Ne ratio. `rates()` has none, so it is 1;
-    # kept so tables stay interchangeable with the development branch's.
+    # Column 10 (ne_ratio) is always 1 in `rates()`.
     @inbounds m_row[10] = 1.0
 
     @inbounds f_row[1] = f_n
@@ -255,10 +231,8 @@ end
     simulate_models!(param, buf, ops, B_bins, var_params,
                      m_view, ps_view, pn_view, f_view)
 
-One prior draw: solve `ppos` at B = 0.999, then walk the B-bin loop writing rows
-directly into the provided sub-matrices. `ops` is `_tail_ops(...)`, aligned to `B_bins`.
-On `set_ppos!` failure (the model is refused) all rows remain zero; the caller's matrix is
-zero-initialised and `rates()` drops them.
+Solve one prior draw: `ppos` at B = 0.999, then every B bin, written into the given
+rows. If `set_ppos!` fails the rows stay zero and `rates()` drops the model.
 """
 function simulate_models!(
     param::parameters,
@@ -281,7 +255,7 @@ function simulate_models!(
     param.gam_flanking = Int(gam_flanking)
     param.al_tot = alpha
     param.al_low = alpha * alpha_low
-    # Must precede set_θ!, which consumes ρ.
+    # Before set_θ!, which uses ρ.
     param.ρ = rho
 
     param.B = 0.999
@@ -291,9 +265,7 @@ function simulate_models!(
     catch
         return nothing
     end
-    # Cache the successful (ppos_l, ppos_h) for the next model in this task chunk.
-    # Only warm-start when we got a non-degenerate solution; otherwise the next
-    # call falls back to the [0, 0] / [0.001, 0.001] fallback chain inside set_ppos!.
+    # Starting point for the next model of this task (only if both are non-zero).
     if param.ppos_l > 0.0 && param.ppos_h > 0.0
         buf.prev_ppos[1] = param.ppos_l
         buf.prev_ppos[2] = param.ppos_h
@@ -317,8 +289,9 @@ end
 	rates(param; iterations, output_file, ...)
 
 Solve `iterations` random models across `B_bins` and write the ABC reference table:
-models, per-DAC neutral and selected cumulative SFS, and fixation rates. One forward
-model (dev docs/abcmk_validation.md 4v, the measured best): Phi published (eq 9); beneficial SFS at B level with sojourn at gamma*B; Phi flat on the SFS; guarded ppos solve; TailWeight projection.
+models, neutral and selected cumulative SFS at each DAC, and fixation rates. Forward model:
+Φ from eq. 9 of the paper, beneficial SFS scaled by B with the sojourn at γ·B, and `ppos`
+solved to tolerance (models that cannot be solved are dropped).
 
 # Arguments
  - `param::parameters`: mutable structure containing the model (`N`, `n`, `dac`, `shape`).
@@ -333,9 +306,8 @@ model (dev docs/abcmk_validation.md 4v, the measured best): Phi published (eq 9)
    `ρ ~ Uniform(lo, hi)` per model. Recorded in the `rho` column.
  - `B_bins`: background-selection bins (default `0.1:0.025:0.975` plus `0.999`).
 
-The DFE shape is drawn `Uniform(shape·2^-2, shape·2^2)` (uniform on the published range,
-kept by decision -- not the paper's log-uniform). A model whose `ppos` cannot be solved is
-refused and dropped; the count is logged.
+The DFE shape is drawn from `Uniform(shape·2^-2, shape·2^2)` (uniform, not log-uniform
+as in the paper). The number of dropped models is logged.
 
 # Returns
  - `Dict` with `:models`, `:neut`, `:sel`, `:dsdn`, `:dac`; the same is written to
@@ -372,19 +344,14 @@ function rates(
     u_gam_flanking = Uniform(gam_flanking[1], gam_flanking[end])
     u_gam_dfe = Uniform(gam_dfe[1], gam_dfe[end])
 
-    # afac = Uniform(0.5 * 2^-4, 0.5 * 2^4)
+    # DFE shape prior
     afac = Uniform(shape * 2^-2, shape * 2^2)
-
-    # afac  = Uniform(0.5,4)
 
     u_tot = Uniform(alpha[1], alpha[end])
     u_low = ifelse(weak, 0.0:0.05:1, [0])
 
-    # Recombination rate: either drawn per model or held at a fixed scalar.
-    # The `isnothing(u_rho)` branch below consumes NO RNG, so the default
-    # (`rho = nothing`) leaves the random stream identical to the pre-`rho`
-    # implementation. Unlike the other priors, the draw is not rounded: ρ is
-    # recorded rather than inferred, so the column holds the exact value used.
+    # Recombination rate: drawn per model or fixed. A fixed value draws no random
+    # numbers. The draw is not rounded: the `rho` column stores the value used.
     u_rho, rho_fixed = _rho_prior(rho, param)
 
     priors = Vector{Float64}[]
@@ -414,12 +381,10 @@ function rates(
     r_pn = zeros(Float64, total_rows, n_dac)
     r_f  = zeros(Float64, total_rows, 4)
 
-    # Position-indexed operator vector aligned to B_bins -- avoids per-call Float64
-    # hash on `binom[param.B]` inside the inner loop.
+    # One TailWeights per B bin, in B_bins order.
     ops = _tail_ops(param, binom, B_bins)
 
-    # Chunked parallelism: one param struct + one SolveRatesBuffers per task,
-    # reused across all iterations assigned to that task.
+    # One parameter copy and one SolveRatesBuffers per task.
     nt = max(1, Threads.nthreads())
     chunks = collect(Iterators.partition(1:iterations, max(1, cld(iterations, nt))))
     @sync for chunk in chunks
@@ -441,11 +406,8 @@ function rates(
     end
 
     @info "Saving solved models in $output_file"
-    # Filter rows where simulate_models! returned all zeros (set_ppos! failed
-    # or solve_rates! threw for every B_bin).
+    # Drop the models set_ppos! could not solve (their rows are all zero).
     idx = vec(sum(view(m, :, 1:8), dims=2) .!= 0)
-    # F6/F9: a rejected row is a model `set_ppos!` could not solve -- refused rather than
-    # written mis-specified.
     let n_drop = count(!, idx)
         n_drop > 0 && @info "$(n_drop) of $(length(idx)) model x B rows rejected " *
             "($(round(100n_drop/length(idx), digits=2))%)"
