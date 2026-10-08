@@ -8,6 +8,7 @@ makedocs(;
     authors="Jesús Murga-Moreno, Lawrence Uricchio, David Enard",
     repo="https://github.com/jmurga/MKtest.jl/blob/{commit}{path}#{line}",
     sitename="MKtest.jl",
+    checkdocs=:exports,
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", "false") == "true",
         canonical="https://jmurga.github.io/MKtest.jl",

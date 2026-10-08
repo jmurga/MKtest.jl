@@ -92,7 +92,7 @@ The function ```MKtest.summary_statistics``` will produce the simulated (summary
 # a single gene set is a Matrix and a Vector: wrap them as [sfs], [divergence]
 @time df = MKtest.summary_statistics(adap, [sfs], [divergence]; h5_file = "mktest/rates.jld2", output_folder = "mktest/", summstat_size = 10^5);
 ```
-The function will create $N$ summary statistic files and the observed data files depending on the length of variables `sfs` and `divergence` parsed with `MKtest.parse_sfs` function (*summaries_N.txt* and *alpha_N.txt* respectively, see [Data](data.md)). Both files will be used to perform the ABC inference.
+The function will create $N$ summary statistic files and the observed data files depending on the length of variables `sfs` and `divergence` parsed with `MKtest.parse_sfs` function (*summaries_N.txt* and *alpha_N.txt* respectively). Both files will be used to perform the ABC inference.
 
 You can also read any SFS and divergence files using the packages `CSV` and `DataFrames` to create the input Vectors. In such case, please be sure that sfs and divergence arguments are of type ```Vector``` using square braces (```[]```) comprehesion
 

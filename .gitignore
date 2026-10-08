@@ -6,3 +6,6 @@
 docs/build/
 scripts/singularity/abcmk.simg
 .github/workflows/main.yml
+
+# docs environment is resolved in CI
+docs/Manifest.toml

@@ -107,7 +107,7 @@ end
 
 	fix_pos_sim(parameters,gamma,ppos)
 
-Expected positive fixations rate reduced due to the impact of background selection and linkage. The probabilty of fixation of positively selected alleles is reduced by a factor Φ across all deleterious linked sites [`Analytical.Φ`](@ref).
+Expected positive fixations rate reduced due to the impact of background selection and linkage. The probabilty of fixation of positively selected alleles is reduced by a factor Φ across all deleterious linked sites [`MKtest.Φ`](@ref).
 
 ```math
 \\mathbb{E}[D_{n+}] =  \\Phi \\cdot \\mathbb{E}[D_{n+}]

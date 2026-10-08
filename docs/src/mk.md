@@ -17,7 +17,7 @@ mk = MKtest.standard_mk(sfs, divergence)
 ```
 
 ## Fay, Waycoff and Wu MK extension
-[Fay et al. (2002)]([fwwMK](https://doi.org/10.1038/4151024a)) proposed an approach that removes all polymorphisms segregating at a frequency ($j$) below a given threshold (usually $j > 5\%–15\%$). Although there is no consensus about what this threshold should be used, [J. Charlesworth & Eyre-Walker (2008)](https://doi.org/10.1093/molbev/msn005) demonstrated that  estimates are robust using a frequency threshold of 15%, below which most slightly deleterious polymorphisms are found and removed. The estimates are reasonably accurate only when the rate of adaptive evolution is high and the Distribution of Fitness Effects (DFE) of deleterious mutations is leptokurtic.
+[Fay et al. (2002)](https://doi.org/10.1038/4151024a) proposed an approach that removes all polymorphisms segregating at a frequency ($j$) below a given threshold (usually $j > 5\%–15\%$). Although there is no consensus about what this threshold should be used, [J. Charlesworth & Eyre-Walker (2008)](https://doi.org/10.1093/molbev/msn005) demonstrated that  estimates are robust using a frequency threshold of 15%, below which most slightly deleterious polymorphisms are found and removed. The estimates are reasonably accurate only when the rate of adaptive evolution is high and the Distribution of Fitness Effects (DFE) of deleterious mutations is leptokurtic.
 
 $\alpha = 1 - (\frac{P_{N (j>15\%)}}{P_{S (j>15\%)}\cdot\frac{D_S}{D_N})$
 
@@ -28,7 +28,7 @@ fww = MKtest.fww_mk(sfs, divergence; cutoff = 0.15)
 ```
 
 ## imputed MKT (in preparation)
-The imputed MKT (impMKT) is a modification of the Fay, Waycoff, and Wu MK extension (fwwMK) ([Fay et al. (2002)]([fwwMK](https://doi.org/10.1038/4151024a)) to improve gene-by-gene analyses. The method propose the imputation of slightly deleterious mutations at the SFS rather than removing all variants below a frequency threshold. The imputedMK aims to maximize the information to test the excess of divergence ratio relative to polymorphism at the gene level. $\alpha$ is estimated as
+The imputed MKT (impMKT) is a modification of the Fay, Waycoff, and Wu MK extension (fwwMK) ([Fay et al. (2002)](https://doi.org/10.1038/4151024a) to improve gene-by-gene analyses. The method propose the imputation of slightly deleterious mutations at the SFS rather than removing all variants below a frequency threshold. The imputedMK aims to maximize the information to test the excess of divergence ratio relative to polymorphism at the gene level. $\alpha$ is estimated as
 
 $\alpha_{imputed} = 1 - \left( \frac{P_{N} - P_{wd}}{P_{S}} \cdot \frac{D_{N}}{D_{S}} \right)$
 

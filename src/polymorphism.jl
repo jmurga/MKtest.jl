@@ -231,6 +231,13 @@ function sfs_neg(param::parameters, p::Float64, binom::SparseMatrixCSC{Float64,I
     return out
 end
 
+function cumulative_vector!(v::Union{SubArray,Vector{T}}) where {T<:Number}
+    @inbounds for i = length(v)-1:-1:1
+        v[i] += v[i+1]
+    end
+    return v
+end
+
 """
 	cumulative_sfs(sfs_tmp)
 
@@ -242,24 +249,6 @@ Changing SFS considering all values above a frequency *x*. The original aMK appr
 # Output 
  - `Vector{Float64}`: SFS vector.
 """
-#=function cumulative_sfs!(sfs_tmp::Matrix{Float64},freqs::Bool=true)
-
-    idx = ifelse(freqs, 2, 1)
-
-    for c ∈ eachcol(@view sfs_tmp[:,2:end])
-        cumulative_vector!(c)
-    end
-
-    return sfs_tmp
-end=#
-
-function cumulative_vector!(v::Union{SubArray,Vector{T}}) where {T<:Number}
-    @inbounds for i = length(v)-1:-1:1
-        v[i] += v[i+1]
-    end
-    return v
-end
-
 function cumulative_sfs(sfs_tmp::Union{Array, SubArray}, freqs::Bool = true)
     n, m = size(sfs_tmp)
     out = similar(sfs_tmp)
