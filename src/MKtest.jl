@@ -49,4 +49,45 @@ include("methods.jl")
 include("bootstrap.jl")
 include("balancing.jl")
 
+# Plotting: the methods are in ext/MKtestPlotsExt.jl and load with `using Plots`.
+"""
+    plot_α_x(a_x...; control, percentil, labels, output_path, kwargs...)
+    plot_α_x(α_table; ...)
+    plot_α_x(a_x, control; percentil, ...)
+    plot_α_x(sfs, divergence; sample_size, cumulative, ...)
+    plot_α_x(result; ...)
+
+Plot one or more alpha(x) curves against the derived allele count, optionally over a
+percentile band of control curves. Requires `using Plots`.
+
+# Arguments
+ - `a_x`: alpha(x) vectors, `[dac, frequency, alpha_x]` tables from `parse_sfs`/`α_x`
+   (the DAC is then the x axis), or `asymptotic_mk` results (NamedTuple or DataFrame).
+ - `sfs::Matrix`, `divergence::Vector`: compute alpha(x) with `α_x`.
+ - `control`: control curves, drawn as a band. Default `nothing`.
+ - `percentil::AbstractVector{<:Real}`: low and high quantiles of the band. Default `[0.1, 0.9]`.
+ - `labels`: legend labels, in curve order. Default `nothing` (`α1`, `α2`, ...).
+ - `output_path`: save the figure; the format comes from the extension (`.png`, `.svg`,
+   `.pdf`, `.ps`, `.html`). Default `nothing`.
+ - `sample_size::Union{Nothing,Int}`: project the SFS first (sfs/divergence only).
+ - `cumulative::Bool`: use the cumulative SFS (sfs/divergence only). Default `true`.
+ - Other keywords (`xlim`, `ylim`, `size`, `title`, ...) are passed to `Plots.plot`.
+
+# Returns
+ - `Plots.Plot`.
+"""
+function plot_α_x end
+
+"""
+    plot_asymptotic_mk(result; output_path)
+    plot_asymptotic_mk(sfs, divergence; model, cutoff, cumulative, output_path)
+
+Plot an asymptotic MK fit: the observed alpha(x), the fitted curve of the model used
+(`ExponentialFit` or `LinearFit`), the asymptote and its 95% CI. Requires `using Plots`.
+
+# Returns
+ - `Plots.Plot`.
+"""
+function plot_asymptotic_mk end
+
 end
