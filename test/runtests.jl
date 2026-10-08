@@ -371,6 +371,45 @@ using DelimitedFiles: readdlm
         end
     end
 
+    # --- MK tests -------------------------------------------------------------------
+    @testset "MK tests" begin
+        data = joinpath(@__DIR__, "..", "data")
+        tgp = joinpath(data, "tgp.txt")
+        sfs, d, a = MKtest.parse_sfs(tgp; sample_size = 661)
+        # parse_sfs rounds alpha(x) to 5 digits
+        @test MKtest.α_x(sfs, d)[:, 1:2] == a[:, 1:2]
+        @test all(isapprox.(MKtest.α_x(sfs, d)[:, 3], a[:, 3]; atol = 1e-5, nans = true))
+
+        # the model is chosen, never switched: the exponential is the default
+        r_exp = MKtest.asymptotic_mk(sfs, d)
+        r_lin = MKtest.asymptotic_mk(sfs, d; model = MKtest.LinearFit())
+        @test r_exp.model == :exponential && r_lin.model == :linear
+        @test r_lin.c == 0.0 && r_lin.asymptotic_mk ≈ r_lin.a + r_lin.b
+        for r in (r_exp, r_lin)
+            @test r.ci_low < r.asymptotic_mk < r.ci_high
+        end
+        @test MKtest.asymptotic_mk(a).asymptotic_mk ≈ r_exp.asymptotic_mk atol = 1e-5
+
+        # control set 13 of example_bootstrap.txt: the exponential does not converge, so
+        # ExponentialFit returns NaN instead of falling back to the line
+        sc, dc, _ = MKtest.parse_sfs(tgp; sample_size = 661,
+                                     gene_list = joinpath(data, "example_bootstrap.txt"))
+        @test isnan(MKtest.asymptotic_mk(sc[13], dc[13]).asymptotic_mk)
+        @test isfinite(MKtest.asymptotic_mk(sc[13], dc[13]; model = MKtest.LinearFit()).asymptotic_mk)
+        df = MKtest.asymptotic_mk(sc[1:20], dc[1:20]; model = MKtest.LinearFit())
+        @test size(df, 1) == 20 && all(df.model .== :linear)
+
+        # fewer than three alpha(x) values: NaN for either model
+        @test isnan(MKtest.asymptotic_mk([0.1, 0.2]; model = MKtest.LinearFit()).asymptotic_mk)
+
+        # the other tests return one row per set, and p-value correction adds a column
+        for fn in (MKtest.imputed_mk, MKtest.fww_mk, MKtest.standard_mk, MKtest.ni, MKtest.dos)
+            @test size(fn(sc[1:10], dc[1:10]), 1) == 10
+        end
+        @test :pvalue_adjusted in propertynames(MKtest.standard_mk(sc[1:10], dc[1:10]; correction = :fdr))
+        @test MKtest.standard_mk(sfs, d).alpha ≈ 1 - (sum(sfs[:, 2]) / sum(sfs[:, 3])) * (d[2] / d[1]) atol = 1e-3
+    end
+
     # --- ABC output order --------------------------------------------------------
     # Posteriors must come back in the order of the input datasets. `readdir` sorts names
     # as text, so without explicit ordering dataset 10 came second.

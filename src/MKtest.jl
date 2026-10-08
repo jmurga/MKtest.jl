@@ -31,7 +31,10 @@ import Tables: table,matrix
 import DelimitedFiles: readdlm
 
 # MK-approaches
-import LsqFit: curve_fit, confidence_interval
+import LsqFit: curve_fit, vcov, dof
+import MultipleTesting: BenjaminiHochberg, Bonferroni, adjust
+import LinearAlgebra: dot
+import Logging
 import HypothesisTests: pvalue, FisherExactTest
 import StatsBase: ordinalrank
 
