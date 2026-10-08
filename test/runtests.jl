@@ -334,6 +334,37 @@ using DelimitedFiles: readdlm
         end
     end
 
+    # --- ABC output order --------------------------------------------------------
+    # Posteriors must come back in the order of the input datasets. `readdir` sorts names
+    # as text, so without explicit ordering dataset 10 came second.
+    @testset "ABC output order" begin
+        @test MKtest._dataset_index("/a/b/summstat_10.txt") == 10
+        @test MKtest._dataset_index("out_7.0.post.gz") == 7
+        td = mktempdir()
+        for k in (1, 2, 10, 11, 3)
+            touch(joinpath(td, "alphas_$k.txt"))
+        end
+        @test basename.(MKtest._dataset_files(td, "alphas_")) ==
+              ["alphas_$k.txt" for k in (1, 2, 3, 10, 11)]
+
+        # end to end: dataset k has a smaller Ds as k grows, so its alpha estimate rises
+        best = JLD2.load(joinpath(@__DIR__, "fixtures", "abcmk_best_model.jld2"))
+        p() = MKtest.parameters(N = 500, n = 50, dac = [2, 4, 5, 10, 20, 50])
+        tab = joinpath(td, "t.jld2")
+        seed!(1)
+        MKtest.rates(p(); iterations = 300, output_file = tab)
+        K = 12
+        sfs = [best["sfs"] for _ in 1:K]
+        div = [[3000.0, 2000.0 * (1 - 0.06k), best["div"][3], best["div"][4]] for k in 1:K]
+        for method in ("abcreg", "abc")
+            seed!(2)
+            res = MKtest.abcmk(p(), sfs, div; h5_file = tab, summstat_size = 5000,
+                               output_folder = joinpath(td, method), tol = 200,
+                               abc_method = method)
+            @test issorted(res[:inference].α)
+        end
+    end
+
     # --- RjSampling: analytic properties ----------------------
     @testset "RjSampling" begin
         dac = [4, 5, 10, 20, 50, 200, 661]

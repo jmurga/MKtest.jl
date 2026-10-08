@@ -18,6 +18,17 @@ function write_files(x::DataFrame, name::String, newfile::Bool)
     CSV.write(name, x, delim = '\t', header = false, append = newfile)
 end;
 
+# Index of the dataset a file belongs to: 10 for `summstat_10.txt` or `out_10.0.post.gz`.
+_dataset_index(file::String) = parse(Int, match(r"^[a-z]+_(\d+)", basename(file))[1])
+
+# Files of `output_folder` starting with `prefix`, in dataset order. `readdir` sorts names
+# as text (summstat_1, summstat_10, summstat_100, summstat_11, ...), which would return
+# the posteriors in that order instead of the order of the input datasets.
+function _dataset_files(output_folder::String, prefix::String)
+    files = filter(x -> startswith(basename(x), prefix), readdir(output_folder, join = true))
+    return sort(files, by = _dataset_index)
+end
+
 """
 	ABCreg(output_folder, S, P, tol, abcreg)
 
@@ -50,8 +61,8 @@ function ABCreg(;
     end
      
     # List alphas and summstat files
-    a_file   = filter(x -> occursin("alphas", x), readdir(output_folder, join = true))
-    sum_file = filter(x -> occursin("summstat", x), readdir(output_folder, join = true))
+    a_file   = _dataset_files(output_folder, "alphas_")
+    sum_file = _dataset_files(output_folder, "summstat_")
 
     # Change P if omega was not estimated
     if size(readdlm(sum_file[1]),2) != (P+S)
@@ -59,7 +70,7 @@ function ABCreg(;
     end
 
     # Creating output names
-    out = output_folder .* "/out_" .* sort!(string.(1:size(a_file, 1)))
+    out = output_folder .* "/out_" .* string.(_dataset_index.(a_file))
     tol_abcreg = tol./countlines.(sum_file)
     @info "Running ABCreg. Please cite https://doi.org/10.1186/1471-2156-10-35"
     # Using mapi instead map to limit tasks. Bash interaction not working as expected
@@ -73,15 +84,18 @@ function ABCreg(;
     )
 
     @info "Opening and filtering posteriors distributions"
-    out = filter(x -> occursin("post", x), readdir(output_folder, join = true))
+    out = filter(x -> occursin("post", x), _dataset_files(output_folder, "out_"))
     out = filter(x -> !occursin(".1.", x), out)
 
     # Move from CSV.read to readdlm, bug when threads enable in node server.
     # open(x) = Array(CSV.read(x, DataFrame))
     # Control outlier inference. 2Nes non negative values
     posteriors = read_gz(out)
-    # Remove is some file wasnt computed
-    posteriors = posteriors[@. !iszero(posteriors)]
+    # Remove if some file was not computed. The rows after it then no longer match the
+    # dataset numbers.
+    ok = @. !iszero(posteriors)
+    all(ok) || @warn "ABCreg failed for datasets $(_dataset_index.(out[.!ok])); their posteriors are dropped"
+    posteriors = posteriors[ok]
 
     if P != 12
         c_names = [:α_weak, :α_strong, :α, :γ₋, :β,:γ₊,:γ₊₊,:B]
@@ -345,8 +359,8 @@ function abc(; output_folder::String,
     @assert lowercase(transformation) ∈ ["none", "log", "tan"] "Apply one of the following transformations: none, log, tan"
 
     # List/open alphas and summstat files
-    targets = filter(x -> occursin("alphas", x), readdir(output_folder, join = true))
-    param_summaries = filter(x -> occursin("summstat", x), readdir(output_folder, join = true))
+    targets = _dataset_files(output_folder, "alphas_")
+    param_summaries = _dataset_files(output_folder, "summstat_")
 
     # Change P if omega was not estimated
     if size(CSV.read(param_summaries[1],matrix,header=false), 2) != (P + S)
