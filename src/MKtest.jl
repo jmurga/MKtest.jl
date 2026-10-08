@@ -23,6 +23,7 @@ import NLsolve: nlsolve
 import SpecialFunctions: polygamma, zeta, loggamma
 import PoissonRandom: pois_rand
 import LinearAlgebra.BLAS: get_num_threads, set_num_threads
+import LinearAlgebra: mul!
 
 # Parse data
 import GZip: open

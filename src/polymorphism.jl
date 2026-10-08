@@ -23,16 +23,22 @@ Expected rate of neutral allele frequency reduce by background selection. The sp
  - `Vector{Float64}`: expected rate of neutral alleles frequencies.
 """
 function sfs_neut(param::parameters, binom::SparseMatrixCSC{Float64,Int64})
-    NN2 = ceil(Int,param.NN * param.B)
+    # Key on actual binom dimensions, not param.nn, to avoid mismatches when
+    # binom and param.nn are out of sync (e.g. stale cache or mismatched call).
+    binom_nn = size(binom, 1)  # = nn - 1 rows
+    neut_key = (param.NN, binom_nn, param.B)
+    if haskey(_NEUT_CACHE, neut_key)
+        return param.B * param.θ_coding * param.syn_nonsyn_ratio .* _NEUT_CACHE[neut_key]
+    end
 
-    # Allocating variables
+    # Fallback: compute and cache (when called without binom_op having run first)
+    NN2 = ceil(Int, param.NN * param.B)
     x = 0:NN2
     solved_neutral_sfs = 1 ./ x
     replace!(solved_neutral_sfs, Inf => 0.0)
-
-    out::Vector{Float64} = param.B * (param.θ_coding) * param.syn_nonsyn_ratio * (binom * solved_neutral_sfs)
-
-    return out
+    v = binom * solved_neutral_sfs
+    _NEUT_CACHE[neut_key] = v
+    return param.B * param.θ_coding * param.syn_nonsyn_ratio .* v
 end
 
 ############Positive############
@@ -41,17 +47,20 @@ end
 
 	sfs_pos(param,s,p,binom)
 
-Expected rate of positive selected allele frequency reduce by background selection. The spectrum depends on the number of individuals.
+Expected beneficial SFS under background selection (full spectrum, all sample counts).
+The model is the paper's "replace N with Ne in formulae for the frequency spectra" with
+`Ne = B·N`: the level carries `B` (like `sfs_neut`/`sfs_neg`) and the sojourn is evaluated
+at `γ·B`. `Φ` (the published eq. 9, a fixation-probability reduction) enters as one
+scalar. See the `dev` branch, `docs/abcmk_method.md` sections 1-2.
 
 # Arguments
  - `param::parameters`: mutable structure containing the model.
- - `s::Int64`: selection coefficient.
+ - `s::Int64`: selection coefficient (`2N·s_het`).
  - `p::Float64`: positive selected alleles probabilty.
  - `binom::SparseMatrixCSC{Float64, Int64}`: convoluted SFS given the B value.
 # Return:
  - `Array{Float64}`: expected positive selected alleles frequencies.
 """
-#
 function sfs_pos(
     param::parameters,
     s::Int64,
@@ -64,26 +73,22 @@ function sfs_pos(
     else
         red_plus = Φ(param, s)
 
-        # Solving sfs
-        NN2 = ceil(Int,param.NN * param.B)
+        NN2 = ceil(Int, param.NN * param.B)
         xa1 = 0:NN2
         xa2 = @. xa1 / NN2
 
-        # Solving float precision performance using exponential rule.
-        # Original
-        # p*0.5*(ℯ^(2*s_corrected)*(1-ℯ^(-2.0*s_corrected*(1.0-i)))/((ℯ^(2*s_corrected)-1.0)*i*(1.0-i)))
-        # Allocating outputs
-        solved_positive_sfs::Vector{Float64} = @. (1.0 / (NN2)) * (p * 0.5 * positive_sfs(xa2,s))
+        g = s * param.B                       # sojourn at γ·B
+        solved_positive_sfs::Vector{Float64} = @. (1.0 / (NN2)) * (p * 0.5 * positive_sfs(xa2, g))
         replace!(solved_positive_sfs, NaN => 0.0)
 
         out::Vector{Float64} =
-            (param.θ_coding) * red_plus * (1 - param.syn_nonsyn_ratio) * (binom * solved_positive_sfs)
+            param.B * (param.θ_coding) * red_plus * (1 - param.syn_nonsyn_ratio) * (binom * solved_positive_sfs)
     end
 
     return out
 end
 
-function positive_sfs(x::Float64, gam::Int64)
+function positive_sfs(x::Float64, gam::Real)
 
     if isinf(exp(gam * 2))
         # For large gam, approximate to avoid overflow
@@ -99,93 +104,98 @@ function positive_sfs(x::Float64, gam::Int64)
 end
 
 
-# function sfs_pos(
-#     param::parameters,
-#     s::Int64,
-#     p::Float64,
-#     binom::SparseMatrixCSC{Float64,Int64},
-# )
-#     if p == 0.0
-#         out = zeros(Float64, param.nn + 1)
-#         out = out[2:(end-1)]
-#     else
-#         red_plus = Φ(param, s)
+################################################################################
+# Pre-projection source vectors                                                #
+#                                                                              #
+# `_src_pos!` / `_src_neg!` build the population-frequency vector that the SFS #
+# is the binomial projection OF -- everything up to but not including the      #
+# mat-vec, and not including the trailing scalar `factor`.                     #
+#                                                                              #
+# The TailWeight projection in rates.jl applies its weights to them. Keep the   #
+# arithmetic order: the best-model fixture (test/fixtures) pins it bit for bit. #
+################################################################################
 
-#         # Solving sfs
-#         NN2 = ceil(Int,param.NN * param.B)
-#         xa1 = 0:NN2
-#         xa2 = @. xa1 / NN2
+"""
+    _src_pos!(scratch, param, g, p, ncols) -> view
 
-#         # Solving float precision performance using exponential rule. Only one BigFloat estimation.
-#         s_corrected = s * param.B
+Positive-selection source vector, length `ncols = NN2 + 1`, written into the
+front of `scratch`. Returns the view. Caller applies the mat-vec and the
+`B * θ_coding * Φ(param, s) * (1 - syn_nonsyn_ratio)` factor. `g` is the SOJOURN coefficient, `s·B`.
+"""
+function _src_pos!(
+    scratch::AbstractVector{Float64},
+    param::parameters,
+    g::Real,
+    p::Float64,
+    ncols::Int,
+)
+    NN2 = ncols - 1
+    inv_NN2 = 1.0 / NN2
+    coef = p * 0.5 * inv_NN2
+    src = view(scratch, 1:ncols)
+    if p == 0.0
+        fill!(src, 0.0)
+        return src
+    end
+    # Boundaries: i=1 (x=0) and i=NN2+1 (x=1) are the NaN/Inf points the
+    # original code masked with `replace!(.., NaN => 0.0)`. Explicit zeros.
+    @inbounds src[1] = 0.0
+    @inbounds src[ncols] = 0.0
+    @inbounds for i in 2:NN2
+        x = (i - 1) * inv_NN2
+        src[i] = coef * positive_sfs(x, g)
+    end
+    return src
+end
 
-#         s_exp1 = exp(s_corrected * 2)
-#         s_exp2 = exp(s_corrected * -2)
+"""
+    _src_neg!(scratch, param, p, ncols) -> view
 
-#         function positive_sfs(
-#             i::Float64,
-#             g1::Float64 = s_exp1,
-#             g2::Float64 = s_exp2,
-#             p::Float64 = p,
-#         )
-#             Float64(p * 0.5 * (g1 * (1 - g2^(1.0 - i)) / ((g1 - 1.0) * i * (1.0 - i))))
-#         end
+Slightly-deleterious source vector, length `ncols = NN2 + 1`. Same contract as
+`_src_pos!`; caller applies the mat-vec and the `B * θ_coding * (1 - syn_nonsyn_ratio)` factor.
+The `* inv_NN2` is a separate pass on purpose -- see the header above.
 
-#         # Original
-#         # p*0.5*(ℯ^(2*s_corrected)*(1-ℯ^(-2.0*s_corrected*(1.0-i)))/((ℯ^(2*s_corrected)-1.0)*i*(1.0-i)))
+The peak-tracking `break` is retained verbatim from the inline version so this
+stays byte-for-byte equivalent. It is dead in practice -- it fired in 0 of 36
+parameter combinations drawn from the `rates()` priors, because the integrand is
+U-shaped (`1/((x-1)x)` diverges again as `x -> 1`) rather than decaying after its
+peak. See the `dev` branch, `docs/abcmk_performance.md` section 4. It is kept so the table stays identical
+to the full-spectrum `sfs_neg` rather than equal-by-measurement.
+"""
+function _src_neg!(
+    scratch::AbstractVector{Float64},
+    param::parameters,
+    p::Float64,
+    ncols::Int,
+)
+    NN2 = ncols - 1
+    beta = param.scale / (1.0 * param.B)
+    zeta_const = zeta(param.shape, (2.0 + beta) / 2.0)
+    coeff = (1.0 - p) * (2.0^-param.shape) * (beta^param.shape)
+    inv_NN2 = 1.0 / NN2
 
-#         # Allocating outputs
-#         solved_positive_sfs::Vector{Float64} = (1.0 / (NN2)) * (positive_sfs.(xa2))
-#         replace!(solved_positive_sfs, NaN => 0.0)
+    src = view(scratch, 1:ncols)
+    fill!(src, 0.0)
 
-#         out::Vector{Float64} =
-#             (param.θ_coding) * red_plus * 0.75 * (binom * solved_positive_sfs)
-#     end
-
-#     return out
-# end
-
-# function sfs_pos_float(
-#     param::parameters,
-#     s::Int64,
-#     p::Float64,
-#     binom::SparseMatrixCSC{Float64,Int64},
-# )
-#     if p == 0.0
-#         out = zeros(Float64, param.nn + 1)
-#         out = out[2:(end-1)]
-#     else
-#         red_plus = Φ(param, s)
-
-#         # Solving sfs
-#         NN2 = ceil(Int,param.NN * param.B)
-#         xa1 = 0:NN2
-#         xa2 = @. xa1 / NN2
-
-#         s_corrected = s * param.B
-#         s_exp1::Quadmath.Float128 = exp(Quadmath.Float128(s_corrected * 2))
-#         s_exp2::Quadmath.Float128 = exp(Quadmath.Float128(s_corrected * -2))
-
-#         function positive_sfs(
-#             i::Float64,
-#             g1::Quadmath.Float128 = s_exp1,
-#             g2::Quadmath.Float128 = s_exp2,
-#             p::Float64 = p,
-#         )
-#             Float64(p * 0.5 * (g1 * (1 - g2^(1.0 - i)) / ((g1 - 1.0) * i * (1.0 - i))))
-#         end
-
-#         # Allocating outputs
-#         solved_positive_sfs::Vector{Float64} = (1.0 / (NN2)) * (positive_sfs.(xa2))
-#         replace!(solved_positive_sfs, NaN => 0.0)
-#         out::Vector{Float64} =
-#             (param.θ_coding) * red_plus * 0.75 * (binom * solved_positive_sfs)
-#         # out = out[2:end-1]
-
-#     end
-
-#     return out
-# end
+    peak = 0.0
+    tol = 1e-12
+    @inbounds for i in 2:NN2
+        x = (i - 1) * inv_NN2
+        val = coeff * (-zeta(param.shape, x + beta / 2.0) + zeta_const) /
+              ((-1.0 + x) * x)
+        src[i] = val
+        abs_val = abs(val)
+        if abs_val > peak
+            peak = abs_val
+        elseif peak > 0.0 && abs_val < tol * peak
+            break
+        end
+    end
+    @inbounds @simd for i in eachindex(src)
+        src[i] *= inv_NN2
+    end
+    return src
+end
 
 ######Slightly deleterious######
 """
@@ -203,28 +213,39 @@ Expected rate of positive selected allele frequency reduce by background selecti
 """
 function sfs_neg(param::parameters, p::Float64, binom::SparseMatrixCSC{Float64,Int64})
     beta = param.scale / (1.0 * param.B)
-    NN2 = ceil(Int,param.NN * param.B)
+    NN2 = ceil(Int, param.NN * param.B)
+
+
+    zeta_const = zeta(param.shape, (2.0 + beta) / 2.0)
+    coeff = (1.0 - p) * (2.0^-param.shape) * (beta^param.shape)
+
     xa1 = 0:NN2
     xa2 = @. xa1 / NN2
 
-    function z(x::Float64, p::Float64 = p,shape::Float64 = param.shape,beta::Float64=beta)
-        (1.0 - p) *
-        (2.0^-param.shape) *
-        (beta^param.shape) *
-        (-zeta(param.shape, x + beta / 2.0) + zeta(param.shape, (2 + beta) / 2.0)) /
-        ((-1.0 + x) * x)
-    end
+    solve_z = zeros(Float64, length(xa2))
 
-    solve_z = z.(xa2)
+    peak = 0.0
+    tol = 1e-12
 
-    if (solve_z[1] == Inf || isnan(solve_z[1]))
-        solve_z[1] = 0.0
-    end
-    if (solve_z[lastindex(solve_z)] == Inf || isnan(solve_z[lastindex(solve_z)]))
-        solve_z[lastindex(solve_z)] = 0.0
-    end
+    @inbounds for i in 2:(length(xa2)-1)
+        x = xa2[i]
+        val = coeff * (-zeta(param.shape, x + beta / 2.0) + zeta_const) /
+              ((-1.0 + x) * x)
+        solve_z[i] = val
 
-    solved_negative = 1.0 / (NN2 + 0.0) .* solve_z
+        # Track the peak value
+        abs_val = abs(val)
+        if abs_val > peak
+            peak = abs_val
+        elseif peak > 0.0 && abs_val < tol * peak
+            # z(x) is monotonically decaying after its peak near x~0
+            # Once we drop below tolerance * peak, remaining terms are negligible
+            break
+        end
+    end
+    # solve_z[1] and solve_z[end] stay 0.0 (boundary terms, were Inf/NaN anyway)
+
+    solved_negative = (1.0 / NN2) .* solve_z
 
     out = param.B * (param.θ_coding) * (1 - param.syn_nonsyn_ratio) * (binom * solved_negative)
 
@@ -254,9 +275,8 @@ Changing SFS considering all values above a frequency *x*. The original aMK appr
 end=#
 
 function cumulative_vector!(v::Union{SubArray,Vector{T}}) where {T<:Number}
-    n = length(v)
-    @inbounds for i = 1:n
-        v[i] = sum(@view v[i:end])
+    @inbounds for i = length(v)-1:-1:1
+        v[i] += v[i+1]
     end
     return v
 end
