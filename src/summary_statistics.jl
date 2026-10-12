@@ -194,49 +194,83 @@ observed spectrum ([`RjSampling`](@ref)) returns a filled copy.
 _prepare_sampling(sampling::AbstractPoissonSampling, sfs::AbstractMatrix, dac::Vector{Int64}, nn::Integer) = sampling
 
 """
-    RjSampling(; w = (0.0, 1.5), anchor = (0.15, 0.70))
+    RjSampling(; w = (0.0, 1.5), anchor = (0.15, 0.70), tilt = 0.0)
 
-`IndependentSampling` with a demographic nuisance on the polymorphism composition:
-GRAPES' r_j, normalised on an anchor band, with the nonsynonymous class distorted by
-r_j^w.
+`IndependentSampling` with a demographic nuisance on the polymorphism composition. The
+data's synonymous distortion `r_i` (GRAPES' r_j), normalised on an anchor band, is applied to
+the synonymous class and, raised to a random power `w`, to the nonsynonymous class. With
+`tilt > 0` the nonsynonymous class also gets a random frequency tilt. Fixations are drawn as
+in `IndependentSampling`.
 
-Per observed dataset, the synonymous distortion per interval `i` between consecutive DACs
-of `param.dac` (the last interval runs to the top of the spectrum) is measured against each
-table row's own neutral expectation:
+Recommended setting (with `FlatAlphaPrior(by_B = true)` and `stat = "median"` in
+[`abcmk`](@ref)): `RjSampling(w = (0.0, 2.5), tilt = 0.05)`.
 
-    r_i = (Ps_obs,i / sum Ps_obs) / (λps_i / sum λps)
+# Steps, per observed dataset and table row
 
-normalised so that its λps-weighted mean over the ANCHOR band is 1: the intervals lying
-inside `anchor`, a band of derived-allele FREQUENCY, `anchor[1] <= k/nn` and
-`stop/nn <= anchor[2]` with `nn = 2n` sampled chromosomes -- so the same band works at any
-sample size. Each row then draws `w ~ Uniform(w...)` and its tail composition becomes
+1. **Intervals.** The DACs of `param.dac` split the spectrum into intervals
+   `i = [dac_i, dac_(i+1) - 1]`; the last interval runs to `nn - 1`, with `nn = 2n` sampled
+   chromosomes. The row's interval masses are differences of its tails:
+   `e_s,i = λps_i - λps_(i+1)`, `e_n,i = λpn_i - λpn_(i+1)`.
+2. **Synonymous distortion.**
 
-    P_k = sum_{i>=k} λps_i r_i / (sum_{i>=k} λps_i r_i + sum_{i>=k} λpn_i r_i^w)
+       r_i = (Ps_obs,i / sum Ps_obs) / (e_s,i / sum e_s)
 
-after which `ps_k ~ Poisson(P_k O_k)`, `pn_k ~ Poisson((1 - P_k) O_k)` as in
-`IndependentSampling`; fixations are `IndependentSampling`'s. `w` is marginalised: it is
-not written to the summaries, so the file layout and ABCreg's `P` are unchanged.
+3. **Anchor normalisation.** `r` is divided by its `e_s`-weighted mean over the ANCHOR band:
+   the intervals lying wholly inside `anchor`, a band of derived-allele FREQUENCY
+   (`anchor[1] <= dac_i/nn` and `stop_i/nn <= anchor[2]`). The same band therefore works at
+   any sample size.
+   - Why: rescaling `r` by `c` multiplies every Pn/Ps by `c^(w-1)`. That is a pure level
+     change, which only α may set.
+   - The default band, 15-70% of the sample (DAC 199-925 at n = 661; DAC 15-70 at n = 50),
+     assumes the distortion is recent and stays below the 70% cut that empirical data need
+     against mispolarization.
+4. **Transfer.** Each row draws `w ~ Uniform(w...)`.
+   - The synonymous masses become `e_s,i r_i`; the nonsynonymous masses become
+     `e_n,i r_i^w`.
+   - `w = 0`: nonsynonymous sites ignore the distortion. `w = 1`: GRAPES-style, the same
+     distortion on both classes. `w > 1`: stronger on nonsynonymous sites, as when
+     selection and demography interact.
+5. **Tilt** (only if `tilt = a > 0`). The row also draws `τ ~ Uniform(-a, a)`, after `w`, and
+   multiplies the nonsynonymous masses by
 
-- `r ≡ 1` (the data's synonymous shape equals the model's) gives `IndependentSampling`'s
-  composition for any `w`; `w = 1` gives GRAPES-style conditioning on the observed Ps.
-- Why an anchor: rescaling `r` by `c` multiplies Pn/Ps by `c^(w-1)`, a pure level that only
-  α may set. The band is where `r = 1` means "not distorted"; the default 15-70% of the
-  sample (DAC 199-925 at n = 661; DAC 15-70 at n = 50) assumes the distortion is RECENT and
-  stays below the 70% cut that empirical data need against mispolarization. `param.dac`
-  must place at least one whole interval inside it (e.g. at n = 50, DACs 20 and 50 give
-  the intervals 20-49 and 50-69). Plain r_j (no band) was measured worse.
-- Requirements: `param.dac` ascending, Ps > 0 in every DAC interval, at least one whole
-  interval inside the anchor band. Each violation throws an `ArgumentError`.
-- Measured against SLiM on the forward model `rates()` builds (ρ drawn per model; Tennessen
-  history, 661 diploids, 6 ρ x B cells; two-epoch histories, 50 diploids, 8 cells; ABCreg,
-  tol 1000 of 1e5): α RMSE 0.028 vs 0.040 for `IndependentSampling` on the ρ grid, 0.047
-  vs 0.068 on the two-epoch grid, α coverage 0.95-0.96. One α and one DFE shape per grid,
-  one seed per run, bootstraps of one simulated pool, no 70% cut applied.
-- WARNING: pass the RAW per-frequency SFS. `summary_statistics` builds the tails itself;
+       t_i = f_i^τ / c_τ,   f_i = sqrt(dac_i * stop_i) / nn,
+       c_τ = sum_band x_i f_i^τ / sum_band x_i,   x_i = e_n,i r_i^w
+
+   - The Pn mass on the anchor band is unchanged, so the tilt changes only the shape, never
+     the level.
+   - It is a zero-mean, frequency-dependent distortion of the nonsynonymous spectrum that no
+     synonymous `r_i` can measure. It targets expansions, where old high-frequency
+     polymorphism carries slightly deleterious alleles from the small ancestral size.
+   - With `tilt = 0`, no `τ` is drawn and the random stream is identical to the sampler
+     without the option.
+6. **Draws.** With `P_k` the synonymous share of the distorted tails at DAC `k`,
+   `ps_k ~ Poisson(P_k O_k)` and `pn_k ~ Poisson((1 - P_k) O_k)`, as in
+   `IndependentSampling`.
+
+`w` and `τ` are marginalised: they are not written to the summaries, so the file layout and
+ABCreg's `P` are unchanged.
+
+# Notes
+
+- `r ≡ 1` (the data's synonymous shape equals the model's) and `tilt = 0` give
+  `IndependentSampling`'s composition for any `w`.
+- Requirements: `param.dac` ascending, Ps > 0 in every DAC interval, and at least one whole
+  interval inside the anchor band (at n = 50, DACs 20 and 50 give the intervals 20-49 and
+  50-69). Each violation throws an `ArgumentError`.
+- **Measured against SLiM.**
+  - The recommended setting was measured with ABCreg (tol 1000 of 1e5) on the forward model
+    of `rates()` with ρ drawn per row. Test grids: two-epoch histories (5x and 50x
+    expansions, 1/5 and 1/20 bottlenecks, B 0.4 and 0.999; 50 diploids) and the Tennessen
+    history (3 ρ x 2 B; 661 diploids).
+  - α RMSE was 0.029 (two-epoch) and 0.030 (Tennessen), against 0.055 and 0.039 for the
+    v1.0.0 code. The setting was chosen on these same grids, with one α and one DFE shape per
+    grid, and every resample is a bootstrap of one simulated pool.
+- **Contractions.** On its own, with uniform table rows, the sampler leaves a strong
+  bottleneck biased (about -0.10 under a 20x bottleneck at B = 0.999). Most of that bias came
+  from the prior on the realised α, which `FlatAlphaPrior(by_B = true)` removes: the
+  recommended setting gives -0.02 there.
+- **WARNING: pass the RAW per-frequency SFS.** `summary_statistics` builds the tails itself;
   a spectrum cumulated twice flattens α(x) and biases α.
-- WARNING: not for contractions. A bottleneck distorts the anchor band itself and leaves a
-  flat deleterious Pn/Ps excess that no `r^w` produces; the anchor assigns it to α (α
-  biased by about -0.10 under a 20x bottleneck at B = 0.999).
 """
 struct RjSampling <: AbstractPoissonSampling
     w_lo::Float64
@@ -245,16 +279,22 @@ struct RjSampling <: AbstractPoissonSampling
     anchor_hi::Float64
     ps_obs::Vector{Float64}   # observed Ps per interval (empty until _prepare_sampling)
     band::Vector{Bool}        # intervals inside the anchor band
+    tilt::Float64             # τ ~ U(-tilt, tilt); 0 = no tilt
+    lnf::Vector{Float64}      # ln geometric-mid frequency per interval (tilt coordinate)
 end
 
-function RjSampling(; w = (0.0, 1.5), anchor = (0.15, 0.70))
+RjSampling(w_lo, w_hi, anchor_lo, anchor_hi, ps_obs, band) =
+    RjSampling(w_lo, w_hi, anchor_lo, anchor_hi, ps_obs, band, 0.0, Float64[])
+
+function RjSampling(; w = (0.0, 1.5), anchor = (0.15, 0.70), tilt = 0.0)
     lo, hi = Float64(first(w)), Float64(last(w))
     (isfinite(lo) && isfinite(hi) && 0 <= lo <= hi) ||
         throw(ArgumentError("w must satisfy 0 <= w[1] <= w[2] < Inf, got $w"))
     a_lo, a_hi = Float64(first(anchor)), Float64(last(anchor))
     0 < a_lo < a_hi <= 1 || throw(ArgumentError(
         "anchor must be a frequency band (lo, hi) with 0 < lo < hi <= 1, got $anchor"))
-    return RjSampling(lo, hi, a_lo, a_hi, Float64[], Bool[])
+    (isfinite(tilt) && tilt >= 0) || throw(ArgumentError("tilt must be finite and >= 0, got $tilt"))
+    return RjSampling(lo, hi, a_lo, a_hi, Float64[], Bool[], Float64(tilt), Float64[])
 end
 
 function _prepare_sampling(s::RjSampling, sfs::AbstractMatrix,
@@ -273,18 +313,20 @@ function _prepare_sampling(s::RjSampling, sfs::AbstractMatrix,
         "add DACs so that one interval [dac[i], dac[i+1] - 1] falls inside it"))
     all(>(0), ps_obs) || throw(ArgumentError(
         "RjSampling needs Ps > 0 in every DAC interval; got $ps_obs for dac = $dac"))
-    return RjSampling(s.w_lo, s.w_hi, s.anchor_lo, s.anchor_hi, ps_obs, band)
+    lnf = [log(sqrt(dac[i] * stops[i]) / nn) for i in 1:n]
+    return RjSampling(s.w_lo, s.w_hi, s.anchor_lo, s.anchor_hi, ps_obs, band, s.tilt, lnf)
 end
 
 """
-    _rj_tails!(tps, tpn, r, λps_col, λpn_col, s, w)
+    _rj_tails!(tps, tpn, r, λps_col, λpn_col, s, w, τ = 0.0)
 
 Distorted tail sums of one table row for [`RjSampling`](@ref): fills
-`tps[k] = sum_{i>=k} λps_i r_i`, `tpn[k] = sum_{i>=k} λpn_i r_i^w` from the row's TAIL sums
-`λps_col`, `λpn_col` (split into intervals by differencing), with `r` normalised on the
-anchor band. `r` is scratch.
+`tps[k] = sum_{i>=k} λps_i r_i`, `tpn[k] = sum_{i>=k} λpn_i r_i^w t_i` from the row's TAIL
+sums `λps_col`, `λpn_col` (split into intervals by differencing), with `r` normalised on
+the anchor band and `t_i = exp(τ ln f_i) / c_τ` (1 if `τ = 0`) normalised so the band's
+Pn mass is unchanged. `r` is scratch.
 """
-function _rj_tails!(tps, tpn, r, λps_col, λpn_col, s::RjSampling, w::Float64)
+function _rj_tails!(tps, tpn, r, λps_col, λpn_col, s::RjSampling, w::Float64, τ::Float64 = 0.0)
     n = length(λps_col)
     tot_obs = sum(s.ps_obs)
     tot_mod = 0.0
@@ -300,13 +342,24 @@ function _rj_tails!(tps, tpn, r, λps_col, λpn_col, s::RjSampling, w::Float64)
         end
     end
     c = den > 0.0 && num > 0.0 ? num / den : 1.0
+    # tilt: normalise exp(τ ln f) on the band's (r-distorted) Pn mass
+    cτ = 1.0
+    if τ != 0.0
+        tn = 0.0; td = 0.0
+        @inbounds for i in 1:n
+            s.band[i] || continue
+            x = max(0.0, i < n ? λpn_col[i] - λpn_col[i+1] : λpn_col[n]) * (r[i] / c)^w
+            tn += x * exp(τ * s.lnf[i]); td += x
+        end
+        cτ = td > 0.0 && tn > 0.0 ? tn / td : 1.0
+    end
     acc_s = 0.0; acc_n = 0.0
     @inbounds for i in n:-1:1
         e_s = max(0.0, i < n ? λps_col[i] - λps_col[i+1] : λps_col[n])
         e_n = max(0.0, i < n ? λpn_col[i] - λpn_col[i+1] : λpn_col[n])
         ri = r[i] / c
         acc_s += e_s * ri
-        acc_n += e_n * ri^w
+        acc_n += τ == 0.0 ? e_n * ri^w : e_n * ri^w * exp(τ * s.lnf[i]) / cτ
         tps[i] = acc_s
         tpn[i] = acc_n
     end
@@ -344,9 +397,13 @@ function poisson_polymorphism!(
     tps = zeros(n_dac); tpn = zeros(n_dac); r = zeros(n_dac)
     fixed_w = s.w_lo == s.w_hi
     u = fixed_w ? nothing : Distributions.Uniform(s.w_lo, s.w_hi)
+    tilt = s.tilt > 0.0
+    tilt && length(s.lnf) != n_dac && throw(ArgumentError(
+        "RjSampling with tilt was not prepared for $n_dac DACs"))
     @inbounds for j in 1:N
         w = fixed_w ? s.w_lo : rand(u)
-        _rj_tails!(tps, tpn, r, view(λps, :, j), view(λpn, :, j), s, w)
+        τ = tilt ? s.tilt * (2 * rand() - 1) : 0.0
+        _rj_tails!(tps, tpn, r, view(λps, :, j), view(λpn, :, j), s, w, τ)
         for i in 1:n_dac
             denom = tps[i] + tpn[i]
             if denom == 0.0
@@ -367,7 +424,8 @@ end
 _sampling_desc(::AbstractPoissonSampling, param) = ""
 _sampling_desc(s::RjSampling, param) =
     "  w ~ U($(s.w_lo), $(s.w_hi)), anchor freq $(s.anchor_lo)-$(s.anchor_hi)" *
-    " (DAC $(ceil(Int, s.anchor_lo * param.nn))-$(floor(Int, s.anchor_hi * param.nn)))"
+    " (DAC $(ceil(Int, s.anchor_lo * param.nn))-$(floor(Int, s.anchor_hi * param.nn)))" *
+    (s.tilt > 0 ? ", tilt τ ~ U(-$(s.tilt), $(s.tilt))" : "")
 
 ################################
 ######    Row priors      ######

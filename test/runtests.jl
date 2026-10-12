@@ -526,6 +526,34 @@ using DelimitedFiles: readdlm
         end
         @test fixdraw(MKtest.RjSampling()) == fixdraw(MKtest.IndependentSampling())
 
+        # tilt: τ = 0 is the untilted sampler; τ ≠ 0 moves Pn mass along ln f, band mass fixed
+        pt = MKtest._prepare_sampling(MKtest.RjSampling(tilt = 0.05), raw, dac, 1322)
+        @test pt.tilt == 0.05 && pt.band == band
+        @test pt.lnf ≈ log.(sqrt.(dac .* [4, 9, 19, 49, 199, 660, 1321]) ./ 1322) rtol = 1e-12
+        a0 = zeros(n); b0 = zeros(n); a1 = zeros(n); b1 = zeros(n)
+        MKtest._rj_tails!(a0, b0, r, λps_col, λpn_col, pt, 0.7)
+        MKtest._rj_tails!(a1, b1, r, λps_col, λpn_col, pt, 0.7, 0.0)
+        @test (a0, b0) == (a1, b1)
+        MKtest._rj_tails!(a1, b1, r, λps_col, λpn_col, pt, 0.7, 0.3)
+        iv(t) = [i < n ? t[i] - t[i+1] : t[n] for i in 1:n]
+        @test a1 == a0                                        # Ps untouched
+        @test sum(iv(b1)[band]) ≈ sum(iv(b0)[band]) rtol = 1e-12   # no level on the band
+        q = iv(b1) ./ iv(b0)
+        @test issorted(q)                                     # τ > 0: Pn toward high frequency
+        @test q ./ q[1] ≈ exp.(0.3 .* (pt.lnf .- pt.lnf[1])) rtol = 1e-12
+        @test_throws ArgumentError MKtest.RjSampling(tilt = -0.1)
+        # tilt = 0 draws exactly the untilted sampler (no extra random numbers)
+        p0 = MKtest._prepare_sampling(MKtest.RjSampling(0.0, 1.5, 0.15, 0.70, Float64[], Bool[]),
+                                      raw, dac, 1322)
+        pz = MKtest._prepare_sampling(MKtest.RjSampling(w = (0.0, 1.5), tilt = 0.0), raw, dac, 1322)
+        function polydraw(smp)
+            a = zeros(n, 50); b = zeros(n, 50)
+            seed!(5)
+            MKtest.poisson_polymorphism!(a, b, O, repeat(λps_col, 1, 50), repeat(λpn_col, 1, 50), smp)
+            return a, b
+        end
+        @test polydraw(p0) == polydraw(pz)
+        @test polydraw(pt) != polydraw(p0)
     end
 
     # --- FlatAlphaPrior -----------------------------------------------------------
