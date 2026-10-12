@@ -679,4 +679,23 @@ using DelimitedFiles: readdlm
         @test_throws ArgumentError MKtest.FlatAlphaPrior(floor = 1.0)
     end
 
+    # --- valid_data ----------------------------------------------------------------
+    @testset "valid_data" begin
+        dac = [4, 5, 10, 20, 50, 200, 661]
+        param = MKtest.parameters(n = 661, dac = dac)
+        raw = hcat(1.0:1321.0, fill(3.0, 1321), fill(2.0, 1321))
+        gap = copy(raw); gap[200:660, 3] .= 0.0      # no Ps in one interval; every tail > 0
+        top = copy(raw); top[661:end, 2] .= 0.0      # no Pn at DAC >= 661
+        d = [3000.0, 2000.0, 1e6, 3e5]
+        sfs = [raw, gap, top, raw, raw]
+        div = [d, d, d, [0.0, 2000.0, 1e6, 3e5], permutedims(d)]   # Dn = 0; 1 x 4 form
+        @test MKtest.valid_data(param, sfs, div) == [true, false, false, false, true]
+        @test MKtest.valid_data(param, sfs, div; sampling = MKtest.IndependentSampling()) ==
+              [true, true, false, false, true]
+        # the same intervals as the sampler: what valid_data rejects, RjSampling throws for
+        @test MKtest._interval_ps(raw, dac) == MKtest._prepare_sampling(MKtest.RjSampling(), raw, dac, 1322).ps_obs
+        @test_throws ArgumentError MKtest._prepare_sampling(MKtest.RjSampling(), gap, dac, 1322)
+        @test_throws ArgumentError MKtest.valid_data(param, sfs, div[1:3])
+    end
+
 end

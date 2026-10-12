@@ -301,10 +301,8 @@ end
 function _prepare_sampling(s::RjSampling, sfs::AbstractMatrix,
                            dac::Vector{Int64}, nn::Integer)
     issorted(dac) || throw(ArgumentError("RjSampling needs param.dac ascending"))
-    cum = cumulative_sfs(sfs)
-    tail_ps = map(z -> sum(cum[cum[:, 1] .== z, 3]), dac)
+    ps_obs = _interval_ps(sfs, dac)
     n = length(dac)
-    ps_obs = [i < n ? tail_ps[i] - tail_ps[i+1] : tail_ps[n] for i in 1:n]
     stops = [i < n ? dac[i+1] - 1 : nn - 1 for i in 1:n]
     # the band is a frequency; resolve it with this dataset's sample size
     band = [dac[i] >= s.anchor_lo * nn && stops[i] <= s.anchor_hi * nn for i in 1:n]
@@ -317,6 +315,51 @@ function _prepare_sampling(s::RjSampling, sfs::AbstractMatrix,
     lnf = [log(sqrt(dac[i] * stops[i]) / nn) for i in 1:n]
     return RjSampling(s.w_lo, s.w_hi, s.anchor_lo, s.anchor_hi, ps_obs, band, s.tilt, lnf)
 end
+
+"Observed Ps per DAC interval `[dac_i, dac_(i+1) - 1]` (the last runs to the top) of a RAW SFS."
+function _interval_ps(sfs::AbstractMatrix, dac::Vector{Int64})
+    cum = cumulative_sfs(sfs)
+    tail_ps = map(z -> sum(cum[cum[:, 1] .== z, 3]), dac)
+    n = length(dac)
+    return [i < n ? tail_ps[i] - tail_ps[i+1] : tail_ps[n] for i in 1:n]
+end
+
+"""
+    valid_data(param, sfs, divergence; sampling = RjSampling()) -> Vector{Bool}
+
+Which datasets `summary_statistics` and [`abcmk`](@ref) can use with `sampling`, one `Bool`
+per dataset, so that datasets that would stop the run are discarded beforehand:
+
+    ok = MKtest.valid_data(param, sfs, divergence)
+    sfs, divergence = sfs[ok], divergence[ok]
+
+Every sampler needs `Dn > 0`, `Ds > 0` and, at every DAC of `param.dac`, Pn > 0 and Ps > 0
+in the tail (DAC >= k), so that the observed α(x) is finite. [`RjSampling`](@ref) also
+needs Ps > 0 in every interval between consecutive DACs, where it measures the
+synonymous distortion. The DAC layout itself (ascending, one interval inside the anchor
+band) is not checked here: it is the same for every dataset, and `RjSampling` still
+throws for it.
+
+`sfs` and `divergence` as for `summary_statistics`: RAW per-frequency SFS `[DAC Pn Ps]`
+and divergence `[Dn, Ds, ...]`.
+"""
+function valid_data(param::parameters, sfs::Vector, divergence::Vector;
+                    sampling::AbstractPoissonSampling = RjSampling())
+    length(sfs) == length(divergence) || throw(ArgumentError(
+        "got $(length(sfs)) SFS for $(length(divergence)) divergence datasets"))
+    return [_valid_data(sampling, x, d, param.dac) for (x, d) in zip(sfs, divergence)]
+end
+
+function _valid_data(::AbstractPoissonSampling, sfs::AbstractMatrix, d, dac::Vector{Int64})
+    d[1] > 0 && d[2] > 0 || return false
+    cum = cumulative_sfs(sfs)
+    tails = cum[in(dac).(view(cum, :, 1)), 2:3]
+    return size(tails, 1) == length(dac) && all(>(0), tails)
+end
+
+_valid_data(s::RjSampling, sfs::AbstractMatrix, d, dac::Vector{Int64}) =
+    invoke(_valid_data, Tuple{AbstractPoissonSampling,AbstractMatrix,Any,Vector{Int64}}, s, sfs, d, dac) &&
+    all(>(0), _interval_ps(sfs, dac))
 
 """
     _rj_tails!(tps, tpn, r, λps_col, λpn_col, s, w, τ = 0.0)
