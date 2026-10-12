@@ -936,6 +936,8 @@ Performs Approximate Bayesian Computation (ABC) using either regression adjustme
 - `stat::String`: The statistic to summarize the posteriors, such as "mode". Default is `"mode"`.
 - `sampling::AbstractPoissonSampling`: how the summary statistics are sampled from the rates
   table. `IndependentSampling()` (default) or `RjSampling()`.
+- `row_prior::AbstractRowPrior`: which table rows are drawn. `TableRowPrior()` (default) or
+  `FlatAlphaPrior()`.
 
 # Returns
 - `DataFrame`: A DataFrame summarizing the posterior distributions.
@@ -954,10 +956,11 @@ function abcmk(
     rm_summaries::Bool=true,
     stat::String="mode",
     sampling::AbstractPoissonSampling=IndependentSampling(),
+    row_prior::AbstractRowPrior=TableRowPrior(),
 )
     @assert abc_method ∈ ["abcreg","abc"] "Please select ABCreg or abc from R package"
 
-    summ_stats = summary_statistics(param,sfs,divergence,h5_file=h5_file,output_folder=output_folder,summstat_size=summstat_size,alpha=alpha,B_bins=B_bins,sampling=sampling);
+    summ_stats = summary_statistics(param,sfs,divergence,h5_file=h5_file,output_folder=output_folder,summstat_size=summstat_size,alpha=alpha,B_bins=B_bins,sampling=sampling,row_prior=row_prior);
 
     if lowercase(abc_method) == "abcreg"
         posteriors = ABCreg(output_folder=output_folder,S=length(param.dac),tol=tol,rm_summaries=rm_summaries);

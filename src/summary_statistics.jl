@@ -369,6 +369,84 @@ _sampling_desc(s::RjSampling, param) =
     "  w ~ U($(s.w_lo), $(s.w_hi)), anchor freq $(s.anchor_lo)-$(s.anchor_hi)" *
     " (DAC $(ceil(Int, s.anchor_lo * param.nn))-$(floor(Int, s.anchor_hi * param.nn)))"
 
+################################
+######    Row priors      ######
+################################
+
+"""
+    AbstractRowPrior
+
+Which table rows `summary_statistics` draws, i.e. the ABC prior over the model parameters:
+[`TableRowPrior`](@ref) (the default, uniform over the rows) or [`FlatAlphaPrior`](@ref).
+"""
+abstract type AbstractRowPrior end
+
+"""
+    TableRowPrior()
+
+Rows drawn uniformly (with replacement): the prior is the table's own design. The default.
+"""
+struct TableRowPrior <: AbstractRowPrior end
+
+"""
+    FlatAlphaPrior(; bin = 0.01, floor = 0.001, by_B = false)
+
+Rows drawn with replacement, weighted so that the prior on each row's realised α
+`(λW + λS) / λdn` is flat: weight `1 / max(count of its α bin, floor · rows)`, bins of
+width `bin`. The floor keeps the sparse edges of the α range from taking huge weights.
+With `by_B = true` α is flattened within each B value of the table instead (counts and
+floor per B), so the prior on B keeps the table's uniform design; otherwise flattening α
+also moves prior mass toward high B, where the high α values are.
+
+Why: a table drawn with uniform α LABELS has a realised-α prior that falls with α, because
+the realised α shrinks with B (two-epoch table: 18.5% of rows below 0.05, 1.7% in
+[0.45, 0.50)). Rejection ABC then pulls α toward 0 wherever the likelihood is broad.
+Measured in the offline lab (`results/rj/lab*`, 2026-10-11): bottleneck α RMSE 0.105 -> 0.039
+(bt_strong, B .999) and 0.038 -> 0.019 (bt_moderate, B 0.4), ρ ladder unchanged (|Δ| ≤ 0.001).
+"""
+struct FlatAlphaPrior <: AbstractRowPrior
+    bin::Float64
+    floor::Float64
+    by_B::Bool
+end
+
+function FlatAlphaPrior(; bin = 0.01, floor = 0.001, by_B = false)
+    (isfinite(bin) && bin > 0) || throw(ArgumentError("bin must be > 0, got $bin"))
+    (isfinite(floor) && 0 <= floor < 1) || throw(ArgumentError("floor must be in [0, 1), got $floor"))
+    return FlatAlphaPrior(Float64(bin), Float64(floor), Bool(by_B))
+end
+
+"Row weights over the candidate rows `idx` (nothing = uniform). `B`: the table's B column."
+_row_weights(::TableRowPrior, dsdn::AbstractMatrix, idx; B = nothing) = nothing
+
+function _row_weights(p::FlatAlphaPrior, dsdn::AbstractMatrix, idx; B = nothing)
+    p.by_B && B === nothing && throw(ArgumentError("FlatAlphaPrior(by_B = true) needs the B column"))
+    key = Vector{Tuple{Float64,Int}}(undef, length(idx))
+    cnt = Dict{Tuple{Float64,Int},Int}()
+    nB  = Dict{Float64,Int}()
+    @inbounds for (k, i) in enumerate(idx)
+        α = (dsdn[i, 3] + dsdn[i, 4]) / dsdn[i, 2]
+        g = p.by_B ? Float64(B[i]) : 0.0
+        key[k] = (g, isfinite(α) ? floor(Int, α / p.bin) : -1)
+        nB[g] = get(nB, g, 0) + 1
+        key[k][2] >= 0 && (cnt[key[k]] = get(cnt, key[k], 0) + 1)
+    end
+    # by_B: each B value carries its share of rows, split equally over its occupied α bins
+    nbin = Dict{Float64,Int}()
+    for k in keys(cnt); nbin[k[1]] = get(nbin, k[1], 0) + 1; end
+    share(g) = p.by_B ? nB[g] / (length(idx) * nbin[g]) : 1.0
+    return [x[2] >= 0 ? share(x[1]) / max(cnt[x], p.floor * nB[x[1]]) : 0.0 for x in key]
+end
+
+"Draw `n` rows of `idx` under `prior`."
+function _sample_rows(prior::AbstractRowPrior, dsdn::AbstractMatrix, idx, n::Int; B = nothing)
+    w = _row_weights(prior, dsdn, idx; B)
+    return w === nothing ? sample(idx, n; replace = true) : sample(idx, Weights(w), n; replace = true)
+end
+
+_row_prior_desc(::TableRowPrior) = "TableRowPrior (uniform rows)"
+_row_prior_desc(p::FlatAlphaPrior) = "FlatAlphaPrior (bin $(p.bin), floor $(p.floor), by_B $(p.by_B))"
+
 """
     sampling_summaries!(buf, fs, d, neut, sel, dsdn, gn, sh, gL, gH, B, output, summstat_size, sampling)
 
@@ -506,6 +584,8 @@ Estimate summary statistics using observed data and analytical rates. *output_fo
    `[alpha[1], alpha[end]]`. `al_tot` is the model's alpha LABEL, which equals the realised
    fixation alpha only in the B = 0.999 bin.
  - `B_bins::Union{Nothing,Vector{Float64}}` : keep only models with B in this range.
+ - `row_prior::AbstractRowPrior` : how table rows are drawn. `TableRowPrior()` (default)
+   or `FlatAlphaPrior()`.
 """
 function summary_statistics(
     param::parameters,
@@ -517,6 +597,7 @@ function summary_statistics(
     alpha::Union{Nothing,Vector{Float64}} = nothing,
     B_bins::Union{Nothing,Vector{Float64}} = nothing,
     sampling::AbstractPoissonSampling = IndependentSampling(),
+    row_prior::AbstractRowPrior = TableRowPrior(),
 )
 
     @assert 1 ∉ param.dac "Please exclude singletons from the inference"
@@ -545,6 +626,7 @@ function summary_statistics(
         println(io, "rates_file  = ", h5_file)
         println(io, "rates_opts  = ", tmp.options)
         println(io, "sampling    = ", nameof(typeof(sampling)), _sampling_desc(sampling, param))
+        println(io, "row_prior   = ", _row_prior_desc(row_prior))
         println(io, "S           = ", length(param.dac))
         println(io, "N, n        = ", param.N, ", ", param.n)
         println(io, "cutoff      = ", param.cutoff)
@@ -590,7 +672,7 @@ function summary_statistics(
     # Increasing manually the summstat_size to ensure we retrieved the input summaries size
     increased_summstat = 1 * summstat_size
 
-    sampled_idx = sample(idx, increased_summstat;replace=true)
+    sampled_idx = _sample_rows(row_prior, tmp.dsdn, idx, increased_summstat; B = tmp.models.B)
 
     @assert length(sampled_idx) >=  increased_summstat "Check the filters or increase the number of rates solutions"
 

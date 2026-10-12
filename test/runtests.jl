@@ -525,6 +525,45 @@ using DelimitedFiles: readdlm
             return (αm, ωm, dn, ds)
         end
         @test fixdraw(MKtest.RjSampling()) == fixdraw(MKtest.IndependentSampling())
+
+    end
+
+    # --- FlatAlphaPrior -----------------------------------------------------------
+    @testset "FlatAlphaPrior" begin
+        rng = MersenneTwister(11)
+        M = 200_000
+        α = rand(rng, M) .^ 2 .* 0.5                 # realised α piled near 0
+        λdn = rand(rng, M) .+ 1.0
+        dsdn = hcat(ones(M), λdn, 0.4 .* α .* λdn, 0.6 .* α .* λdn)
+        idx = collect(1:M)
+        @test MKtest._row_weights(MKtest.TableRowPrior(), dsdn, idx) === nothing
+        w = MKtest._row_weights(MKtest.FlatAlphaPrior(floor = 0.0, by_B = false), dsdn, idx)
+        mass = [sum(w[floor.(Int, α ./ 0.01) .== k]) for k in 0:49]
+        @test maximum(mass) / minimum(mass) < 1.0 + 1e-9  # flat: every bin carries the same weight
+        # the floor caps the weight of sparse bins
+        wf = MKtest._row_weights(MKtest.FlatAlphaPrior(floor = 0.05, by_B = false), dsdn, idx)
+        @test maximum(wf) <= 1 / (0.05 * M) + 1e-15
+        seed!(3)
+        s = MKtest._sample_rows(MKtest.FlatAlphaPrior(floor = 0.0, by_B = false), dsdn, idx, 400_000)
+        h = [count(==(k), floor.(Int, α[s] ./ 0.01)) for k in 0:49] ./ 400_000
+        @test maximum(abs.(h .- 0.02)) < 0.003
+        # a non-finite α (λdn = 0) is never drawn
+        d2 = copy(dsdn); d2[1, 2] = 0.0
+        @test MKtest._row_weights(MKtest.FlatAlphaPrior(by_B = false), d2, idx)[1] == 0.0
+        # by_B: α flat within each B value, and each B keeps its share of rows
+        Bc = ifelse.(1:M .<= M ÷ 4, 400.0, 999.0)               # 25% / 75% of rows
+        αB = ifelse.(Bc .== 400.0, rand(rng, M) .* 0.2, 0.2 .+ rand(rng, M) .* 0.3)
+        dB = hcat(ones(M), λdn, 0.5 .* αB .* λdn, 0.5 .* αB .* λdn)
+        wB = MKtest._row_weights(MKtest.FlatAlphaPrior(floor = 0.0, by_B = true), dB, idx; B = Bc)
+        @test sum(wB[Bc .== 400.0]) / sum(wB) ≈ 0.25 rtol = 1e-9
+        mB = [sum(wB[(Bc .== 999.0) .& (floor.(Int, αB ./ 0.01) .== k)]) for k in 20:49]
+        @test maximum(mB) / minimum(mB) < 1.0 + 1e-9
+        # by_B = false (the default) ignores B; by_B = true needs it
+        @test MKtest._row_weights(MKtest.FlatAlphaPrior(), dsdn, idx) ==
+              MKtest._row_weights(MKtest.FlatAlphaPrior(by_B = false), dsdn, idx; B = Bc)
+        @test_throws ArgumentError MKtest._row_weights(MKtest.FlatAlphaPrior(by_B = true), dB, idx)
+        @test_throws ArgumentError MKtest.FlatAlphaPrior(bin = 0)
+        @test_throws ArgumentError MKtest.FlatAlphaPrior(floor = 1.0)
     end
 
 end
