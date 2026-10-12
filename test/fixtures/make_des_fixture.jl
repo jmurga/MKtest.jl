@@ -37,7 +37,7 @@ for (tag, samp) in (("des", MKtest.DemographyExponentSampling()),
     Random.seed!(7)
     MKtest.summary_statistics(mkparam(), [BEST["sfs"]], [BEST["div"]]; h5_file = tab,
                               summstat_size = 200, output_folder = of, sampling = samp)
-    summ[tag] = readdlm(joinpath(of, "summstat_1.txt"))
+    summ[tag] = MKtest._with_gz(readdlm, joinpath(of, "summstat_1.txt.gz"))
 end
 
 jldsave(OUT; models = Matrix(r.models), model_names = names(r.models), dsdn = r.dsdn,

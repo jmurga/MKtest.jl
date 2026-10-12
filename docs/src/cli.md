@@ -79,7 +79,7 @@ Optional Arguments:
 julia abcmk_cli.jl summaries --folder mktest/ --rates mktest/rates.jld2 --samples 661 --dac 2,4,5,10,20,50,200,661,925 --summsize 1000000
 ```
 
-The function will output observed data (*alphas_N.txt*) and summary statistics (*summaries_N.txt*) in the selected folder. These file will be used at ABC inference to generate posterior distributions.
+The function will output observed data (*alphas_N.txt.gz*) and summary statistics (*summstat_N.txt.gz*), gzip-compressed, in the selected folder. These file will be used at ABC inference to generate posterior distributions.
 
 ```bash
 julia abcmk_cli.jl summaries --analysis_folder mktest/ --rates  mktest/rates.jld2 --samples 661 --replicas 100 --summstatSize 100000 --dac 2,4,5,10,20,50,200,661,925

@@ -772,7 +772,7 @@ function summary_statistics(
     B  = collect(view(models, :, 1))               # B * 1000
 
     # Making summaries
-    summ_output = output_folder .* "/summstat_" .* string.(1:size(sfs_p, 1)) .* ".txt"
+    summ_output = output_folder .* "/summstat_" .* string.(1:size(sfs_p, 1)) .* ".txt.gz"
 
     @info "Estimating and writting summary statistics at $output_folder"
 
@@ -792,7 +792,7 @@ function summary_statistics(
         samplers
     );
 
-    α_output = output_folder * "/alphas_" .* string.(1:size(sfs_p, 1)) .* ".txt"
+    α_output = output_folder * "/alphas_" .* string.(1:size(sfs_p, 1)) .* ".txt.gz"
 
     @. write_files(α, α_output)
 end

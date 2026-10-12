@@ -6,13 +6,24 @@
 q_lower(x::Vector{Float64}) = quantile(x, [0.025])
 q_upper(x::Vector{Float64}) = quantile(x, [0.975])
 
+# A `.gz` name is written gzip-compressed.
 function write_files(x::Matrix{Float64}, name::String)
-    CSV.write(name, Tables.table(x), delim = '\t', header = false)
+    CSV.write(name, Tables.table(x), delim = '\t', header = false, compress = endswith(name, ".gz"))
 end;
 
 function write_files(x::SubArray, name::String)
-    CSV.write(name, Tables.table(x), delim = '\t', header = false)
+    CSV.write(name, Tables.table(x), delim = '\t', header = false, compress = endswith(name, ".gz"))
 end;
+
+# Plain or gzipped text through `GZip.open`, closed afterwards.
+function _with_gz(f, file::String)
+    io = open(file)
+    try
+        return f(io)
+    finally
+        close(io)
+    end
+end
 
 # A positive whole number given as any Real (1000, 1000.0, 1e3) as an Int.
 function _as_count(x::Real, name::String)
@@ -25,7 +36,7 @@ function write_files(x::DataFrame, name::String, newfile::Bool)
     CSV.write(name, x, delim = '\t', header = false, append = newfile)
 end;
 
-# Index of the dataset a file belongs to: 10 for `summstat_10.txt` or `out_10.0.post.gz`.
+# Index of the dataset a file belongs to: 10 for `summstat_10.txt.gz` or `out_10.0.post.gz`.
 _dataset_index(file::String) = parse(Int, match(r"^[a-z]+_(\d+)", basename(file))[1])
 
 # Files of `output_folder` starting with `prefix`, in dataset order. `readdir` sorts names
@@ -74,13 +85,13 @@ function ABCreg(;
     tol = _as_count(tol, "tol")
 
     # Change P if omega was not estimated
-    if size(readdlm(sum_file[1]),2) != (P+S)
+    if size(_with_gz(readdlm, sum_file[1]), 2) != (P+S)
         P = P - 4
     end
 
     # Creating output names
     out = output_folder .* "/out_" .* string.(_dataset_index.(a_file))
-    tol_abcreg = tol./countlines.(sum_file)
+    tol_abcreg = tol ./ _with_gz.(countlines, sum_file)
     @info "Running ABCreg. Please cite https://doi.org/10.1186/1471-2156-10-35"
     # Using mapi instead map to limit tasks. Bash interaction not working as expected
     ThreadsX.mapi(

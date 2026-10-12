@@ -302,7 +302,7 @@ using DelimitedFiles: readdlm
                                   summstat_size = 200, output_folder = of,
                                   sampling = MKtest.IndependentSampling(),
                                   row_prior = MKtest.TableRowPrior())
-        @test readdlm(joinpath(of, "summstat_1.txt")) == fx["summ_indep"]
+        @test MKtest._with_gz(readdlm, joinpath(of, "summstat_1.txt.gz")) == fx["summ_indep"]
 
         # the defaults are RjSampling(w = (0, 2.5), tilt = 0.05) with FlatAlphaPrior(by_B = true)
         summ(; kw...) = begin
@@ -310,7 +310,7 @@ using DelimitedFiles: readdlm
             seed!(7)
             MKtest.summary_statistics(mkparam(), [fx["sfs"]], [fx["div"]]; h5_file = tab,
                                       summstat_size = 200, output_folder = of, kw...)
-            readdlm(joinpath(of, "summstat_1.txt"))
+            MKtest._with_gz(readdlm, joinpath(of, "summstat_1.txt.gz"))
         end
         @test summ() == summ(sampling = MKtest.RjSampling(w = (0.0, 2.5), tilt = 0.05),
                              row_prior = MKtest.FlatAlphaPrior(by_B = true))
@@ -341,7 +341,7 @@ using DelimitedFiles: readdlm
             MKtest.summary_statistics(mkparam(), [best["sfs"]], [best["div"]]; h5_file = tab,
                                       summstat_size = 200, output_folder = of, sampling = samp,
                                       row_prior = MKtest.TableRowPrior())
-            @test readdlm(joinpath(of, "summstat_1.txt")) == fx[tag]
+            @test MKtest._with_gz(readdlm, joinpath(of, "summstat_1.txt.gz")) == fx[tag]
         end
     end
 
@@ -427,6 +427,7 @@ using DelimitedFiles: readdlm
     @testset "ABC output order" begin
         @test MKtest._dataset_index("/a/b/summstat_10.txt") == 10
         @test MKtest._dataset_index("out_7.0.post.gz") == 7
+        @test MKtest._dataset_index("summstat_10.txt.gz") == 10
         @test MKtest._as_count(1e3, "tol") === 1000
         @test MKtest._as_count(Int32(5), "tol") === 5
         @test_throws ArgumentError MKtest._as_count(0.5, "tol")
