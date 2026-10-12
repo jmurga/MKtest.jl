@@ -97,4 +97,27 @@ Plot an asymptotic MK fit: the observed alpha(x), the fitted curve of the model 
 """
 function plot_asymptotic_mk end
 
+"""
+    plot_violins_empirical(tbl; omega, params, alternative, pvalues, output_path, kwargs...)
+
+Case against control sets per analysis, as Figure 4 of bioRxiv
+doi:10.64898/2025.12.12.693836: one row per parameter (α, α_strong, α_weak by default), one column per
+analysis. A grey violin shows the control sets, a black bar their median, a black dot the
+case and stars its empirical p-value. Requires `using StatsPlots`.
+
+# Arguments
+ - `tbl::DataFrame`: output of [`case_control_table`](@ref); analyses keep their order.
+ - `omega::Bool`: plot ωₐ, ωₐ_strong, ωₐ_weak instead. Default `false`.
+ - `params`: parameter columns, one row each; overrides `omega`.
+ - `alternative::Symbol`: passed to [`empirical_test`](@ref). Default `:greater`.
+ - `pvalues`: an `empirical_test` result to annotate; computed from `tbl` by default, or
+   `false` for no stars.
+ - `output_path`: save the figure; format from the extension (`.png`, `.svg`, `.pdf`, ...).
+ - Other keywords (`size`, `dpi`, ...) are passed to the final `plot`.
+
+# Returns
+ - `Plots.Plot`.
+"""
+function plot_violins_empirical end
+
 end

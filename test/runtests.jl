@@ -466,6 +466,62 @@ using DelimitedFiles: readdlm
         @test one(sfs[1], div[1])[:inference] == one([sfs[1]], [div[1]])[:inference]
     end
 
+    # --- summary_abc --------------------------------------------------------------
+    @testset "summary_abc" begin
+        rng = MersenneTwister(11)
+        cn = [:α_weak, :α_strong, :α, :γ₋, :β, :γ₊, :γ₊₊, :B]
+        post = [MKtest.DataFrame(rand(rng, 500, 8), cn) for _ in 1:3]
+        q(v, p) = MKtest.quantile(v, p)
+        for (k, P) in ((1, post[1:1]), (3, post), (3, Matrix.(post)))
+            r = MKtest.summary_abc(P; stat = "median")
+            @test nrow(r[:inference]) == k && nrow(r[:quantiles]) == k
+            @test nrow(r[:stats]) == 7k
+            @test r[:stats].Stats[1:7] ==
+                  ["Min.", "2.5% Perc.", "Median", "Mean", "Mode", "97.5% Perc.", "Max"]
+            for i in 1:k, c in cn
+                v = post[i][:, c]
+                blk = r[:stats][(7i - 6):7i, c]
+                @test blk ≈ [minimum(v), q(v, 0.025), MKtest.median(v), MKtest.mean(v),
+                             blk[5], q(v, 0.975), maximum(v)]
+                @test r[:inference][i, c] == MKtest.median(v)
+            end
+        end
+        # the mode row is get_mode, the inference row follows `stat`
+        r = MKtest.summary_abc(post[1:1]; stat = "Mode")
+        @test vec(Matrix(r[:inference])) == vec(MKtest.get_mode(post[1]))
+        @test startswith(r[:quantiles][1, :α], string(round(r[:inference][1, :α], digits = 3)) * " [")
+        @test_throws ArgumentError MKtest.summary_abc(post; stat = "foo")
+    end
+
+    # --- case/control empirical test ----------------------------------------------
+    @testset "empirical_test" begin
+        cn = [:α_weak, :α_strong, :α]
+        ctrl = MKtest.DataFrame(hcat(1.0:99, 1.0:99, 1.0:99), cn)
+        mk(x, a) = MKtest.case_control_table(
+            MKtest.OrderedDict(:inference => MKtest.DataFrame([x x x], cn)), ctrl; analysis = a)
+        tbl = vcat(mk(95.0, "a"), mk(100.0, "b"), mk(50.0, "c"))
+        @test nrow(tbl) == 300
+        @test names(tbl)[1:3] == ["analysis", "type", "set"]
+        r = MKtest.empirical_test(tbl)
+        @test r.param[1:3] == ["α", "α_strong", "α_weak"]
+        pa = r.p[r.param .== "α"]
+        # 95 vs 1..99: 5 controls >= 95 -> 6 / 100; 100: none -> 1 / 100; 50: 50 -> 51 / 100
+        @test pa ≈ [0.06, 0.01, 0.51]
+        @test r.stars[r.param .== "α"] == ["", "*", ""]
+        @test r.control_median[1] == 50.0 && r.n_control[1] == 99
+        rl = MKtest.empirical_test(tbl; alternative = :less)
+        @test rl.p[rl.param .== "α"] ≈ [96 / 100, 100 / 100, 51 / 100]
+        rt = MKtest.empirical_test(tbl; alternative = :two_sided)
+        @test rt.p[rt.param .== "α"] ≈ [0.12, 0.02, 1.0]
+        @test MKtest._stars.([0.0005, 0.005, 0.03, 0.05]) == ["***", "**", "*", ""]
+        # per analysis: the controls of one analysis never enter another's test
+        tbl2 = vcat(mk(95.0, "a"), MKtest.case_control_table(
+            MKtest.DataFrame([95.0 95.0 95.0], cn), ctrl .* 0 .+ 1000; analysis = "z"))
+        @test MKtest.empirical_test(tbl2).p[[1, 4]] ≈ [0.06, 1.0]
+        @test_throws ArgumentError MKtest.empirical_test(tbl; omega = true)
+        @test_throws ArgumentError MKtest.case_control_table(ctrl, ctrl; analysis = "x")
+    end
+
     # --- RjSampling: analytic properties ----------------------
     @testset "RjSampling" begin
         dac = [4, 5, 10, 20, 50, 200, 661]

@@ -182,181 +182,69 @@ end
 
 
 """
-	summary_abc(posteriors,stat)
-Posterior distributions statistics. The function estimates Min., 0.5% Perc., Median, Mean, Mode, "99.5% Perc., Max values. The mode is estimated following R package abc mode function. The argument `stat` define the output estimation.
+	summary_abc(posteriors; stat)
+
+Posterior statistics: Min., 2.5% Perc., Median, Mean, Mode, 97.5% Perc. and Max. of every
+parameter. The mode follows the R package abc (maximum of a kernel density estimate).
 
 # Arguments
- - `posterior::Matrix{Float64}` : posterior distribution.
- - `stat::String`: output estimation.
+ - `posteriors::Vector{DataFrame}` or `Vector{Matrix{Float64}}`: one posterior per dataset,
+   with 8 (no ω) or 12 columns.
+ - `stat::String`: statistic returned as the point estimate: "Min.", "Median", "Mean",
+   "Mode" or "Max" (case-insensitive). Default "Mode".
 # Output
- - `DataFrame`: posterior statistics.
- - `DataFrame`: chosen statistic inference.
+ - `OrderedDict` with
+   - `:inference`: one row per dataset with the chosen statistic.
+   - `:quantiles`: the same values as strings with the 95% interval, `"0.2 [0.1-0.3]"`.
+   - `:stats`: all statistics, a `Stats` column then one row per statistic and dataset.
 """
-function summary_abc(posteriors::Vector{Matrix{Float64}}; stat::String = "Mode")
-    @info "Computing statistics over posteriors distributions"
-
-    p_min    = vcat(ThreadsX.map(x -> minimum(x, dims = 1), posteriors)...)
-    p_max    = vcat(ThreadsX.map(x -> maximum(x, dims = 1), posteriors)...)
-    p_mean   = vcat(ThreadsX.map(x -> mean(x, dims = 1), posteriors)...)
-    p_median = vcat(ThreadsX.map(x -> median(x, dims = 1), posteriors)...)
-    p_mode   = vcat(ThreadsX.map(get_mode, posteriors)...)
-    p_lower  = vcat(ThreadsX.map(x -> mapslices(q_lower, x, dims = 1), posteriors)...)
-    p_upper  = vcat(ThreadsX.map(x -> mapslices(q_upper, x, dims = 1), posteriors)...)
-
-    if size(p_mean,2) != 12
-        c_names = [:α_weak, :α_strong, :α, :γ₋, :β,:γ₊,:γ₊₊,:B]
-    else
-        c_names = [:α_weak, :α_strong, :α,:ωₐ_weak,:ωₐ_strong,:ωₐ,:ωₙₐ,:γ₋,:β,:γ₊,:γ₊₊,:B]
-    end
-    if length(posteriors) == 1
-
-        quantile_string = String[]
-        for i in zip(p_lower,p_upper)
-            push!(quantile_string," [" * join(string.(round.(i,digits=3)),"-") * "]")
-        end
-        quantile_string = DataFrame(x1=vcat(quantile_string))
-
-        stats = DataFrame(
-            :Stats => repeat(
-                ["Min.", "2.5% Perc.", "Median", "Mean", "Mode", "97.5% Perc.", "Max"],
-                inner = length(posteriors),
-            ),
-        )
-
-        tmp = DataFrame(
-            vcat(p_min, p_lower, p_median, p_mean, p_mode, p_upper, p_max),
-	    c_names
-        )
-
-        df = hcat(stats, tmp)
-
-        @info df
-
-        df_quantiles = permutedims(string.(permutedims(string.(round.(df[df.Stats.==uppercasefirst(stat), 2:end],digits=3))),quantile_string))
-        rename!(df_quantiles,c_names)
-
-        # return df[df.Stats.==uppercasefirst(stat), 2:end], df_quantiles, df
-        return OrderedDict(:inference=>df[df.Stats.==uppercasefirst(stat), 2:end],:quantiles=>df_quantiles,:stats=>df)
-
-    else
-        df = DataFrame[]
-        for i::Int64 = 1:length(posteriors)
-            stats = DataFrame(
-                :Stats => [
-                    "Min.",
-                    "2.5% Perc.",
-                    "Median",
-                    "Mean",
-                    "Mode",
-                    "97.5% Perc.",
-                    "Max",
-                ],
-            )
-
-            tmp = DataFrame(
-                hcat(
-                    p_min[i, :],
-                    p_lower[i, :],
-                    p_median[i, :],
-                    p_mean[i, :],
-                    p_mode[i, :],
-                    p_upper[i, :],
-                    p_max[i, :],
-                )',
-                c_names
-            )
-            push!(df, hcat(stats, tmp))
-        end
-
-        df_vcat = vcat(df...)
-
-        # return  df_vcat[df_vcat.Stats.==uppercasefirst(stat), 2:end], df
-        return OrderedDict(:inference=>df[df.Stats.==uppercasefirst(stat), 2:end],:quantiles=> df_quantiles,:stats=>df)
-
-    end
-end
-
 function summary_abc(posteriors::Vector{DataFrame}; stat::String = "Mode")
     @info "Computing statistics over posteriors distributions"
 
-    p_min    = vcat(ThreadsX.map(x -> minimum.(eachcol(x))', posteriors)...)
-    p_max    = vcat(ThreadsX.map(x -> maximum.(eachcol(x))', posteriors)...)
-    p_mean   = vcat(ThreadsX.map(x -> mean.(eachcol(x))', posteriors)...)
-    p_median = vcat(ThreadsX.map(x -> median.(eachcol(x))', posteriors)...)
-    p_mode   = vcat(ThreadsX.map(get_mode, posteriors)...)
-    p_lower  = vcat(ThreadsX.map(x -> hcat(q_lower.(eachcol(x))...), posteriors)...)
-    p_upper  = vcat(ThreadsX.map(x -> hcat(q_upper.(eachcol(x))...), posteriors)...)
+    labels = ["Min.", "2.5% Perc.", "Median", "Mean", "Mode", "97.5% Perc.", "Max"]
+    key = uppercasefirst(lowercase(stat))
+    key = key == "Min" ? "Min." : key
+    key in labels || throw(ArgumentError(
+        "stat must be one of Min., Median, Mean, Mode or Max; got \"$stat\""))
 
-    if size(p_mean,2) != 12
-        c_names = [:α_weak, :α_strong, :α, :γ₋, :β,:γ₊,:γ₊₊,:B]
-    else
-        c_names = [:α_weak, :α_strong, :α,:ωₐ_weak,:ωₐ_strong,:ωₐ,:ωₙₐ,:γ₋,:β,:γ₊,:γ₊₊,:B]
+    c_names = propertynames(first(posteriors))
+
+    # One 7 x P block per dataset, rows in the order of `labels`.
+    blocks = ThreadsX.map(posteriors) do x
+        cols = eachcol(x)
+        vcat(
+            minimum.(cols)',
+            (only.(q_lower.(Vector{Float64}.(cols))))',
+            median.(cols)',
+            mean.(cols)',
+            get_mode(x),
+            (only.(q_upper.(Vector{Float64}.(cols))))',
+            maximum.(cols)',
+        )
     end
 
-    if length(posteriors) == 1
+    df = vcat([hcat(DataFrame(:Stats => labels), DataFrame(b, c_names)) for b in blocks]...)
 
-        quantile_string = String[]
-        for i in zip(p_lower,p_upper)
-            push!(quantile_string," [" * join(string.(round.(i,digits=3)),"-") * "]")
-        end
-        quantile_string = DataFrame(x1=vcat(quantile_string))
+    i_stat = findfirst(==(key), labels)
+    inference = DataFrame(reduce(vcat, (b[i_stat:i_stat, :] for b in blocks)), c_names)
+    quantiles = DataFrame(
+        reduce(vcat, (permutedims(string.(round.(b[i_stat, :], digits = 3), " [",
+                                          round.(b[2, :], digits = 3), "-",
+                                          round.(b[6, :], digits = 3), "]"))
+                      for b in blocks)),
+        c_names,
+    )
 
-        stats = DataFrame(
-            :Stats => repeat(
-                ["Min.", "5% Perc.", "Median", "Mean", "Mode", "95% Perc.", "Max"],
-                inner = length(posteriors),
-            ),
-        )
+    length(posteriors) == 1 && @info df
 
-        tmp = DataFrame(
-            vcat(p_min, p_lower, p_median, p_mean, p_mode, p_upper, p_max),
-        c_names
-        )
+    return OrderedDict(:inference => inference, :quantiles => quantiles, :stats => df)
+end
 
-        df = hcat(stats, tmp)
-
-        # @info df
-
-        df_quantiles = permutedims(string.(permutedims(string.(round.(df[df.Stats.==uppercasefirst(stat), 2:end],digits=3))),quantile_string))
-        rename!(df_quantiles,c_names)
-
-        return OrderedDict(:inference=>df[df.Stats.==uppercasefirst(stat), 2:end],:quantiles=>df_quantiles,:stats=>df)
-        # return df[df.Stats.==uppercasefirst(stat), 2:end], df_quantiles, df
-
-    else
-        df = DataFrame[]
-        for i::Int64 = 1:length(posteriors)
-            stats = DataFrame(
-                :Stats => [
-                    "Min.",
-                    "5% Perc.",
-                    "Median",
-                    "Mean",
-                    "Mode",
-                    "95% Perc.",
-                    "Max",
-                ],
-            )
-
-            tmp = DataFrame(
-                hcat(
-                    p_min[i, :],
-                    p_lower[i, :],
-                    p_median[i, :],
-                    p_mean[i, :],
-                    p_mode[i, :],
-                    p_upper[i, :],
-                    p_max[i, :],
-                )',c_names
-            )
-            push!(df, hcat(stats, tmp))
-        end
-
-        df_vcat = vcat(df...)
-
-        return OrderedDict(:inference=>df_vcat[df_vcat.Stats.==uppercasefirst(stat), 2:end],:stats=>df_vcat)
-        # return df_vcat[df_vcat.Stats.==uppercasefirst(stat), 2:end], df
-    end
+function summary_abc(posteriors::Vector{Matrix{Float64}}; stat::String = "Mode")
+    c_names(x) = size(x, 2) == 12 ?
+        [:α_weak, :α_strong, :α, :ωₐ_weak, :ωₐ_strong, :ωₐ, :ωₙₐ, :γ₋, :β, :γ₊, :γ₊₊, :B] :
+        [:α_weak, :α_strong, :α, :γ₋, :β, :γ₊, :γ₊₊, :B]
+    return summary_abc([DataFrame(x, c_names(x)) for x in posteriors]; stat = stat)
 end
 
 #############
