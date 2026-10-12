@@ -228,13 +228,10 @@ function plot_asymptotic_mk(
     result::NamedTuple;
     output_path::Union{Nothing,AbstractString}=nothing,
 )
-    p = scatter(result.f, result.alpha_x,
+    p = plot(result.f, result.alpha_x,
         label="Observed α(x)",
         color=:navy,
-        alpha=0.8,
-        markersize=5,
-        markerstrokewidth=0.5,
-        markerstrokecolor=:white,
+        linewidth=2,
         xlabel="Derived allele frequency x",
         ylabel="MK α(x)",
         title="Asymptotic MK Test: α(x) vs Frequency",
@@ -284,9 +281,10 @@ function plot_asymptotic_mk(
     model::MKtest.AbstractAsymptoticModel=MKtest.ExponentialFit(),
     cutoff::Vector{Float64}=[0.0, 1.0],
     cumulative::Bool=true,
+    n::Union{Nothing,Int}=nothing,
     output_path::Union{Nothing,AbstractString}=nothing,
 )
-    result = asymptotic_mk(sfs, divergence; model=model, cutoff=cutoff, cumulative=cumulative)
+    result = asymptotic_mk(sfs, divergence; model=model, cutoff=cutoff, cumulative=cumulative, n=n)
     return plot_asymptotic_mk(result; output_path=output_path)
 end
 
