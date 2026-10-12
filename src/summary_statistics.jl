@@ -644,7 +644,7 @@ Estimate summary statistics using observed data and analytical rates. *output_fo
    are built here, and a spectrum cumulated twice flattens α(x) and biases α.
  - `divergence::Vector`: divergence data from parse_sfs().
  - `output_folder::String` : path to save summary statistics and observed data.
- - `summstat_size::Int64` : number of summary statistics to sample.
+ - `summstat_size::Real` : number of summary statistics to sample, a positive whole number (`1e5` works).
  - `sampling::AbstractPoissonSampling` : how the Poisson realisations are drawn.
    `RjSampling()` (default) or `IndependentSampling()` (ABC-MK v1.0.0). `RjSampling` needs
    at least one DAC interval inside its anchor band and Ps > 0 in every DAC interval.
@@ -660,7 +660,7 @@ function summary_statistics(
     sfs::Vector,
     divergence::Vector;
     h5_file::String,
-    summstat_size::Int64,
+    summstat_size::Real,
     output_folder::String,
     alpha::Union{Nothing,Vector{Float64}} = nothing,
     B_bins::Union{Nothing,Vector{Float64}} = nothing,
@@ -669,6 +669,7 @@ function summary_statistics(
 )
 
     @assert 1 ∉ param.dac "Please exclude singletons from the inference"
+    summstat_size = _as_count(summstat_size, "summstat_size")
 
     ## Opening files
     assertion_params(param)
@@ -795,6 +796,10 @@ function summary_statistics(
 
     @. write_files(α, α_output)
 end
+
+# One set, as `parse_sfs` returns it for a single gene list.
+summary_statistics(param::parameters, sfs::AbstractMatrix{<:Real}, divergence::AbstractVector{<:Real}; kwargs...) =
+    summary_statistics(param, [Matrix{Float64}(sfs)], [Vector{Float64}(divergence)]; kwargs...)
 
 function pol_correction!(
     sfs_all::Vector{Matrix{Float64}},

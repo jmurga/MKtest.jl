@@ -38,8 +38,7 @@ Three values, in this order:
    alpha(x) keeps the frequencies it was computed at even when `cutoff` trims the SFS.
 
 With a multi-set `gene_list`, or `mode = :gene`, each of the three is a `Vector` of the
-above. `summary_statistics` and `abcmk` take Vectors: wrap a single result as `[sfs]`,
-`[divergence]`.
+above. `summary_statistics` and `abcmk` take either form.
 """
 function parse_sfs(
     data::Union{AbstractString,DataFrame};

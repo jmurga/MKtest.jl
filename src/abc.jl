@@ -14,6 +14,13 @@ function write_files(x::SubArray, name::String)
     CSV.write(name, Tables.table(x), delim = '\t', header = false)
 end;
 
+# A positive whole number given as any Real (1000, 1000.0, 1e3) as an Int.
+function _as_count(x::Real, name::String)
+    (isfinite(x) && isinteger(x) && x > 0) ||
+        throw(ArgumentError("$name must be a positive whole number, got $x"))
+    return Int(x)
+end
+
 function write_files(x::DataFrame, name::String, newfile::Bool)
     CSV.write(name, x, delim = '\t', header = false, append = newfile)
 end;
@@ -38,7 +45,7 @@ Performing ABC inference using ABCreg. Please, be sure the input folder contain 
  - `output_folder::String` : folder containing the observed data and summary estatistics. It will be used to output the posterior distributions
  - `P::Int64` : number of parameters to infer.
  - `S::Int64` : number of summary stastitics to perform the inference.
- - `tol::Float64` : tolerance value. It defines the number of accepted values at ABC inference.
+ - `tol::Real` : number of accepted values at ABC inference, a positive whole number (`1000`, `1e3`).
  - `abcreg::String` : path to ABCreg binary.
 # Output
  - `posteriors:Vector{Matrix{Float64}}`: posteriors distributions estimated by ABCreg.
@@ -47,7 +54,7 @@ function ABCreg(;
     output_folder::String,
     S::Int64,
     P::Int64 = 12,
-    tol::Int64,
+    tol::Real,
     rm_summaries::Bool = false,
     abcreg::Union{Nothing,String}=nothing,
     T::Bool=false,
@@ -63,6 +70,8 @@ function ABCreg(;
     # List alphas and summstat files
     a_file   = _dataset_files(output_folder, "alphas_")
     sum_file = _dataset_files(output_folder, "summstat_")
+
+    tol = _as_count(tol, "tol")
 
     # Change P if omega was not estimated
     if size(readdlm(sum_file[1]),2) != (P+S)
@@ -345,7 +354,7 @@ end
 function abc(; output_folder::String,
     S::Int64,
     P::Int64 = 12,
-    tol::Int64,
+    tol::Real,
     transformation::String = "none",
     kernel::String = "epanechnikov",
     rm_summaries::Bool = false
@@ -361,6 +370,8 @@ function abc(; output_folder::String,
     # List/open alphas and summstat files
     targets = _dataset_files(output_folder, "alphas_")
     param_summaries = _dataset_files(output_folder, "summstat_")
+
+    tol = _as_count(tol, "tol")
 
     # Change P if omega was not estimated
     if size(CSV.read(param_summaries[1],matrix,header=false), 2) != (P + S)

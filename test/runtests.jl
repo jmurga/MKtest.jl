@@ -427,6 +427,10 @@ using DelimitedFiles: readdlm
     @testset "ABC output order" begin
         @test MKtest._dataset_index("/a/b/summstat_10.txt") == 10
         @test MKtest._dataset_index("out_7.0.post.gz") == 7
+        @test MKtest._as_count(1e3, "tol") === 1000
+        @test MKtest._as_count(Int32(5), "tol") === 5
+        @test_throws ArgumentError MKtest._as_count(0.5, "tol")
+        @test_throws ArgumentError MKtest._as_count(0, "tol")
         td = mktempdir()
         for k in (1, 2, 10, 11, 3)
             touch(joinpath(td, "alphas_$k.txt"))
@@ -445,14 +449,20 @@ using DelimitedFiles: readdlm
         div = [[3000.0, 2000.0 * (1 - 0.06k), best["div"][3], best["div"][4]] for k in 1:K]
         # ABC-MK v1.0.0 settings: this checks the file order, not the estimator. With the
         # defaults the two lowest-α datasets (α near 0) can swap places.
-        for method in ("abcreg", "abc")
+        # summstat_size and tol given as Int for one method and as Float for the other
+        for (method, ss, tl) in (("abcreg", 5000, 200), ("abc", 5e3, 200.0))
             seed!(2)
-            res = MKtest.abcmk(p(), sfs, div; h5_file = tab, summstat_size = 5000,
-                               output_folder = joinpath(td, method), tol = 200,
+            res = MKtest.abcmk(p(), sfs, div; h5_file = tab, summstat_size = ss,
+                               output_folder = joinpath(td, method), tol = tl,
                                abc_method = method, sampling = MKtest.IndependentSampling(),
                                row_prior = MKtest.TableRowPrior(), stat = "mode")
             @test issorted(res[:inference].α)
         end
+
+        # a single set as parse_sfs returns it (Matrix, Vector) equals the wrapped call
+        one(s, d) = (seed!(3); MKtest.abcmk(p(), s, d; h5_file = tab, summstat_size = 2000,
+                                            output_folder = joinpath(td, "one"), tol = 100))
+        @test one(sfs[1], div[1])[:inference] == one([sfs[1]], [div[1]])[:inference]
     end
 
     # --- RjSampling: analytic properties ----------------------

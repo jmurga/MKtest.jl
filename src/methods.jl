@@ -910,11 +910,11 @@ end
           sfs::Vector,
           divergence::Vector;
           h5_file::String,
-          summstat_size::Int64,
+          summstat_size::Real,
           output_folder::String,
           alpha::Union{Nothing,Vector{Float64}} = nothing,
           B_bins::Union{Nothing,Vector{Float64}} = nothing,
-          tol::Int64=1000,
+          tol::Real=1000,
           abc_method::String="abcreg",
           rm_summaries::Bool=true,
           stat::String="median",
@@ -925,14 +925,16 @@ Performs Approximate Bayesian Computation (ABC) using either regression adjustme
 
 # Arguments
 - `param::parameters`: The model parameters.
-- `sfs::Vector`: Site frequency spectrum data.
-- `divergence::Vector`: Divergence data.
+- `sfs::Vector`: Site frequency spectrum data, one matrix per set. A single `Matrix` (one set,
+  as `parse_sfs` returns it) is also accepted.
+- `divergence::Vector`: Divergence data, one vector per set, or a single `Vector{<:Real}` with a
+  single `Matrix` SFS.
 - `h5_file::String`: Path to the HDF5 file containing the data.
-- `summstat_size::Int64`: Size of the summary statistics.
+- `summstat_size::Real`: Number of summary statistics rows to sample, a positive whole number (`1e5` works).
 - `output_folder::String`: Folder where outputs will be stored.
 - `alpha::Union{Nothing,Vector{Float64}}`: Optional alpha values for the summary statistics function. Default is `nothing`.
 - `B_bins::Union{Nothing,Vector{Float64}}`: Optional B bins for the summary statistics function. Default is `nothing`.
-- `tol::Int64`: Number of reatained values in ABC. Defining the olerance level for the ABC method. Default is `1000`.
+- `tol::Real`: Number of retained values in ABC, a positive whole number (`1e3` works). Default is `1000`.
 - `abc_method::String`: Method to use for ABC, either "abcreg" or another method. Default is `"abcreg"`.
 - `rm_summaries::Bool`: Whether to remove summaries after computation. Default is `true`.
 - `stat::String`: The statistic to summarize the posteriors, such as "mode". Default is `"median"`.
@@ -953,11 +955,11 @@ function abcmk(
     sfs::Vector,
     divergence::Vector;
     h5_file::String,
-    summstat_size::Int64,
+    summstat_size::Real,
     output_folder::String,
     alpha::Union{Nothing,Vector{Float64}} = nothing,
     B_bins::Union{Nothing,Vector{Float64}} = nothing,
-    tol::Int64=1000,
+    tol::Real=1000,
     abc_method::String="abcreg",
     rm_summaries::Bool=true,
     stat::String="median",
@@ -965,6 +967,8 @@ function abcmk(
     row_prior::AbstractRowPrior=FlatAlphaPrior(),
 )
     @assert abc_method ∈ ["abcreg","abc"] "Please select ABCreg or abc from R package"
+    summstat_size = _as_count(summstat_size, "summstat_size")
+    tol = _as_count(tol, "tol")
 
     summ_stats = summary_statistics(param,sfs,divergence,h5_file=h5_file,output_folder=output_folder,summstat_size=summstat_size,alpha=alpha,B_bins=B_bins,sampling=sampling,row_prior=row_prior);
 
@@ -982,3 +986,7 @@ function abcmk(
 
     return df_abcmk
 end
+
+# One set, as `parse_sfs` returns it for a single gene list: `sfs::Matrix`, `divergence::Vector`.
+abcmk(param::parameters, sfs::AbstractMatrix{<:Real}, divergence::AbstractVector{<:Real}; kwargs...) =
+    abcmk(param, [Matrix{Float64}(sfs)], [Vector{Float64}(divergence)]; kwargs...)
