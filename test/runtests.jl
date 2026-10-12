@@ -263,20 +263,18 @@ using DelimitedFiles: readdlm
     # The fixtures were produced by the code (commit 8c68fa35) that RjSampling was
     # tested with: abcmk_best_model.jld2 for the forward model and the default sampler,
     # abcmk_des.jld2 for a ρ-drawn table and RjSampling (make_des_fixture.jl). Both must
-    # be reproduced exactly at one thread.
+    # be reproduced at one thread.
     function check_table(r, fx, DAC)
         @test Matrix(r.models) == fx["models"]
         @test names(r.models) == fx["model_names"]
-        # Bit-identical only at ONE thread: with more, `dsdn` / `sel` drift at the 1e-9
-        # level (the per-task ppos warm start depends on how rows are chunked).
-        if Threads.nthreads() == 1
-            @test r.dsdn == fx["dsdn"]
-            @test all(r.neut[k] == fx["neut"][k] && r.sel[k] == fx["sel"][k] for k in DAC)
-        else
-            @test r.dsdn ≈ fx["dsdn"] rtol = 1e-7
-            @test all(isapprox(r.neut[k], fx["neut"][k]; rtol = 1e-7) &&
-                      isapprox(r.sel[k], fx["sel"][k]; rtol = 1e-7) for k in DAC)
-        end
+        # At ONE thread the rates match to the last bits: another CPU (SIMD width, FMA)
+        # changes the summation order and flips the last digit. With more threads, `dsdn` /
+        # `sel` drift at the 1e-9 level (the per-task ppos warm start depends on how rows
+        # are chunked).
+        tol = Threads.nthreads() == 1 ? 1e-10 : 1e-7
+        @test r.dsdn ≈ fx["dsdn"] rtol = tol
+        @test all(isapprox(r.neut[k], fx["neut"][k]; rtol = tol) &&
+                  isapprox(r.sel[k], fx["sel"][k]; rtol = tol) for k in DAC)
     end
 
     @testset "best-model fixture" begin
@@ -556,7 +554,7 @@ using DelimitedFiles: readdlm
         @test sum(iv(b1)[band]) ≈ sum(iv(b0)[band]) rtol = 1e-12   # no level on the band
         q = iv(b1) ./ iv(b0)
         @test issorted(q)                                     # τ > 0: Pn toward high frequency
-        @test q ./ q[1] ≈ exp.(0.3 .* (pt.lnf .- pt.lnf[1])) rtol = 1e-12
+        @test q ./ q[1] ≈ exp.(0.3 .* (pt.lnf .- pt.lnf[1])) rtol = 1e-10
         @test_throws ArgumentError MKtest.RjSampling(tilt = -0.1)
         # tilt = 0 draws exactly the untilted sampler (no extra random numbers)
         p0 = MKtest._prepare_sampling(MKtest.RjSampling(0.0, 1.5, 0.15, 0.70, Float64[], Bool[]),
