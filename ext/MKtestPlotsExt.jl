@@ -53,6 +53,18 @@ function _ax_curves(x)
         "iterable of $(eltype(els)) is neither a curve nor a collection of curves"))
 end
 
+# Frequencies of each curve of `_ax_curves(x)`, or `nothing` where the input does not carry
+# them (the position i is then DAC i, frequency i / n).
+_ax_freqs(x::AbstractMatrix{<:Real}) = Union{Nothing,Vector{Float64}}[Float64.(x[:, 2])]
+_ax_freqs(x::AbstractVector{<:AbstractMatrix{<:Real}}) =
+    Union{Nothing,Vector{Float64}}[Float64.(m[:, 2]) for m in x]
+_ax_freqs(x::NamedTuple) =
+    Union{Nothing,Vector{Float64}}[haskey(x, :f) ? Float64.(x.f) : nothing]
+_ax_freqs(x::DataFrame) = hasproperty(x, :f) ?
+    Union{Nothing,Vector{Float64}}[Float64.(v) for v in x.f] :
+    Union{Nothing,Vector{Float64}}[nothing for _ in 1:size(x, 1)]
+_ax_freqs(x) = Union{Nothing,Vector{Float64}}[nothing for _ in _ax_curves(x)]
+
 # x axis: the DAC of a [dac, frequency, alpha_x] table, otherwise the row index.
 _ax_coords(x::AbstractMatrix{<:Real}) = size(x, 2) == 3 ? Float64.(x[:, 1]) : nothing
 _ax_coords(x) = nothing
@@ -125,15 +137,33 @@ function _plot_α_x(
     percentil::AbstractVector{<:Real}=[0.1, 0.9],
     labels=nothing,
     x=nothing,
+    freqs=nothing,
+    cutoff::AbstractVector{<:Real}=[0.0, 1.0],
+    n::Union{Nothing,Integer}=nothing,
     output_path::Union{Nothing,AbstractString}=nothing,
     kwargs...,
 )
     isempty(curves) && throw(ArgumentError("no alpha(x) curve to plot"))
-    n = maximum(length, curves)
+    length(cutoff) == 2 && 0 <= cutoff[1] <= cutoff[2] <= 1 || throw(ArgumentError(
+        "cutoff must be [low, high] with 0 <= low <= high <= 1; got $cutoff"))
+    n_max = maximum(length, curves)
     xc = isnothing(x) ? nothing : Float64.(x)
-    _xs(c) = isnothing(xc) ? (1:length(c)) : view(xc, 1:length(c))
     labs = _ax_labels(labels, length(curves))
     has_band = !isnothing(control)
+
+    # Positions of each curve inside the frequency cutoff. Without known frequencies,
+    # position i is DAC i of a haploid sample of `n` (default: longest curve + 1).
+    nn = isnothing(n) ? n_max + 1 : Int(n)
+    nn > n_max || throw(ArgumentError(
+        "n = $nn is not a valid haploid sample size for an alpha(x) curve of length $n_max"))
+    fs = isnothing(freqs) ? fill(nothing, length(curves)) : freqs
+    _freq(len, f) = isnothing(f) ? (1:len) ./ nn : view(f, 1:len)
+    _keep(len, f) = findall(v -> cutoff[1] <= v <= cutoff[2], _freq(len, f))
+    keeps = [_keep(length(c), fs[i]) for (i, c) in enumerate(curves)]
+    all(isempty, keeps) && throw(ArgumentError(
+        "no alpha(x) value lies inside the frequency cutoff $cutoff"))
+    _xs(k) = isnothing(xc) ? Float64.(k) : xc[k]
+    n_last = maximum(k -> isempty(k) ? 0 : last(k), keeps)
 
     # Keywords from the caller override these defaults.
     kw = values(kwargs)
@@ -145,7 +175,7 @@ function _plot_α_x(
         legend=(length(curves) == 1 && !has_band) ? false : :bottomright,
     )
     if isnothing(xc) && !any(k -> haskey(kw, k), (:xlim, :xlims, :xlimit, :xlimits))
-        defaults = merge(defaults, (; xticks=0:max(1, round(Int, n / 8)):n))
+        defaults = merge(defaults, (; xticks=0:max(1, round(Int, n_last / 8)):n_last))
     end
     opts = merge(defaults, kw)
 
@@ -153,20 +183,23 @@ function _plot_α_x(
 
     # The control band is drawn first, behind the curves.
     if has_band
-        low, high = _ax_band(_ax_curves(control), n, percentil)
+        low, high = _ax_band(_ax_curves(control), n_max, percentil)
+        # The band follows the frequencies of the longest curve.
+        kb = _keep(n_max, fs[argmax(length.(curves))])
         lbl = "control " * string(round(100 * minimum(percentil), digits=1)) * "-" *
               string(round(100 * maximum(percentil), digits=1)) * "%"
-        band = (; fillrange=high, fillalpha=0.25, linealpha=0, color=:grey, label=lbl)
-        p = plot(_xs(low), low; merge(opts, band)...)
+        band = (; fillrange=high[kb], fillalpha=0.25, linealpha=0, color=:grey, label=lbl)
+        p = plot(_xs(kb), low[kb]; merge(opts, band)...)
     end
 
     colors = palette(:tab10)
     for (i, c) in enumerate(curves)
+        k = keeps[i]
         series = (; label=labs[i], color=colors[mod1(i, 10)])
         if isnothing(p)
-            p = plot(_xs(c), c; merge(opts, series)...)
+            p = plot(_xs(k), c[k]; merge(opts, series)...)
         else
-            plot!(p, _xs(c), c; lw=opts.lw, series...)
+            plot!(p, _xs(k), c[k]; lw=opts.lw, series...)
         end
     end
 
@@ -196,13 +229,16 @@ plot_α_x(curves::AbstractVector{<:AbstractVector{<:Real}}; kwargs...) =
     _plot_α_x(_ax_curves(curves); kwargs...)
 
 plot_α_x(α_table::AbstractMatrix{<:Real}; kwargs...) =
-    _plot_α_x(_ax_curves(α_table); x=_ax_coords(α_table), kwargs...)
+    _plot_α_x(_ax_curves(α_table); x=_ax_coords(α_table), freqs=_ax_freqs(α_table), kwargs...)
 
 plot_α_x(α_tables::AbstractVector{<:AbstractMatrix{<:Real}}; kwargs...) =
-    _plot_α_x(_ax_curves(α_tables); x=_ax_coords(first(α_tables)), kwargs...)
+    _plot_α_x(_ax_curves(α_tables); x=_ax_coords(first(α_tables)), freqs=_ax_freqs(α_tables),
+              kwargs...)
 
-plot_α_x(result::NamedTuple; kwargs...) = _plot_α_x(_ax_curves(result); kwargs...)
-plot_α_x(result::DataFrame; kwargs...) = _plot_α_x(_ax_curves(result); kwargs...)
+plot_α_x(result::NamedTuple; kwargs...) =
+    _plot_α_x(_ax_curves(result); freqs=_ax_freqs(result), kwargs...)
+plot_α_x(result::DataFrame; kwargs...) =
+    _plot_α_x(_ax_curves(result); freqs=_ax_freqs(result), kwargs...)
 
 plot_α_x(
     a_x::AbstractVector{<:Real},
@@ -215,13 +251,16 @@ function plot_α_x(
     divergence::Vector;
     sample_size::Union{Nothing,Int}=nothing,
     cumulative::Bool=true,
+    cutoff::AbstractVector{<:Real}=[0.0, 1.0],
+    n::Union{Nothing,Int}=nothing,
     kwargs...,
 )
     if !isnothing(sample_size)
         sfs = project(sfs, sample_size)
     end
-    tbl = α_x(sfs, divergence; cumulative=cumulative)
-    return _plot_α_x(_ax_curves(tbl); x=_ax_coords(tbl), kwargs...)
+    # Cut the SFS before the cumulative sum, as `asymptotic_mk` does.
+    tbl = α_x(sfs, divergence; cutoff=Float64.(cutoff), cumulative=cumulative, n=n)
+    return _plot_α_x(_ax_curves(tbl); x=_ax_coords(tbl), freqs=_ax_freqs(tbl), kwargs...)
 end
 
 function plot_asymptotic_mk(

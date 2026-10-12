@@ -66,6 +66,13 @@ percentile band of control curves. Requires `using Plots`.
  - `sfs::Matrix`, `divergence::Vector`: compute alpha(x) with `α_x`.
  - `control`: control curves, drawn as a band. Default `nothing`.
  - `percentil::AbstractVector{<:Real}`: low and high quantiles of the band. Default `[0.1, 0.9]`.
+ - `cutoff::AbstractVector{<:Real}`: derived allele frequency window `[low, high]`; curves
+   and band are drawn only inside it. Default `[0.0, 1.0]`. Frequencies come from the
+   table's frequency column or the `asymptotic_mk` result's `f`; for plain vectors position
+   i is DAC i of `n` haploid samples. With `sfs`/`divergence` the SFS is cut before the
+   cumulative sum, as in `asymptotic_mk`.
+ - `n::Union{Nothing,Int}`: haploid sample size behind plain vectors (default: longest
+   curve + 1), or of a trimmed SFS (sfs/divergence only).
  - `labels`: legend labels, in curve order. Default `nothing` (`α1`, `α2`, ...).
  - `output_path`: save the figure; the format comes from the extension (`.png`, `.svg`,
    `.pdf`, `.ps`, `.html`). Default `nothing`.
