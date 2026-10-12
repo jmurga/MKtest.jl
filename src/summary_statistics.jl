@@ -49,15 +49,15 @@ end
     AbstractPoissonSampling
 
 How `sampling_summaries!` draws the Poisson realisations that become the ABC summary
-statistics: [`IndependentSampling`](@ref) (the default) or [`RjSampling`](@ref), which
-accounts for demography in the polymorphism.
+statistics: [`RjSampling`](@ref) (the default), which accounts for demography in the
+polymorphism, or [`IndependentSampling`](@ref) (ABC-MK v1.0.0).
 """
 abstract type AbstractPoissonSampling end
 
 """
     IndependentSampling()
 
-Every class drawn as an independent Poisson. The default.
+Every class drawn as an independent Poisson. The sampler of ABC-MK v1.0.0.
 
 Let `O_k` be the observed polymorphisms at DAC >= k (Pn + Ps) and `D` the observed
 divergence. Per table row, with tail rates `λps_k`, `λpn_k` and fixation rates `λds`,
@@ -194,7 +194,7 @@ observed spectrum ([`RjSampling`](@ref)) returns a filled copy.
 _prepare_sampling(sampling::AbstractPoissonSampling, sfs::AbstractMatrix, dac::Vector{Int64}, nn::Integer) = sampling
 
 """
-    RjSampling(; w = (0.0, 1.5), anchor = (0.15, 0.70), tilt = 0.0)
+    RjSampling(; w = (0.0, 2.5), anchor = (0.15, 0.70), tilt = 0.05)
 
 `IndependentSampling` with a demographic nuisance on the polymorphism composition. The
 data's synonymous distortion `r_i` (GRAPES' r_j), normalised on an anchor band, is applied to
@@ -202,8 +202,9 @@ the synonymous class and, raised to a random power `w`, to the nonsynonymous cla
 `tilt > 0` the nonsynonymous class also gets a random frequency tilt. Fixations are drawn as
 in `IndependentSampling`.
 
-Recommended setting (with `FlatAlphaPrior(by_B = true)` and `stat = "median"` in
-[`abcmk`](@ref)): `RjSampling(w = (0.0, 2.5), tilt = 0.05)`.
+The default sampler of `summary_statistics` and [`abcmk`](@ref), used there with
+`FlatAlphaPrior()` and `stat = "median"`. `RjSampling(w = (0.0, 1.5), tilt = 0.0)` is the
+sampler before the tilt.
 
 # Steps, per observed dataset and table row
 
@@ -258,17 +259,17 @@ ABCreg's `P` are unchanged.
   interval inside the anchor band (at n = 50, DACs 20 and 50 give the intervals 20-49 and
   50-69). Each violation throws an `ArgumentError`.
 - **Measured against SLiM.**
-  - The recommended setting was measured with ABCreg (tol 1000 of 1e5) on the forward model
+  - The defaults were measured with ABCreg (tol 1000 of 1e5) on the forward model
     of `rates()` with ρ drawn per row. Test grids: two-epoch histories (5x and 50x
     expansions, 1/5 and 1/20 bottlenecks, B 0.4 and 0.999; 50 diploids) and the Tennessen
     history (3 ρ x 2 B; 661 diploids).
   - α RMSE was 0.029 (two-epoch) and 0.030 (Tennessen), against 0.055 and 0.039 for the
-    v1.0.0 code. The setting was chosen on these same grids, with one α and one DFE shape per
+    v1.0.0 code. The defaults were chosen on these same grids, with one α and one DFE shape per
     grid, and every resample is a bootstrap of one simulated pool.
-- **Contractions.** On its own, with uniform table rows, the sampler leaves a strong
+- **Contractions.** With uniform table rows (`TableRowPrior()`), the sampler leaves a strong
   bottleneck biased (about -0.10 under a 20x bottleneck at B = 0.999). Most of that bias came
-  from the prior on the realised α, which `FlatAlphaPrior(by_B = true)` removes: the
-  recommended setting gives -0.02 there.
+  from the prior on the realised α, which `FlatAlphaPrior()` removes: the defaults give -0.02
+  there.
 - **WARNING: pass the RAW per-frequency SFS.** `summary_statistics` builds the tails itself;
   a spectrum cumulated twice flattens α(x) and biases α.
 """
@@ -286,7 +287,7 @@ end
 RjSampling(w_lo, w_hi, anchor_lo, anchor_hi, ps_obs, band) =
     RjSampling(w_lo, w_hi, anchor_lo, anchor_hi, ps_obs, band, 0.0, Float64[])
 
-function RjSampling(; w = (0.0, 1.5), anchor = (0.15, 0.70), tilt = 0.0)
+function RjSampling(; w = (0.0, 2.5), anchor = (0.15, 0.70), tilt = 0.05)
     lo, hi = Float64(first(w)), Float64(last(w))
     (isfinite(lo) && isfinite(hi) && 0 <= lo <= hi) ||
         throw(ArgumentError("w must satisfy 0 <= w[1] <= w[2] < Inf, got $w"))
@@ -435,32 +436,40 @@ _sampling_desc(s::RjSampling, param) =
     AbstractRowPrior
 
 Which table rows `summary_statistics` draws, i.e. the ABC prior over the model parameters:
-[`TableRowPrior`](@ref) (the default, uniform over the rows) or [`FlatAlphaPrior`](@ref).
+[`FlatAlphaPrior`](@ref) (the default) or [`TableRowPrior`](@ref) (uniform over the rows,
+ABC-MK v1.0.0).
 """
 abstract type AbstractRowPrior end
 
 """
     TableRowPrior()
 
-Rows drawn uniformly (with replacement): the prior is the table's own design. The default.
+Rows drawn uniformly (with replacement): the prior is the table's own design. The row prior
+of ABC-MK v1.0.0.
 """
 struct TableRowPrior <: AbstractRowPrior end
 
 """
-    FlatAlphaPrior(; bin = 0.01, floor = 0.001, by_B = false)
+    FlatAlphaPrior(; bin = 0.01, floor = 0.001, by_B = true)
 
 Rows drawn with replacement, weighted so that the prior on each row's realised α
-`(λW + λS) / λdn` is flat: weight `1 / max(count of its α bin, floor · rows)`, bins of
-width `bin`. The floor keeps the sparse edges of the α range from taking huge weights.
-With `by_B = true` α is flattened within each B value of the table instead (counts and
-floor per B), so the prior on B keeps the table's uniform design; otherwise flattening α
-also moves prior mass toward high B, where the high α values are.
+`(λW + λS) / λdn` is flat within each B value of the table: weight
+`π_B / max(count of its α bin, floor · rows of B)`, bins of width `bin`, with
+`π_B = rows of B / (rows · occupied α bins of B)`. Every α bin of a B value then carries the
+same weight, and every B value keeps its share of rows, so the prior on B keeps the table's
+uniform design. The floor keeps the sparse edges of the α range from taking huge weights.
+With `by_B = false` α is flattened over the whole table (`1 / max(count, floor · rows)`),
+which also moves prior mass toward high B, where the high α values are. The default row
+prior of `summary_statistics` and [`abcmk`](@ref).
 
 Why: a table drawn with uniform α LABELS has a realised-α prior that falls with α, because
 the realised α shrinks with B (two-epoch table: 18.5% of rows below 0.05, 1.7% in
 [0.45, 0.50)). Rejection ABC then pulls α toward 0 wherever the likelihood is broad.
-Measured in the offline lab (`results/rj/lab*`, 2026-10-11): bottleneck α RMSE 0.105 -> 0.039
-(bt_strong, B .999) and 0.038 -> 0.019 (bt_moderate, B 0.4), ρ ladder unchanged (|Δ| ≤ 0.001).
+Measured in the offline lab (`results/rj/lab*`, 2026-10-11, α flat over the whole table):
+bottleneck α RMSE 0.105 -> 0.039 (bt_strong, B .999) and 0.038 -> 0.019 (bt_moderate, B 0.4),
+ρ ladder unchanged (|Δ| ≤ 0.001). Flattening within each B (`by_B = true`) was then selected
+on resamples 21-60 of the same grids and kept on the held-out resamples 61-100
+(`results/rj/iter2`).
 """
 struct FlatAlphaPrior <: AbstractRowPrior
     bin::Float64
@@ -468,7 +477,7 @@ struct FlatAlphaPrior <: AbstractRowPrior
     by_B::Bool
 end
 
-function FlatAlphaPrior(; bin = 0.01, floor = 0.001, by_B = false)
+function FlatAlphaPrior(; bin = 0.01, floor = 0.001, by_B = true)
     (isfinite(bin) && bin > 0) || throw(ArgumentError("bin must be > 0, got $bin"))
     (isfinite(floor) && 0 <= floor < 1) || throw(ArgumentError("floor must be in [0, 1), got $floor"))
     return FlatAlphaPrior(Float64(bin), Float64(floor), Bool(by_B))
@@ -637,13 +646,14 @@ Estimate summary statistics using observed data and analytical rates. *output_fo
  - `output_folder::String` : path to save summary statistics and observed data.
  - `summstat_size::Int64` : number of summary statistics to sample.
  - `sampling::AbstractPoissonSampling` : how the Poisson realisations are drawn.
-   `IndependentSampling()` (default) or `RjSampling()`.
+   `RjSampling()` (default) or `IndependentSampling()` (ABC-MK v1.0.0). `RjSampling` needs
+   at least one DAC interval inside its anchor band and Ps > 0 in every DAC interval.
  - `alpha::Union{Nothing,Vector{Float64}}` : keep only models with `al_tot` in
    `[alpha[1], alpha[end]]`. `al_tot` is the model's alpha LABEL, which equals the realised
    fixation alpha only in the B = 0.999 bin.
  - `B_bins::Union{Nothing,Vector{Float64}}` : keep only models with B in this range.
- - `row_prior::AbstractRowPrior` : how table rows are drawn. `TableRowPrior()` (default)
-   or `FlatAlphaPrior()`.
+ - `row_prior::AbstractRowPrior` : how table rows are drawn. `FlatAlphaPrior()` (default)
+   or `TableRowPrior()` (ABC-MK v1.0.0).
 """
 function summary_statistics(
     param::parameters,
@@ -654,8 +664,8 @@ function summary_statistics(
     output_folder::String,
     alpha::Union{Nothing,Vector{Float64}} = nothing,
     B_bins::Union{Nothing,Vector{Float64}} = nothing,
-    sampling::AbstractPoissonSampling = IndependentSampling(),
-    row_prior::AbstractRowPrior = TableRowPrior(),
+    sampling::AbstractPoissonSampling = RjSampling(),
+    row_prior::AbstractRowPrior = FlatAlphaPrior(),
 )
 
     @assert 1 ∉ param.dac "Please exclude singletons from the inference"

@@ -917,7 +917,9 @@ end
           tol::Int64=1000,
           abc_method::String="abcreg",
           rm_summaries::Bool=true,
-          stat::String="mode") -> DataFrame
+          stat::String="median",
+          sampling::AbstractPoissonSampling=RjSampling(),
+          row_prior::AbstractRowPrior=FlatAlphaPrior()) -> DataFrame
 
 Performs Approximate Bayesian Computation (ABC) using either regression adjustment (ABCreg) or a basic ABC method and returns a summary of the posterior distributions.
 
@@ -933,11 +935,15 @@ Performs Approximate Bayesian Computation (ABC) using either regression adjustme
 - `tol::Int64`: Number of reatained values in ABC. Defining the olerance level for the ABC method. Default is `1000`.
 - `abc_method::String`: Method to use for ABC, either "abcreg" or another method. Default is `"abcreg"`.
 - `rm_summaries::Bool`: Whether to remove summaries after computation. Default is `true`.
-- `stat::String`: The statistic to summarize the posteriors, such as "mode". Default is `"mode"`.
+- `stat::String`: The statistic to summarize the posteriors, such as "mode". Default is `"median"`.
 - `sampling::AbstractPoissonSampling`: how the summary statistics are sampled from the rates
-  table. `IndependentSampling()` (default) or `RjSampling()`.
-- `row_prior::AbstractRowPrior`: which table rows are drawn. `TableRowPrior()` (default) or
-  `FlatAlphaPrior()`.
+  table. `RjSampling()` (default) or `IndependentSampling()`.
+- `row_prior::AbstractRowPrior`: which table rows are drawn. `FlatAlphaPrior()` (default) or
+  `TableRowPrior()`.
+
+The defaults (`RjSampling()`, `FlatAlphaPrior()`, `"median"`) are the configuration measured
+against SLiM in the two-epoch and Tennessen benchmarks (see [`RjSampling`](@ref)). ABC-MK
+v1.0.0 is `sampling = IndependentSampling(), row_prior = TableRowPrior(), stat = "mode"`.
 
 # Returns
 - `DataFrame`: A DataFrame summarizing the posterior distributions.
@@ -954,9 +960,9 @@ function abcmk(
     tol::Int64=1000,
     abc_method::String="abcreg",
     rm_summaries::Bool=true,
-    stat::String="mode",
-    sampling::AbstractPoissonSampling=IndependentSampling(),
-    row_prior::AbstractRowPrior=TableRowPrior(),
+    stat::String="median",
+    sampling::AbstractPoissonSampling=RjSampling(),
+    row_prior::AbstractRowPrior=FlatAlphaPrior(),
 )
     @assert abc_method ∈ ["abcreg","abc"] "Please select ABCreg or abc from R package"
 

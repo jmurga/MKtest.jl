@@ -297,15 +297,26 @@ using DelimitedFiles: readdlm
             @test MKtest.analytical_alpha(p) == fx[key]
         end
 
-        # the independent sampler, explicitly and as the default
-        for (tag, kw) in (("indep", (; sampling = MKtest.IndependentSampling())),
-                          ("default", NamedTuple()))
-            of = joinpath(td, tag)
+        # the independent sampler with uniform rows (ABC-MK v1.0.0)
+        of = joinpath(td, "indep")
+        seed!(7)
+        MKtest.summary_statistics(mkparam(), [fx["sfs"]], [fx["div"]]; h5_file = tab,
+                                  summstat_size = 200, output_folder = of,
+                                  sampling = MKtest.IndependentSampling(),
+                                  row_prior = MKtest.TableRowPrior())
+        @test readdlm(joinpath(of, "summstat_1.txt")) == fx["summ_indep"]
+
+        # the defaults are RjSampling(w = (0, 2.5), tilt = 0.05) with FlatAlphaPrior(by_B = true)
+        summ(; kw...) = begin
+            of = mktempdir()
             seed!(7)
             MKtest.summary_statistics(mkparam(), [fx["sfs"]], [fx["div"]]; h5_file = tab,
                                       summstat_size = 200, output_folder = of, kw...)
-            @test readdlm(joinpath(of, "summstat_1.txt")) == fx["summ_indep"]
+            readdlm(joinpath(of, "summstat_1.txt"))
         end
+        @test summ() == summ(sampling = MKtest.RjSampling(w = (0.0, 2.5), tilt = 0.05),
+                             row_prior = MKtest.FlatAlphaPrior(by_B = true))
+        @test summ() != fx["summ_indep"]
     end
 
     @testset "RjSampling fixture" begin
@@ -321,15 +332,17 @@ using DelimitedFiles: readdlm
         check_table(r, fx, DAC)
         @test r.options == fx["options"]
 
-        for (tag, samp) in (("summ_des", MKtest.RjSampling()),
-                            ("summ_des_w08", MKtest.RjSampling(w = (0.8, 0.8))))
+        # recorded with the untilted sampler, w ~ U(0, 1.5), and uniform rows
+        for (tag, samp) in (("summ_des", MKtest.RjSampling(w = (0.0, 1.5), tilt = 0.0)),
+                            ("summ_des_w08", MKtest.RjSampling(w = (0.8, 0.8), tilt = 0.0)))
             # the summaries are drawn from the table built here; at one thread it is the
             # fixture's table, so the draws must match exactly
             Threads.nthreads() == 1 || continue
             of = joinpath(td, tag)
             seed!(7)
             MKtest.summary_statistics(mkparam(), [best["sfs"]], [best["div"]]; h5_file = tab,
-                                      summstat_size = 200, output_folder = of, sampling = samp)
+                                      summstat_size = 200, output_folder = of, sampling = samp,
+                                      row_prior = MKtest.TableRowPrior())
             @test readdlm(joinpath(of, "summstat_1.txt")) == fx[tag]
         end
     end
@@ -432,11 +445,14 @@ using DelimitedFiles: readdlm
         K = 12
         sfs = [best["sfs"] for _ in 1:K]
         div = [[3000.0, 2000.0 * (1 - 0.06k), best["div"][3], best["div"][4]] for k in 1:K]
+        # ABC-MK v1.0.0 settings: this checks the file order, not the estimator. With the
+        # defaults the two lowest-α datasets (α near 0) can swap places.
         for method in ("abcreg", "abc")
             seed!(2)
             res = MKtest.abcmk(p(), sfs, div; h5_file = tab, summstat_size = 5000,
                                output_folder = joinpath(td, method), tol = 200,
-                               abc_method = method)
+                               abc_method = method, sampling = MKtest.IndependentSampling(),
+                               row_prior = MKtest.TableRowPrior(), stat = "mode")
             @test issorted(res[:inference].α)
         end
     end
@@ -554,6 +570,9 @@ using DelimitedFiles: readdlm
         end
         @test polydraw(p0) == polydraw(pz)
         @test polydraw(pt) != polydraw(p0)
+        # defaults
+        d = MKtest.RjSampling()
+        @test (d.w_lo, d.w_hi, d.anchor_lo, d.anchor_hi, d.tilt) == (0.0, 2.5, 0.15, 0.70, 0.05)
     end
 
     # --- FlatAlphaPrior -----------------------------------------------------------
@@ -586,10 +605,11 @@ using DelimitedFiles: readdlm
         @test sum(wB[Bc .== 400.0]) / sum(wB) ≈ 0.25 rtol = 1e-9
         mB = [sum(wB[(Bc .== 999.0) .& (floor.(Int, αB ./ 0.01) .== k)]) for k in 20:49]
         @test maximum(mB) / minimum(mB) < 1.0 + 1e-9
-        # by_B = false (the default) ignores B; by_B = true needs it
-        @test MKtest._row_weights(MKtest.FlatAlphaPrior(), dsdn, idx) ==
+        # by_B = false ignores B; the default (by_B = true) needs it
+        @test MKtest._row_weights(MKtest.FlatAlphaPrior(by_B = false), dsdn, idx) ==
               MKtest._row_weights(MKtest.FlatAlphaPrior(by_B = false), dsdn, idx; B = Bc)
-        @test_throws ArgumentError MKtest._row_weights(MKtest.FlatAlphaPrior(by_B = true), dB, idx)
+        @test MKtest.FlatAlphaPrior().by_B
+        @test_throws ArgumentError MKtest._row_weights(MKtest.FlatAlphaPrior(), dB, idx)
         @test_throws ArgumentError MKtest.FlatAlphaPrior(bin = 0)
         @test_throws ArgumentError MKtest.FlatAlphaPrior(floor = 1.0)
     end
