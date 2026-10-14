@@ -38,6 +38,12 @@ import Logging
 import HypothesisTests: pvalue, FisherExactTest
 import StatsBase: ordinalrank
 
+# dfe_ml engine (src/ml/)
+import Optim
+import LineSearches
+import ADTypes
+import SpecialFunctions: gamma_inc, beta_inc, erfc, besselk
+
 include("abcmk/parameters.jl")
 include("abcmk/fixations.jl")
 include("abcmk/sfs.jl")
@@ -46,6 +52,8 @@ include("abcmk/rates.jl")
 include("data/parse.jl")
 include("abcmk/abc.jl")
 include("utils.jl")
+include("ml/interface.jl")
+include("ml/models.jl")
 include("methods.jl")
 include("bootstrap.jl")
 include("alpha_b.jl")
