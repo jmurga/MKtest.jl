@@ -31,10 +31,10 @@
 # empty cells of the DataFrame header came out as "".
 -     h = fill(DataFrame(["" ""; "#unfolded" ""], :auto), length(sfs_r))
 -     @. write_files(h, output_dofe, false)
-+     # GRAPES' header: a free-text title line, then "#unfolded". Plain text: written as a
++     # GRAPES' header: a blank line, then "#unfolded". Plain text: written as a
 +     # DataFrame through CSV, the empty cells came out as `""` on both lines.
 +     for f in output_dofe
 +         Base.open(f, "w") do io
-+             print(io, "MKtest dofe\n#unfolded\n")
++             print(io, "\n#unfolded\n")
 +         end
 # (C2 removed one `    end` and this fix adds one back: the pair cancels in the multiset.)

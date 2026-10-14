@@ -42,7 +42,7 @@ function write_dofe(path, sfs_n, div, n_ind)
     pn = permutedims(sfs_n[:, 2]); ps = permutedims(sfs_n[:, 3])
     dofe = MKtest.sfs_to_dofe(pn, ps, [div[1]], [div[2]], [div[3]], [div[4]], "1", 2 * n_ind)
     open(path, "w") do io
-        print(io, "MKtest dofe\n#unfolded\n")     # as MKtest.grapes() writes it
+        print(io, "\n#unfolded\n")     # as MKtest.grapes() writes it
     end
     MKtest.write_files(dofe, path, true)
     return path

@@ -343,11 +343,11 @@ function grapes(
     output_dofe   = @. tempname() * idx
     output_grapes = @. output_dofe * "." * model
 
-    # GRAPES' header: a free-text title line, then "#unfolded". Plain text: written as a
+    # GRAPES' header: a blank line, then "#unfolded". Plain text: written as a
     # DataFrame through CSV, the empty cells came out as `""` on both lines.
     for f in output_dofe
         Base.open(f, "w") do io
-            print(io, "MKtest dofe\n#unfolded\n")
+            print(io, "\n#unfolded\n")
         end
     end
     @. write_files(dofe, output_dofe, true)
