@@ -6,10 +6,16 @@
 #   objective at fixed parameters: relative 1e-10. The new engine sums the expected
 #     SFS in a plain loop where dev used BLAS `mul!`, which reorders the sum (about
 #     one ulp per entry); nothing else in the arithmetic changed.
-#   fits: lnL within 1e-6 and alpha within 1e-6 for GammaZero; for the other models
-#     lnL >= dev's - 1e-6. A one-ulp change of the objective can move an optimizer
-#     along a flat ridge (dev measured GammaExpo's alpha moving 0.8% under a 1-ulp
-#     perturbation), so their parameters are reported, not asserted.
+#   fits (as first written): GammaZero lnL and alpha within 1e-6; other models lnL >=
+#     dev's - 1e-6.
+#
+# CHANGED 2026-10-15, AFTER seeing the first run (user decision): 80/80 objective checks
+# passed at 1e-10, and 5 fit checks failed. Two were ~1e-6 (inside Optim's own stop rule,
+# f_reltol 1e-8 x |lnL| ~ 3e-6). Three were DisplGamma, 0.27-4.8 lnL BELOW dev. The new
+# engine under dev's own Optim 1.13.3 moved the same cells by +5.01 / +0.03 / -0.28, so
+# DisplGamma's optimum depends on ulp-level path differences in both engines; it is not
+# a likelihood change. Now: the objective stays the guard (1e-10); fits are asserted for
+# GammaZero only, at Optim's tolerance (1e-5), and every other fit is reported.
 
 using DelimitedFiles
 
@@ -56,10 +62,8 @@ _devref_integ(name) = name == "RombergIntegrator" ? MKtest.RombergIntegrator() :
                     MKtest.dfe_ml(s, d, m; integrator = integ, cache = cache)
                 end
                 if f["model"] == "GammaZero"
-                    @test abs(r.loglik[1] - ll_dev) < 1e-6
-                    @test abs(r.alpha[1] - parse(Float64, f["alpha"])) < 1e-6
-                else
-                    @test r.loglik[1] >= ll_dev - 1e-6
+                    @test abs(r.loglik[1] - ll_dev) < 1e-5
+                    @test abs(r.alpha[1] - parse(Float64, f["alpha"])) < 1e-5
                 end
                 @info "dev reference $key" lnL_dev = ll_dev lnL_new = r.loglik[1] alpha_dev = f["alpha"] alpha_new = r.alpha[1]
             end
