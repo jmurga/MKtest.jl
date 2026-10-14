@@ -348,22 +348,20 @@ function grapes(
     @. write_files(dofe, output_dofe, true)
 
     @info "Running Grapes"
-    if model == "GammaZero" || no_div_param
+    # GammaZero has no beneficial class, so -no_div_param means nothing there. The test used
+    # to read `model == "GammaZero" || no_div_param`, which reset the flag whenever it was
+    # set and made -no_div_param impossible to pass.
+    if model == "GammaZero"
         no_div_param = false
     end
 
+    # Vectors splat into separate Cmd arguments; an empty vector adds none. The options
+    # used to be joined into one string, which a Cmd passes as ONE argument
+    # ("-no_div_data -fold"), and an empty one as an empty argument.
     bool_options = ["-no_div_data", "-no_div_param", "-no_syn_orient_error", "-fold"]
-    bool_options = join(
-        bool_options[any(
-            vcat(no_div_data, no_div_param, no_syn_orient_error, fold),
-            dims = 2,
-        )],
-        " ",
-    )
+    bool_options = bool_options[[no_div_data, no_div_param, no_syn_orient_error, fold]]
 
-    if !isempty(fixed_param)
-        fixed_param = "-fixed_param " * fixed_param
-    end
+    fixed_param = isempty(fixed_param) ? String[] : ["-fixed_param", fixed_param]
 
     r(
         d,
