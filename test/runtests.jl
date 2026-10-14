@@ -699,3 +699,7 @@ using DelimitedFiles: readdlm
     end
 
 end
+
+# dfe_ml engine (src/ml/)
+include("ml/engine.jl")
+include("ml/extension.jl")
