@@ -24,6 +24,8 @@ makedocs(;
                 ],
                 "Command-Line interface" => "cli.md",
                 "MK approaches" => "mk.md",
+                "DFE and alpha by maximum likelihood" => "dfe_ml.md",
+                "How to add a new DFE" => "new_dfe.md",
                 "Bootstrap" => "bootstrap.md",
                 "Reference" => "reference.md"
         ]
