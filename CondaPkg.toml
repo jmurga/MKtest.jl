@@ -1,0 +1,10 @@
+# grapes-static links GSL 2.7 (libgsl.so.25) but does not pin it, so a new environment
+# would take GSL 2.8 and the binary would fail to load. grapes() and the dfe_ml parity
+# fixture (test/fixtures/make_grapes_parity_fixture.jl) need it.
+channels = ["conda-forge", "genomedk"]
+
+[deps]
+gsl = "2.7.*"
+
+    [deps.grapes-static]
+    channel = "genomedk"
