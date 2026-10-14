@@ -1,0 +1,2 @@
+alpha,cmd,date,grapes_version,julia,lnL,model,n_chrom,n_ind,n_param_grapes,p_negGmean,p_negGshape,p_posGmean,p_pos_prop,p_syno_orientation_error,src_sha,theta,wall_s
+0.0863,grapes -in <dofe> -out <out> -model GammaExpo -nearly_neutral 5 -FWW_threshold 0.15 -nb_rand_start 0 -anc_to_rec_Ne_ratio 1.0,2026-10-15T01:44:33.250,grapes-static-1.1.0-h6bb024c_1,1.13.1,-318.8019,GammaExpo,40,20,46,2242.656162,0.112228,2.759257,0.02088,0.001445,622e6e0bb9d056b092196a880a8dc891139f50969fa858ac68798123011be064,0.001615,488.80155301094055
