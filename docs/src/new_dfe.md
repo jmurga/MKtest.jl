@@ -31,8 +31,10 @@ From these two methods the engine builds:
 - the tail masses (`cdf`, `ccdf`) and the CDF, so `quadrature = IntervalCDF()` works;
 - the optimizer scale: a parameter is optimised on a log scale when its lower bound is
   positive (`σ` here, not `μ`);
-- three starting points, at 1/4, 1/2 and 3/4 of every range on that scale. The engine
-  always adds the centre of the box, plus `nb_rand_start` seeded random points.
+- eight starting points, the first points of a Halton sequence over the box on that
+  scale. The engine always adds the centre of the box, plus `nb_rand_start` seeded random
+  points. For a wide box, give your own with `MKtest.dfe_start_points(m) = [[...], ...]`:
+  a likelihood surface that is flat far from the data can hold the optimizer at a start.
 
 ### Why the `MKtest.` prefix
 
@@ -71,7 +73,7 @@ starting points, and refuses to wrap a model that already has `p_lethal`.
 | method | default | override when |
 |---|---|---|
 | `MKtest.dfe_log_scale(m)` | lower bound > 0 | a positive parameter is better optimised linearly (shapes, proportions) |
-| `MKtest.dfe_start_points(m)` | 3 points across the box | you know good starts (the built-ins use GRAPES') |
+| `MKtest.dfe_start_points(m)` | 8 Halton points across the box | you know good starts (the built-ins use GRAPES') |
 | `MKtest.dfe_name(m)` | the type name | the output table should say something else |
 | `MKtest.discrete_components(m, p)` | none | the DFE has point masses, as `(S, weight)` pairs (`NeuGamma`, `FixedSpikes`) |
 | `MKtest.dfe_mass_below(m, p, b)`, `dfe_mass_above(m, p, a)`, `dfe_cdf_continuous!(out, m, p, edges)` | from `distribution`, else numerical | a closed form is faster or more accurate |
