@@ -339,12 +339,17 @@ function grapes(
 
     @info "Converting SFS to dofe file"
     dofe = @. sfs_to_dofe(pn, ps, dn, ds, ln, ls, idx, n)
-    h = fill(DataFrame(["" ""; "#unfolded" ""], :auto), length(sfs_r))
 
     output_dofe   = @. tempname() * idx
     output_grapes = @. output_dofe * "." * model
 
-    @. write_files(h, output_dofe, false)
+    # GRAPES' header: a free-text title line, then "#unfolded". Plain text: written as a
+    # DataFrame through CSV, the empty cells came out as `""` on both lines.
+    for f in output_dofe
+        Base.open(f, "w") do io
+            print(io, "MKtest dofe\n#unfolded\n")
+        end
+    end
     @. write_files(dofe, output_dofe, true)
 
     @info "Running Grapes"

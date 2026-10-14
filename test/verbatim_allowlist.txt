@@ -25,5 +25,16 @@
 +     bool_options = bool_options[[no_div_data, no_div_param, no_syn_orient_error, fold]]
 -     if !isempty(fixed_param)
 -         fixed_param = "-fixed_param " * fixed_param
--     end
 +     fixed_param = isempty(fixed_param) ? String[] : ["-fixed_param", fixed_param]
+
+# grapes() dofe header written as plain text (the user's fix, 2026-10-15): through CSV the
+# empty cells of the DataFrame header came out as "".
+-     h = fill(DataFrame(["" ""; "#unfolded" ""], :auto), length(sfs_r))
+-     @. write_files(h, output_dofe, false)
++     # GRAPES' header: a free-text title line, then "#unfolded". Plain text: written as a
++     # DataFrame through CSV, the empty cells came out as `""` on both lines.
++     for f in output_dofe
++         Base.open(f, "w") do io
++             print(io, "MKtest dofe\n#unfolded\n")
++         end
+# (C2 removed one `    end` and this fix adds one back: the pair cancels in the multiset.)
