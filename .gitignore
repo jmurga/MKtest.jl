@@ -9,3 +9,4 @@ scripts/singularity/abcmk.simg
 
 # docs environment is resolved in CI
 docs/Manifest.toml
+.CondaPkg/

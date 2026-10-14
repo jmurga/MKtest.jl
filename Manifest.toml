@@ -2,7 +2,7 @@
 
 julia_version = "1.13.1"
 manifest_format = "2.1"
-project_hash = "13becd40fc925c398028e13c27bb737bc5dcbfab"
+project_hash = "d3b0f8b8233788307ba72351d006750f97971a7f"
 
 [[deps.ADTypes]]
 deps = ["PrecompileTools"]
@@ -481,6 +481,12 @@ version = "1.4.1"
     Arrow = "69666777-d1a9-59fb-9406-91d4454c9d45"
     TimeZones = "f269a46b-ccf7-5d73-abea-4c690281aa53"
 
+[[deps.EnumX]]
+git-tree-sha1 = "c49898e8438c828577f04b92fc9368c388ac783c"
+registries = "General"
+uuid = "4e289a0a-7415-4d19-859d-a7e5c4648b56"
+version = "1.0.7"
+
 [[deps.FFTA]]
 deps = ["AbstractFFTs", "DocStringExtensions", "LinearAlgebra", "MuladdMacro", "Primes", "Random", "Reexport"]
 git-tree-sha1 = "65e55303b72f4a567a51b174dd2c47496efeb95a"
@@ -794,16 +800,18 @@ uuid = "2fda8390-95c7-5789-9bda-21331edee243"
 version = "0.16.1"
 
 [[deps.MKtest]]
-deps = ["CSV", "CondaPkg", "DataFrames", "DelimitedFiles", "Distributions", "GLM", "GZip", "HypothesisTests", "JLD2", "KernelDensity", "LinearAlgebra", "Logging", "LsqFit", "MultipleTesting", "NLsolve", "OrderedCollections", "Parameters", "Parsers", "PoissonRandom", "Random", "SparseArrays", "SpecialFunctions", "StatsBase", "Suppressor", "Tables", "ThreadsX", "Unzip"]
+deps = ["ADTypes", "CSV", "CondaPkg", "DataFrames", "DelimitedFiles", "Distributions", "GLM", "GZip", "HypothesisTests", "JLD2", "KernelDensity", "LineSearches", "LinearAlgebra", "Logging", "LsqFit", "MultipleTesting", "NLsolve", "Optim", "OrderedCollections", "Parameters", "Parsers", "PoissonRandom", "Random", "SparseArrays", "SpecialFunctions", "StatsBase", "Suppressor", "Tables", "ThreadsX", "Unzip"]
 path = "."
 uuid = "eac4f1b0-fea5-4d5c-b218-523869339fe7"
 version = "1.0.0"
 
     [deps.MKtest.extensions]
     MKtestPlotsExt = "Plots"
+    MKtestStatsPlotsExt = "StatsPlots"
 
     [deps.MKtest.weakdeps]
     Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+    StatsPlots = "f3b207a7-027a-5e70-b257-86293d7955fd"
 
 [[deps.MacroTools]]
 git-tree-sha1 = "1e0228a030642014fe5cfe68c2c0a818f9e3f522"
@@ -916,6 +924,19 @@ registries = "General"
 uuid = "efe28fd5-8261-553b-a9e1-b2916fc3738e"
 version = "0.5.6+0"
 
+[[deps.Optim]]
+deps = ["ADTypes", "EnumX", "FillArrays", "LineSearches", "LinearAlgebra", "NLSolversBase", "NaNMath", "PositiveFactorizations", "Printf", "SparseArrays", "Statistics"]
+git-tree-sha1 = "81f338ad984b25bc82471db4d235e7b8bf21b8d6"
+registries = "General"
+uuid = "429524aa-4258-5aef-a3af-852621145aeb"
+version = "2.3.2"
+
+    [deps.Optim.extensions]
+    OptimMOIExt = "MathOptInterface"
+
+    [deps.Optim.weakdeps]
+    MathOptInterface = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
+
 [[deps.OrderedCollections]]
 git-tree-sha1 = "f9b03759e9ef463718934fbed30820b39997511e"
 registries = "General"
@@ -981,6 +1002,13 @@ git-tree-sha1 = "36d8b4b899628fb92c2749eb488d884a926614d3"
 registries = "General"
 uuid = "2dfb63ee-cc39-5dd5-95bd-886bf059d720"
 version = "1.4.3"
+
+[[deps.PositiveFactorizations]]
+deps = ["LinearAlgebra"]
+git-tree-sha1 = "17275485f373e6673f7e7f97051f703ed5b15b20"
+registries = "General"
+uuid = "85a6dd25-e78a-55b7-8502-1745935b8125"
+version = "0.2.4"
 
 [[deps.PrecompileTools]]
 deps = ["Preferences"]
