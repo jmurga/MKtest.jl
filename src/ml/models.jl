@@ -24,15 +24,30 @@ dfe_log_scale(m::AbstractDFEModel) = map(b -> first(b) > 0, values(dfe_parameter
 
 Starting points of the optimizer, in natural space and `dfe_parameters` order. The
 engine always adds the centre of the box in optimizer space, and `nb_rand_start`
-random points. Default: three points at 1/4, 1/2 and 3/4 of every parameter's range
-in optimizer space.
+random points. Default: the first 8 points of a Halton sequence (bases 2, 3, 5, ...)
+over the box in optimizer space, which fill it rather than sit on its diagonal and are
+the same at every call. Override with starts you trust when the box is wide.
 """
 function dfe_start_points(m::AbstractDFEModel)
     b = collect(values(dfe_parameters(m)))
     ls = collect(dfe_log_scale(m))
-    return [[ls[i] ? exp(log(b[i][1]) + f * (log(b[i][2]) - log(b[i][1]))) :
-                     b[i][1] + f * (b[i][2] - b[i][1]) for i in eachindex(b)]
-            for f in (0.25, 0.5, 0.75)]
+    lo = [ls[i] ? log(Float64(b[i][1])) : Float64(b[i][1]) for i in eachindex(b)]
+    hi = [ls[i] ? log(Float64(b[i][2])) : Float64(b[i][2]) for i in eachindex(b)]
+    return [[_from_opt(lo[i] + _halton(k, _PRIMES[i]) * (hi[i] - lo[i]), ls[i]) for i in eachindex(b)]
+            for k in 1:8]
+end
+
+const _PRIMES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53)
+
+# k-th element (k >= 1) of the van der Corput sequence in base `p`.
+function _halton(k::Int, p::Int)
+    f, r = 1.0, 0.0
+    while k > 0
+        f /= p
+        r += f * (k % p)
+        k ÷= p
+    end
+    return r
 end
 
 """

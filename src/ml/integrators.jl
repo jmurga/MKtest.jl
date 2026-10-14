@@ -124,7 +124,9 @@ Use it to reproduce GRAPES, not for new analyses.
 """
 struct RombergIntegrator <: AbstractIntegrator end
 
-integrate(::RombergIntegrator, f, a::Float64, b::Float64) = _qromb(f, a, b)
+# `f::F ... where {F}`: Julia does not specialise on a function argument that is only
+# passed through, and the unspecialised inner call allocates.
+integrate(::RombergIntegrator, f::F, a::Float64, b::Float64) where {F} = _qromb(f, a, b)
 
 """
     GaussLegendreSojourn(; panel = 0.5, tail = 45.0)
@@ -159,7 +161,7 @@ end
 ExactSojourn(fallback::AbstractIntegrator = GaussLegendreSojourn(); max_series::Real = LARGE_S_VALUE) =
     ExactSojourn(fallback, Float64(max_series))
 
-integrate(e::ExactSojourn, f, a::Float64, b::Float64) = integrate(e.fallback, f, a, b)
+integrate(e::ExactSojourn, f::F, a::Float64, b::Float64) where {F} = integrate(e.fallback, f, a, b)
 
 """
     expected_count(integ, S, j, n, logc) -> Float64
@@ -240,7 +242,7 @@ const _GL10_W = (0.0666713443086881, 0.1494513491505806, 0.2190863625159820,
 end
 
 # Generic rule for any integrand: panel doubling until the estimate stops moving.
-function integrate(g::GaussLegendreSojourn, f, a::Float64, b::Float64)
+function integrate(g::GaussLegendreSojourn, f::F, a::Float64, b::Float64) where {F}
     prev = _gl_composite(f, a, b, 8)
     npan = 16
     while npan <= _GL_MAX_PANELS
