@@ -1,0 +1,6 @@
+# Lines the verbatim gate (test/verbatim_gate.sh) allows to differ from main 614be3c7.
+# "- " = a line of main that may disappear, "+ " = a line that may appear. Exact content.
+#
+# D2: abc.jl moved one folder down, so the default ABCreg binary path needs one more "..".
+-         abcreg = abspath(joinpath(@__DIR__, "..", "scripts", "reg"))
++         abcreg = abspath(joinpath(@__DIR__, "..", "..", "scripts", "reg"))
