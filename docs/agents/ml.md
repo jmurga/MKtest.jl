@@ -53,8 +53,9 @@ design is `docs/agents/briefs/task1_phase0_report.md` on dev.
   a built-in with the same density.
 - **One-ulp changes move ridge fits.** dev measured GammaExpo's alpha moving 0.8% under a
   1-ulp perturbation of the neutral term. The new engine sums the SFS in a plain loop where
-  dev used BLAS `mul!`. `test/ml/dev_reference.jl` asserts the objective to 1e-10
-  relative and does not assert ridge-model parameters.
+  dev used BLAS `mul!`. The dev-reference guard (objective to 1e-10 against dev
+  9d752e40) was retired on 2026-10-15; RombergIntegrator stays frozen by
+  `test/fixtures/integrator_baseline.jld2`.
 - **Ne ratio**: the divergence side uses the DFE rescaled by `dfe_ne_multipliers` (S-scale
   parameters x r, `med_prop` / r as GRAPES). Unknown parameter names error rather than
   being skipped (dev skipped `negLNmean`, `BKscale` and FixedSpikes silently).

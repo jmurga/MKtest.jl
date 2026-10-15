@@ -286,32 +286,54 @@ function simulate_models!(
 end
 
 """
-	rates(param; iterations, output_file, ...)
+    rates(param; iterations, output_file, gH = [100, 1000], gL = [1, 10],
+          gam_flanking = [-1000, -500], gam_dfe = [-1000, -200], alpha = [0.1, 0.9],
+          rho = nothing, B_bins = vcat(0.1:0.025:0.975, 0.999), weak = true)
 
-Solve `iterations` random models across `B_bins` and write the ABC reference table:
-models, neutral and selected cumulative SFS at each DAC, and fixation rates. Forward model:
-Φ from eq. 9 of the paper, beneficial SFS scaled by B with the sojourn at γ·B, and `ppos`
-solved to tolerance (models that cannot be solved are dropped).
+Build the ABC-MK reference table: draw `iterations` models from the priors, solve each in
+every `B` bin, and append the table to the JLD2 file `output_file`.
+
+For each draw, [`set_ppos!`](@ref) solves the beneficial probabilities at `B = 0.999`;
+draws it cannot solve are dropped (the count is logged). Then, for each `B`, the model's
+expected synonymous and nonsynonymous SFS tails (DAC >= k) at every `param.dac` and its
+fixation rates are computed. The draws run on all Julia threads (`julia -t auto`); with a
+seed, the table reproduces only at the same thread count.
 
 # Arguments
- - `param::parameters`: mutable structure containing the model (`N`, `n`, `dac`, `shape`).
- - `iterations::Int64`: number of prior draws; each is solved in every B bin.
- - `output_file::String`: rates file to write (JLD2; appends a block under `N/n/cutoff`).
- - `gH`, `gL`: ranges of strong / weak beneficial `2N·s` (defaults `[100, 1000]`,
-   `[1, 10]`; drawn as `floor(Uniform)`, so `gL` reaches 9, not 10).
- - `gam_flanking`, `gam_dfe`: ranges of flanking / coding deleterious `2N·s`
-   (paper Table 2 defaults `[-1000, -500]`, `[-1000, -200]`).
- - `alpha::Vector{Float64}`: range of `al_tot` (paper default `[0.1, 0.9]`).
- - `rho`: `nothing` (default) holds `param.ρ`; a scalar holds that value; `[lo, hi]` draws
-   `ρ ~ Uniform(lo, hi)` per model. Recorded in the `rho` column.
- - `B_bins`: background-selection bins (default `0.1:0.025:0.975` plus `0.999`).
+ - `param::parameters`: the model; `N`, `n`, `dac`, `cutoff` and `shape` are used as
+   set, the other drawn fields are overwritten in per-task copies.
 
-The DFE shape is drawn from `Uniform(shape·2^-2, shape·2^2)` (uniform, not log-uniform
-as in the paper). The number of dropped models is logged.
+# Keywords
+ - `iterations::Int64`: number of prior draws; the table has up to
+   `iterations * length(B_bins)` rows.
+ - `output_file::String`: JLD2 file, opened in append mode; the block is written under
+   the group `"N/n/cutoff=[lo,hi]"`, which must not exist yet.
+ - `gH`, `gL::Vector{Int64}`: ranges of the strongly and weakly beneficial coefficients,
+   drawn as `floor(Uniform(lo, hi))` (so `gL` reaches 9, not 10).
+ - `gam_flanking`, `gam_dfe::Vector{Int64}`: ranges of the flanking and coding
+   deleterious coefficients (mean of the DFE), drawn the same way.
+ - `alpha::Vector{Float64}`: range of `al_tot`, drawn uniformly and rounded to 2 digits.
+ - `rho`: `nothing` keeps `param.ρ`; a positive number fixes ρ; `[lo, hi]` draws
+   `ρ ~ Uniform(lo, hi)` per model. A fixed ρ draws no random numbers.
+ - `B_bins::Vector{Float64}`: background selection values (37 by default).
+ - `weak::Bool`: draw the weak share of α from `0:0.05:1` (`al_low = al_tot * share`);
+   `false` sets `al_low = 0`.
+ - `basesize`, `distributed`: not used.
+
+The DFE shape is drawn from `Uniform(shape/4, 4 shape)`. All coefficients are `2N` times
+the heterozygote selection coefficient.
 
 # Returns
- - `Dict` with `:models`, `:neut`, `:sel`, `:dsdn`, `:dac`; the same is written to
-   `output_file`.
+A `Dict` with the same content as the file block:
+ - `:models`: `DataFrame`, one row per (draw, B), columns `B` (B x 1000), `al_low`,
+   `al_tot`, `gam_flanking`, `gL`, `gH`, `shape`, `gam_dfe`, `rho`, `ne_ratio` (always 1).
+ - `:neut`, `:sel`: `OrderedDict{Int,Array}` from each DAC to the expected synonymous and
+   nonsynonymous tails of every row.
+ - `:dsdn`: matrix of fixation rates, columns `Ds`, `Dn`, and the parts of `Dn` from
+   weakly and from strongly beneficial mutations.
+ - `:dac`: `param.dac`.
+
+The file block also stores `options`, a description of the forward model.
 """
 function rates(
     param::parameters;

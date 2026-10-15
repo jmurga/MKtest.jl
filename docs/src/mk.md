@@ -85,7 +85,7 @@ MKtest.ni(sfs, div)    # (ni = 1.598, p_value = 0.0)     Rand & Kann 1996
 ```
 
 `MKtest.ni_cmh(sfs_vector, div_vector)` combines several datasets into one weighted NI
-(Stoletzki & Eyre-Walker 2011); it returns the value alone, without a test.
+(Stoletzki & Eyre-Walker 2011); it returns `(ni = ...,)`, without a test.
 
 ## Many datasets and multiple testing
 

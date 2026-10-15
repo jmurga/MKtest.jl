@@ -6,8 +6,8 @@ It compares the observed alpha(x) curve and divergence with those of an analytic
 (Uricchio et al. 2019) that includes:
 
 - a gamma DFE of deleterious mutations (shape, mean `gam_dfe`);
-- weakly (`gL`) and strongly (`gH`) beneficial mutations, the share of alpha due to the
-  weak ones (`al_low`), and the total alpha (`al_tot`);
+- weakly (`gL`) and strongly (`gH`) beneficial mutations, the part of alpha due to the
+  weak ones (`al_low`, alpha_W), and the total alpha (`al_tot`);
 - background selection `B` from deleterious flanking sites (`gam_flanking`), with
   recombination `ρ`, and its reduction of the fixation probability of beneficial
   mutations (selective interference).

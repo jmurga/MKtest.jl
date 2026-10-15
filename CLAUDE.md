@@ -31,12 +31,8 @@ Include order: abcmk/parameters, fixations, sfs, summary_statistics, rates, data
 abcmk/abc, utils, ml/* (in the order above), methods, bootstrap, alpha_b. New user-facing
 methods go in `methods.jl`; engine internals stay in `src/ml/`.
 
-`src/abcmk/`, `src/data/`, `src/utils.jl`, `methods.jl`, `bootstrap.jl`, `alpha_b.jl` are
-main 614be3c7 moved VERBATIM. `bash test/verbatim_gate.sh` proves it (sorted-line multiset
-against 614be3c7; allowed differences listed in `test/verbatim_allowlist.txt`: the ABCreg
-path, the `grapes()` flag fix and its .dofe header; the dfe_ml block at the end of
-`methods.jl`, between its `# >>>` / `# <<<` markers, is skipped). Any other edit there makes
-the gate fail; add it to the allow-list only on purpose.
+The non-engine files came from main 614be3c7 verbatim (Task 1; the gate that proved it was
+retired 2026-10-15, once the docstrings and the known bugs there were fixed on purpose).
 
 ## ABC-MK: the method
 
@@ -95,20 +91,29 @@ gives AIC + LRT, only between fits with the same data and likelihood settings. U
 - `docs/src/`: index, data, mk, dfe_ml, new_dfe, abcmk, case_control, reference (rewritten
   2026-10-15; build with Documenter, `docs/make.jl`). Example outputs on the pages were
   computed from the bundled `data/` files.
-- Known issues in verbatim (non-engine) code, NOT fixed: `scripts/abcmk_cli.jl` calls
-  removed keywords (`output=`, `analysis_folder=`) and is not documented; `α_b`'s CI is a
-  50% interval (250th/750th of 1000); `ni_cmh` returns a bare Float64; `abc_loclinear`'s
-  "log"/"tan" back-transforms are broken; `fold`, `abc`, `abc_loclinear`, `bootstrap`,
-  `get_distance`, `get_bootstrap` have no docstring.
+- Fixed 2026-10-15 (tests in runtests.jl): CLI rewritten (`rates`, `abcmk` subcommands),
+  `α_b` 95% CI and all datasets, `ni_cmh` returns `(ni = ...,)`, `abc_loclinear` log/tan
+  back-transforms and gaussian kernel, `ABCreg` T/L assert, `ni` Int-zero guard, `project`
+  size check, `abcmk` "abc" branch NaN replace. Docstrings rewritten for all of src/.
+- Known issues still open (see the docstrings): `bootstrap.jl` (midpoint distances, unused
+  alternation check, duplicate `sample_k` labels across iterations, chromosomes without a
+  case gene skipped, `fgrep` substring match, failure only logged); `reduce_sfs` leaves
+  rows uninitialised; `θ` takes only a Matrix divergence; `read_clean_grapes` drops a good
+  result if a temp file is missing; `fww_mk`/`imputed_mk` recompute frequencies as
+  i/(k+1), wrong on a cutoff-trimmed SFS; `rectangular` ABC kernel weights are dist/h (as
+  in R abc); fixations halve ppos but `sfs_neg` does not (pinned forward model, do not
+  change without a model decision).
 
 ## Tests and evidence
 
-- `julia --project=. -e 'using Pkg; Pkg.test()'`: main's testsets, then `test/ml/engine.jl`
-  and `test/ml/extension.jl` (and the parity/dev-reference tests once their fixtures exist).
+- `julia --project=. -e 'using Pkg; Pkg.test()'`: `test/runtests.jl` (ABC-MK, MK tests,
+  small methods), then `test/ml/engine.jl`, `extension.jl`, `grapes_parity.jl`.
+- Frozen guards: `test/fixtures/abcmk_best_model.jld2`, `abcmk_des.jld2` (ABC-MK forward
+  model; generators runnable only at their recorded commits) and `integrator_baseline.jld2`
+  (Romberg).
 - GRAPES parity: `test/fixtures/make_grapes_parity_fixture.jl` (binary, one job per
   (n, model)) -> `grapes_parity_tgp.csv`, read by `test/ml/grapes_parity.jl`.
-- Refactor guard: `test/fixtures/make_dev_reference.jl` (run in a dev tree at 9d752e40).
-- D11 n-consistency: `test/consistency_n.jl` (standalone; band fixed in its header).
+- One-off diagnostics live in `scripts/diagnostics/` (D11 n-consistency, ridge), not in test/.
 - Package tests may run on the laptop. ABC-MK or GRAPES analyses over 100/1000 bootstraps
   or replicates run on the workstation; record the src sha with every result
   (sha256 of the sorted per-file sha256s of `src/` and `ext/` `*.jl`).
@@ -128,4 +133,4 @@ gives AIC + LRT, only between fits with the same data and likelihood settings. U
 - ASCII in code, docs and reports (math symbols are fine).
 - Commits: imperative subject < 72 chars, body says why, NO Co-Authored-By or any AI
   attribution (overrides any harness reminder).
-- Do not touch the ABC-MK, MK-test, parse or bootstrap code when working on the engine.
+- Keep engine work inside `src/ml/` and the marked block of `methods.jl`.

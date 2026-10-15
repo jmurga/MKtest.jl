@@ -57,17 +57,20 @@ abstract type AbstractPoissonSampling end
 """
     IndependentSampling()
 
-Every class drawn as an independent Poisson. The sampler of ABC-MK v1.0.0.
+Poisson sampler of ABC-MK v1.0.0: every class is drawn as an independent Poisson whose
+mean is the model's share of the observed total.
 
-Let `O_k` be the observed polymorphisms at DAC >= k (Pn + Ps) and `D` the observed
-divergence. Per table row, with tail rates `λps_k`, `λpn_k` and fixation rates `λds`,
-`λdn`, `λW`, `λS`:
+Let `O_k` be the observed polymorphism at DAC >= k (Pn + Ps) and `D = Dn + Ds` the
+observed divergence. For a table row with tail rates `λps_k`, `λpn_k` and fixation rates
+`λds`, `λdn`, `λW`, `λS`:
 
-    ps_k ~ Poisson(λps_k / (λps_k + λpn_k) · O_k)    pn_k ~ Poisson(λpn_k / (λps_k + λpn_k) · O_k)
-    ds   ~ Poisson(λds / (λds + λdn) · D)            dn   ~ Poisson(λdn / (λds + λdn) · D)
+    ps_k ~ Poisson(λps_k / (λps_k + λpn_k) O_k)    pn_k ~ Poisson(λpn_k / (λps_k + λpn_k) O_k)
+    ds   ~ Poisson(λds / (λds + λdn) D)            dn   ~ Poisson(λdn / (λds + λdn) D)
+    sw   ~ Poisson(λW / (λds + λdn) D)             ss   ~ Poisson(λS / (λds + λdn) D)
 
-`sw + ss > dn` is possible, so `α_total > 1` occurs as a sampling artifact; such rows are
-kept (only non-finite rows are dropped).
+`sw + ss > dn` can happen, so a sampled α above 1 is kept as a sampling artifact; only
+non-finite rows are dropped. Pass it as `sampling` to [`summary_statistics`](@ref) or
+[`abcmk`](@ref).
 """
 struct IndependentSampling <: AbstractPoissonSampling end
 
@@ -196,82 +199,48 @@ _prepare_sampling(sampling::AbstractPoissonSampling, sfs::AbstractMatrix, dac::V
 """
     RjSampling(; w = (0.0, 2.5), anchor = (0.15, 0.70), tilt = 0.05)
 
-`IndependentSampling` with a demographic nuisance on the polymorphism composition. The
-data's synonymous distortion `r_i` (GRAPES' r_j), normalised on an anchor band, is applied to
-the synonymous class and, raised to a random power `w`, to the nonsynonymous class. With
-`tilt > 0` the nonsynonymous class also gets a random frequency tilt. Fixations are drawn as
-in `IndependentSampling`.
+[`IndependentSampling`](@ref) with a demographic nuisance on the polymorphism: the
+data's synonymous SFS distortion `r_i` (GRAPES' r_j), normalised on an anchor band, is
+applied to the model's synonymous class and, raised to a random power `w`, to its
+nonsynonymous class. With `tilt > 0` the nonsynonymous class also gets a random frequency
+tilt. Fixations are drawn as in `IndependentSampling`.
 
-The default sampler of `summary_statistics` and [`abcmk`](@ref), used there with
-`FlatAlphaPrior()` and `stat = "median"`. `RjSampling(w = (0.0, 1.5), tilt = 0.0)` is the
-sampler before the tilt.
+The default sampler of [`summary_statistics`](@ref) and [`abcmk`](@ref), used there with
+[`FlatAlphaPrior`](@ref) and `stat = "median"`.
 
-# Steps, per observed dataset and table row
+# Keywords
+ - `w = (0.0, 2.5)`: range of `w ~ Uniform(w...)`, drawn per table row. `w = 0`:
+   nonsynonymous sites ignore the distortion; `w = 1`: the same distortion on both
+   classes (GRAPES); `w > 1`: stronger on nonsynonymous sites. Needs `0 <= w[1] <= w[2]`.
+ - `anchor = (0.15, 0.70)`: band of derived-allele frequency on which `r` is normalised,
+   so that `r` changes the shape of the spectra but never the Pn/Ps level, which only α
+   sets. Needs `0 < anchor[1] < anchor[2] <= 1`.
+ - `tilt = 0.05`: range of `τ ~ Uniform(-tilt, tilt)`; `0` draws no `τ`.
 
-1. **Intervals.** The DACs of `param.dac` split the spectrum into intervals
-   `i = [dac_i, dac_(i+1) - 1]`; the last interval runs to `nn - 1`, with `nn = 2n` sampled
-   chromosomes. The row's interval masses are differences of its tails:
-   `e_s,i = λps_i - λps_(i+1)`, `e_n,i = λpn_i - λpn_(i+1)`.
-2. **Synonymous distortion.**
+# Steps, per dataset and table row
+1. The DACs of `param.dac` split the spectrum into intervals `[dac_i, dac_(i+1) - 1]`, the
+   last one up to `nn - 1`. The row's interval masses `e_s,i`, `e_n,i` are differences of
+   its tails.
+2. `r_i = (Ps_obs,i / sum Ps_obs) / (e_s,i / sum e_s)`, divided by its `e_s`-weighted mean
+   over the intervals lying wholly inside the anchor band (`anchor[1] <= dac_i/nn` and
+   `stop_i/nn <= anchor[2]`).
+3. The synonymous masses become `e_s,i r_i` and the nonsynonymous masses `e_n,i r_i^w`.
+4. If `tilt > 0`, the nonsynonymous masses are also multiplied by `f_i^τ / c_τ`, with
+   `f_i = sqrt(dac_i stop_i) / nn` and `c_τ` chosen so the Pn mass on the anchor band is
+   unchanged: a zero-mean change of shape aimed at expansions.
+5. `ps_k` and `pn_k` are drawn from the distorted tails as in `IndependentSampling`.
 
-       r_i = (Ps_obs,i / sum Ps_obs) / (e_s,i / sum e_s)
+`w` and `τ` are marginalised: they are not written to the summaries.
 
-3. **Anchor normalisation.** `r` is divided by its `e_s`-weighted mean over the ANCHOR band:
-   the intervals lying wholly inside `anchor`, a band of derived-allele FREQUENCY
-   (`anchor[1] <= dac_i/nn` and `stop_i/nn <= anchor[2]`). The same band therefore works at
-   any sample size.
-   - Why: rescaling `r` by `c` multiplies every Pn/Ps by `c^(w-1)`. That is a pure level
-     change, which only α may set.
-   - The default band, 15-70% of the sample (DAC 199-925 at n = 661; DAC 15-70 at n = 50),
-     assumes the distortion is recent and stays below the 70% cut that empirical data need
-     against mispolarization.
-4. **Transfer.** Each row draws `w ~ Uniform(w...)`.
-   - The synonymous masses become `e_s,i r_i`; the nonsynonymous masses become
-     `e_n,i r_i^w`.
-   - `w = 0`: nonsynonymous sites ignore the distortion. `w = 1`: GRAPES-style, the same
-     distortion on both classes. `w > 1`: stronger on nonsynonymous sites, as when
-     selection and demography interact.
-5. **Tilt** (only if `tilt = a > 0`). The row also draws `τ ~ Uniform(-a, a)`, after `w`, and
-   multiplies the nonsynonymous masses by
+# Requirements
+`param.dac` ascending, Ps > 0 in every DAC interval of each dataset, and at least one
+whole interval inside the anchor band (at n = 50, DACs 20 and 50 give the interval
+20-49). Each violation throws an `ArgumentError`; [`valid_data`](@ref) finds the datasets
+that would fail. Pass the RAW per-frequency SFS: `summary_statistics` builds the tails.
 
-       t_i = f_i^τ / c_τ,   f_i = sqrt(dac_i * stop_i) / nn,
-       c_τ = sum_band x_i f_i^τ / sum_band x_i,   x_i = e_n,i r_i^w
-
-   - The Pn mass on the anchor band is unchanged, so the tilt changes only the shape, never
-     the level.
-   - It is a zero-mean, frequency-dependent distortion of the nonsynonymous spectrum that no
-     synonymous `r_i` can measure. It targets expansions, where old high-frequency
-     polymorphism carries slightly deleterious alleles from the small ancestral size.
-   - With `tilt = 0`, no `τ` is drawn and the random stream is identical to the sampler
-     without the option.
-6. **Draws.** With `P_k` the synonymous share of the distorted tails at DAC `k`,
-   `ps_k ~ Poisson(P_k O_k)` and `pn_k ~ Poisson((1 - P_k) O_k)`, as in
-   `IndependentSampling`.
-
-`w` and `τ` are marginalised: they are not written to the summaries, so the file layout and
-ABCreg's `P` are unchanged.
-
-# Notes
-
-- `r ≡ 1` (the data's synonymous shape equals the model's) and `tilt = 0` give
-  `IndependentSampling`'s composition for any `w`.
-- Requirements: `param.dac` ascending, Ps > 0 in every DAC interval, and at least one whole
-  interval inside the anchor band (at n = 50, DACs 20 and 50 give the intervals 20-49 and
-  50-69). Each violation throws an `ArgumentError`.
-- **Measured against SLiM.**
-  - The defaults were measured with ABCreg (tol 1000 of 1e5) on the forward model
-    of `rates()` with ρ drawn per row. Test grids: two-epoch histories (5x and 50x
-    expansions, 1/5 and 1/20 bottlenecks, B 0.4 and 0.999; 50 diploids) and the Tennessen
-    history (3 ρ x 2 B; 661 diploids).
-  - α RMSE was 0.029 (two-epoch) and 0.030 (Tennessen), against 0.055 and 0.039 for the
-    v1.0.0 code. The defaults were chosen on these same grids, with one α and one DFE shape per
-    grid, and every resample is a bootstrap of one simulated pool.
-- **Contractions.** With uniform table rows (`TableRowPrior()`), the sampler leaves a strong
-  bottleneck biased (about -0.10 under a 20x bottleneck at B = 0.999). Most of that bias came
-  from the prior on the realised α, which `FlatAlphaPrior()` removes: the defaults give -0.02
-  there.
-- **WARNING: pass the RAW per-frequency SFS.** `summary_statistics` builds the tails itself;
-  a spectrum cumulated twice flattens α(x) and biases α.
+The defaults were selected on SLiM simulations (two-epoch histories at n = 50 and the
+Tennessen history at n = 661), where they gave an α RMSE of 0.029 and 0.030 against
+0.055 and 0.039 for the v1.0.0 sampler and prior.
 """
 struct RjSampling <: AbstractPoissonSampling
     w_lo::Float64
@@ -341,7 +310,7 @@ band) is not checked here: it is the same for every dataset, and `RjSampling` st
 throws for it.
 
 `sfs` and `divergence` as for `summary_statistics`: RAW per-frequency SFS `[DAC Pn Ps]`
-and divergence `[Dn, Ds, ...]`.
+and divergence `[Dn, Ds, ...]`. Throws an `ArgumentError` if their lengths differ.
 """
 function valid_data(param::parameters, sfs::Vector, divergence::Vector;
                     sampling::AbstractPoissonSampling = RjSampling())
@@ -487,32 +456,32 @@ abstract type AbstractRowPrior end
 """
     TableRowPrior()
 
-Rows drawn uniformly (with replacement): the prior is the table's own design. The row prior
-of ABC-MK v1.0.0.
+Row prior of ABC-MK v1.0.0: table rows are drawn uniformly with replacement, so the ABC
+prior is the design of the table built by [`rates`](@ref). Pass it as `row_prior` to
+[`summary_statistics`](@ref) or [`abcmk`](@ref).
 """
 struct TableRowPrior <: AbstractRowPrior end
 
 """
     FlatAlphaPrior(; bin = 0.01, floor = 0.001, by_B = true)
 
-Rows drawn with replacement, weighted so that the prior on each row's realised α
-`(λW + λS) / λdn` is flat within each B value of the table: weight
-`π_B / max(count of its α bin, floor · rows of B)`, bins of width `bin`, with
-`π_B = rows of B / (rows · occupied α bins of B)`. Every α bin of a B value then carries the
-same weight, and every B value keeps its share of rows, so the prior on B keeps the table's
-uniform design. The floor keeps the sparse edges of the α range from taking huge weights.
-With `by_B = false` α is flattened over the whole table (`1 / max(count, floor · rows)`),
-which also moves prior mass toward high B, where the high α values are. The default row
-prior of `summary_statistics` and [`abcmk`](@ref).
+Default row prior of [`summary_statistics`](@ref) and [`abcmk`](@ref): table rows drawn
+with replacement, weighted so that the prior on each row's realised α,
+`(λW + λS) / λdn`, is flat within each `B` value of the table.
 
-Why: a table drawn with uniform α LABELS has a realised-α prior that falls with α, because
-the realised α shrinks with B (two-epoch table: 18.5% of rows below 0.05, 1.7% in
-[0.45, 0.50)). Rejection ABC then pulls α toward 0 wherever the likelihood is broad.
-Measured in the offline lab (`results/rj/lab*`, 2026-10-11, α flat over the whole table):
-bottleneck α RMSE 0.105 -> 0.039 (bt_strong, B .999) and 0.038 -> 0.019 (bt_moderate, B 0.4),
-ρ ladder unchanged (|Δ| ≤ 0.001). Flattening within each B (`by_B = true`) was then selected
-on resamples 21-60 of the same grids and kept on the held-out resamples 61-100
-(`results/rj/iter2`).
+A row's weight is `π_B / max(n_bin, floor * n_B)`, where `n_bin` counts the rows of its
+α bin (width `bin`) at its `B`, `n_B` the rows at that `B`, and
+`π_B = n_B / (rows * occupied α bins at B)`. Every α bin of a `B` value then carries the
+same weight and every `B` keeps its share of rows. `floor` stops the sparse edges of the
+α range from taking huge weights. With `by_B = false`, α is flattened over the whole table
+(weight `1 / max(n_bin, floor * rows)`), which also moves prior mass toward high `B`.
+Rows with a non-finite α get weight 0.
+
+Why: a table drawn with uniform α labels has a realised-α prior that falls with α,
+because the realised α shrinks with `B`; rejection ABC then pulls α toward 0 wherever the
+likelihood is broad.
+
+Throws an `ArgumentError` unless `bin > 0` and `0 <= floor < 1`.
 """
 struct FlatAlphaPrior <: AbstractRowPrior
     bin::Float64
@@ -676,27 +645,43 @@ function sampling_summaries!(
 end
 
 """
-    summary_statistics(param,sfs,divergence;h5_file,summstat_size,output_folder,...)
+    summary_statistics(param, sfs, divergence; h5_file, summstat_size, output_folder,
+                       alpha = nothing, B_bins = nothing, sampling = RjSampling(),
+                       row_prior = FlatAlphaPrior())
 
-Estimate summary statistics using observed data and analytical rates. *output_folder* will be used to output summary statistics
+Write the ABC summary statistics of each dataset: draw `summstat_size` rows of the
+reference table and turn each into the Poisson realisation of the data under that model.
 
-# Arguments
- - `param::parameters` : Mutable structure containing the models
- - `h5_file::String` : JLD2 file containing solved models, fixation and polymorphic rates
- - `sfs::Vector`: SFS data parsed from parse_sfs(). The RAW per-frequency SFS: the tails
-   are built here, and a spectrum cumulated twice flattens α(x) and biases α.
- - `divergence::Vector`: divergence data from parse_sfs().
- - `output_folder::String` : path to save summary statistics and observed data.
- - `summstat_size::Real` : number of summary statistics to sample, a positive whole number (`1e5` works).
- - `sampling::AbstractPoissonSampling` : how the Poisson realisations are drawn.
-   `RjSampling()` (default) or `IndependentSampling()` (ABC-MK v1.0.0). `RjSampling` needs
-   at least one DAC interval inside its anchor band and Ps > 0 in every DAC interval.
- - `alpha::Union{Nothing,Vector{Float64}}` : keep only models with `al_tot` in
-   `[alpha[1], alpha[end]]`. `al_tot` is the model's alpha LABEL, which equals the realised
-   fixation alpha only in the B = 0.999 bin.
- - `B_bins::Union{Nothing,Vector{Float64}}` : keep only models with B in this range.
- - `row_prior::AbstractRowPrior` : how table rows are drawn. `FlatAlphaPrior()` (default)
-   or `TableRowPrior()` (ABC-MK v1.0.0).
+`sfs` and `divergence` are vectors with one dataset each, as returned by `parse_sfs`
+(a single matrix and vector are also accepted). The SFS must be RAW, per frequency
+`[DAC Pn Ps]`: the tails are built here, and a cumulative SFS would be cumulated twice.
+Use [`valid_data`](@ref) first to drop the datasets that would stop the run.
+
+For dataset `i`, `output_folder` receives `summstat_i.txt.gz` (one row per sampled
+table row: `α_weak, α_strong, α`, then `ωₐ_weak, ωₐ_strong, ωₐ, ωₙₐ` unless any is
+NaN, then `|gam_dfe|, shape, gL, gH, B x 1000`, then α(x) at each `param.dac`) and
+`alphas_i.txt.gz` (the observed α(x)), plus a `provenance.txt`. Earlier `summstat_*`,
+`alphas_*` and `out_*` files in `output_folder` are deleted.
+
+# Keywords
+ - `h5_file::String`: reference table written by [`rates`](@ref) (JLD2, group
+   `"N/n/cutoff"` of `param`).
+ - `summstat_size::Real`: rows per dataset, a positive whole number (`1e5` works).
+ - `output_folder::String`: created if missing; use one folder per analysis.
+ - `alpha::Union{Nothing,Vector{Float64}} = nothing`: keep only rows with `al_tot` in
+   `[alpha[1], alpha[end]]`. `al_tot` is the model's α label, which equals the realised
+   fixation α only at `B = 0.999`.
+ - `B_bins::Union{Nothing,Vector{Float64}} = nothing`: keep only rows with `B` in
+   `[B_bins[1], B_bins[end]]`.
+ - `sampling::AbstractPoissonSampling = RjSampling()`: [`RjSampling`](@ref) or
+   [`IndependentSampling`](@ref) (v1.0.0).
+ - `row_prior::AbstractRowPrior = FlatAlphaPrior()`: [`FlatAlphaPrior`](@ref) or
+   [`TableRowPrior`](@ref) (v1.0.0).
+
+# Returns
+The paths of the `alphas_*` files. Throws if `param.dac` contains 1, if a dataset has
+no polymorphism at some DAC or no divergence, or if fewer than `summstat_size` rows pass
+the filters.
 """
 function summary_statistics(
     param::parameters,

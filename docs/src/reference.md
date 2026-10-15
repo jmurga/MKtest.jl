@@ -1,14 +1,13 @@
 # Reference
 
-Nothing is exported: call every function as `MKtest.f`. Functions documented only in
-the pages (`fold`, `abc`, `abc_loclinear`, `bootstrap`, `get_distance`,
-`get_bootstrap`) have no docstring of their own.
+Nothing is exported: call every function as `MKtest.f`.
 
 ## Input data
 
 ```@docs
 MKtest.parse_sfs
 MKtest.project
+MKtest.fold
 MKtest.cumulative_sfs
 MKtest.reduce_sfs
 MKtest.bootstrap_data
@@ -154,6 +153,8 @@ MKtest.IndependentSampling
 MKtest.FlatAlphaPrior
 MKtest.TableRowPrior
 MKtest.ABCreg
+MKtest.abc
+MKtest.abc_loclinear
 MKtest.summary_abc
 MKtest.analytical_alpha
 MKtest.set_ppos!
@@ -173,6 +174,9 @@ MKtest.sfs_neg
 
 ```@docs
 MKtest.bootstrap_parameters
+MKtest.bootstrap
+MKtest.get_distance
+MKtest.get_bootstrap
 MKtest.case_control_table
 MKtest.empirical_test
 MKtest.empirical_pvalues

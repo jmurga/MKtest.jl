@@ -1,5 +1,30 @@
 """
-    Parse private and shared non-synonymous and synonymous SNPs
+    parse_private_share(param::parameters; data, gene_list = nothing,
+                        private_columns = [10, 11], shared_columns = [12, 13])
+
+Count private and shared non-synonymous and synonymous polymorphisms, the input of
+[`α_b`](@ref).
+
+`data` is a tab-separated file without header, one gene per row, gene ID in column 1. The
+`private_columns` and `shared_columns` hold comma-separated lists of the derived allele
+frequencies of the non-synonymous and synonymous SNPs (first and second column of each
+pair). If the file has 11 columns or fewer, both column pairs are shifted 2 to the left.
+Frequencies are folded (`x > 0.5 -> 1 - x`) and a SNP counts if its folded frequency lies in
+`(param.cutoff[1], param.cutoff[2]]`. Only `param.cutoff` is used from `param`.
+
+# Keywords
+ - `data::AbstractString`: the input file.
+ - `gene_list`: `nothing` (pool all genes), a file with one gene set per row (the format
+   of `parse_sfs`; one column = one set), or a `Vector{String}` of IDs (one set).
+ - `private_columns::Vector{Int64}`: columns of the private Pn and Ps frequencies.
+   Default `[10, 11]`.
+ - `shared_columns::Vector{Int64}`: columns of the shared Pn and Ps frequencies.
+   Default `[12, 13]`.
+
+# Returns
+ - Without `gene_list`: `[rₙ, rₛ, sₙ, sₛ]` (`Vector{Int64}`), the private (`r`) and shared
+   (`s`) non-synonymous and synonymous counts over all genes.
+ - With `gene_list`: a `Vector{Vector{Int64}}`, one `[rₙ, rₛ, sₙ, sₛ]` per gene set.
 """
 function parse_private_share(param::parameters;
     data::S,
@@ -86,7 +111,28 @@ function get_r_s(
 end
 
 """
-    α_b estimation from Vivak et al. (2022)
+    α_b(r_s::Vector{Int64}) -> DataFrame
+    α_b(r_s::Vector) -> DataFrame
+
+Proportion of shared non-synonymous polymorphisms maintained by balancing selection,
+αᵦ, from the test of Soni, Vos & Eyre-Walker (2022) (cited as "Vivak et al. (2022)" in
+earlier versions of this package).
+
+`r_s = [rₙ, rₛ, sₙ, sₛ]` are the private (`r`) and shared (`s`) non-synonymous and
+synonymous polymorphism counts, as returned by [`parse_private_share`](@ref).
+`Z = (sₙ / sₛ) / (rₙ / rₛ)` (0 if `sₛ`, `rₙ` or `rₛ` is 0) and `αᵦ = 1 - 1 / Z` if `Z > 1`,
+else 0. The interval comes from 1000 multinomial resamples of the `sum(r_s)` SNPs over the
+four classes (unseeded; a resample missing a class gives `Z = 0`): the 2.5% and 97.5%
+quantiles of the resampled `Z`, a 95% percentile interval, mapped to α the same way.
+
+The second method applies the first to each element of a vector of count vectors (in
+parallel, logs suppressed) and stacks the rows.
+
+# Returns
+ - `DataFrame`, one row per count vector: `Z`, `αᵦ`, `α_low` and `α_high` (the 95%
+   bootstrap interval of `Z` mapped to α), `pnᵦ = αᵦ * sₙ` (the number of shared
+   non-synonymous SNPs under balancing selection), the input counts `rₙ`, `rₛ`, `sₙ`, `sₛ`,
+   and `variance` (the variance of the bootstrap `Z`).
 """
 function α_b(r_s::Vector{Int64})
     
@@ -108,13 +154,15 @@ function α_b(r_s::Vector{Int64})
 end
 
 """
-    α_b estimation from Vivak et al. (2022)
+    α_b(r_s::Vector)
+
+Apply `α_b` to each `[rₙ, rₛ, sₙ, sₛ]` in `r_s` and `vcat` the rows; see the first method.
 """
 function α_b(r_s::Vector)
 
     @info "Estimating αᵦ"
     out = @suppress begin
-        ThreadsX.map(x -> MKtest.α_b(x),r_s[1:10])
+        ThreadsX.map(x -> MKtest.α_b(x),r_s)
     end
     out = vcat(out...)
     return out
@@ -123,7 +171,10 @@ end
 
 
 """
-    Z estimation from Vivak et al. (2022)
+    z(r_s::Vector{Int64})
+
+Internal: `Z = (sₙ / sₛ) / (rₙ / rₛ)` of [`α_b`](@ref) for `r_s = [rₙ, rₛ, sₙ, sₛ]`, or 0
+when `sₛ`, `rₙ` or `rₛ` is 0.
 """
 function z(r_s::Vector{Int64})
     rₙ,rₛ,sₙ,sₛ = r_s
@@ -136,6 +187,12 @@ function z(r_s::Vector{Int64})
     return(z)
 end
 
+"""
+    bootstrapper(r_s::Vector{Int64})
+
+Internal: `[variance, lower, upper]` of `Z` over 1000 multinomial resamples of the SNPs in
+`r_s`; `lower`/`upper` are the 2.5% and 97.5% quantiles (a 95% interval).
+"""
 function bootstrapper(r_s::Vector{Int64})
 
     rₙ,rₛ,sₙ,sₛ = r_s
@@ -157,9 +214,8 @@ function bootstrapper(r_s::Vector{Int64})
 
     end
 
-    sort!(b_z_list)
-    lp = b_z_list[250]
-    up = b_z_list[750]
+    # 95% percentile interval
+    lp, up = quantile(b_z_list, [0.025, 0.975])
     v  = var(b_z_list)
 
     # out = DataFrame(:variance=>v,:CI_low=>lp,:CI_high=>up)

@@ -1,17 +1,33 @@
 """
-Mutable structure containing the variables required to boostrap a gene file following. All the functions are solve using the internal values of the structure. You should declare a mutable structure to the perform the analytical estimations.
+    bootstrap_parameters(; data, annotations, distance, max_reps, tolerance, iterations,
+                         confounding_factors, output, filter_hla_hist)
 
-# Bootstrap parameters
- - `data::String`: gene list get control genes.
- - `annotations::String`: bed file containing start and end gene coordinates.
- - `distance::Int64`: miminum distance between case and control genes.
- - `max_reps::Int64`: maximum number of genes by control set.
- - `tolerance::Float64`:
- - `iteration::Int64`: number of iteration defining the total number of control sets. Each iteration produce 100 control set.
- - `confounding_factors::String`: file containing confounding factors.
- - `output::String`: output file name without extension
- - `filter_hla_hist::Bool`: filter human HLA and HIST genes from Ensembl v109 annotations
+Settings of `bootstrap`, the matched control-set builder of Enard & Petrov (2020) and
+Di et al. (2021). A keyword (`Parameters.@with_kw`) mutable struct; every field has a
+default.
 
+# Fields
+ - `data::String`: file with the case gene IDs, one per line, no header. Default
+   `"ensembl_list.txt"`.
+ - `annotations::String`: tab-separated BED file without header, at least five columns
+   (chromosome, start, end, gene ID, one more column). The gene IDs in column 4 define the
+   gene universe. Default `"ensembl_gene_coords_v109.bed"`.
+ - `distance::Int64`: minimum distance in bp from a candidate control gene to the closest
+   case gene, as reported by `bedtools closest -d` (see `get_distance`). Default `1`.
+ - `max_reps::Int64`: a control gene may make up at most `max_reps / n_case` of the pooled
+   control genes of one iteration, i.e. on average at most `max_reps` copies per control
+   set. Default `3`.
+ - `tolerance::Float64`: relative tolerance of the matching: the running average of every
+   confounding factor must stay within `[1 - tolerance, 1 + tolerance]` times the case average.
+   Default `0.05`.
+ - `iterations::Int64`: number of independent runs; each gives 100 control sets. Default `10`
+   (1000 sets).
+ - `confounding_factors::String`: file without header, gene ID then one numeric column per
+   factor. Default `"confounding_factors.txt"`.
+ - `output::String`: output prefix, without extension; `bootstrap` writes
+   `<output>_case.txt` and `<output>_control.txt`. Default `"test"`.
+ - `filter_hla_hist::Bool`: remove the human HLA and histone genes (Ensembl gene IDs, lists
+   `hla_genes` and `hist_genes` in `src/bootstrap.jl`) from case and controls. Default `true`.
 """
 @with_kw mutable struct bootstrap_parameters
     data::String = "ensembl_list.txt"
@@ -38,8 +54,9 @@ function filter_case_control(x::Vector{String}, y::Vector{String}, distance::Vec
 end
 
 """
-    Filtering case and intersect with control.
-    The function will also filter by hla_dist and factors_raw (variables)
+    get_valid(x, y, distance)
+
+Unused internal helper: computes `x ∩ y ∩ distance` and returns `nothing`.
 """
 function get_valid(x::Vector{<:AbstractString}, y::Vector{<:AbstractString}, distance::Vector{<:AbstractString})
 
@@ -49,8 +66,10 @@ function get_valid(x::Vector{<:AbstractString}, y::Vector{<:AbstractString}, dis
 end
 
 """
-    Filtering case and intersect with control.
-    The function will also filter by hla_dist and factors_raw (variables)
+    get_factors(case_set, control_set, factors_raw)
+
+Internal: the case-set average of each confounding factor, the control factor matrix, a
+gene -> factor vector `Dict` of the controls and a gene -> 0 use counter.
 """
 function get_factors(
     case_set::Vector{String},
@@ -79,7 +98,10 @@ function get_factors(
 end
 
 """
-    Check limits 
+    check_limits(control_avg, tol)
+
+Internal: per-factor bounds `[(1 - tol) * avg, (1 + tol) * avg]` (a two-column matrix) and a
+vector of `"start"` flags. Called with the case averages.
 """
 function check_limits(control_avg::Vector{Float64}, tol::Float64)
     l_u::Matrix{Float64} = hcat(control_avg, control_avg)
@@ -116,6 +138,24 @@ function get_samples(case_set::Vector{String}, control_boot::Vector{String})
     return (out)
 end
 
+"""
+    get_distance(data::String, annotation::String) -> DataFrame
+
+Distance in bp from every gene of `annotation` to the closest gene listed in `data`, with
+`bedtools closest -d` (installed into the CondaPkg environment from bioconda on first use).
+
+`data` is the case gene list (one ID per line), `annotation` a tab-separated BED file with
+at least five columns (chromosome, start, end, gene ID, ...). Each gene is reduced to a 1 bp
+interval at its midpoint `int((start + end) / 2)`, so the distance is between gene
+midpoints, not gene bodies; case genes get 0. Case genes are selected with `fgrep -f`
+(substring match of the IDs). The search runs per chromosome; a chromosome without case
+genes is skipped, so its genes get no row. Needs `fgrep`, `grep -P`, `awk`, `sort` and `cut`
+on the PATH.
+
+# Returns
+ - `DataFrame` without header names: `Column1` the gene ID, `Column2` the distance in bp
+   (tied closest genes give one row each).
+"""
 function get_distance(data::String, annotation::String)
     if (isnothing(CondaPkg.which("bedtools")))
         CondaPkg.add("bedtools", channel = "bioconda")
@@ -176,6 +216,31 @@ function get_distance(data::String, annotation::String)
     return df
 end
 
+"""
+    get_bootstrap(case_set, control_set; factors_raw, max_reps, tolerance) -> Vector
+
+Draw one pool of matched control genes for `case_set` from `control_set` (Enard & Petrov
+2020).
+
+Pairs of distinct candidate genes are drawn at random and accepted when the running
+average of every confounding factor stays within `tolerance` (relative) of the case
+average and neither gene exceeds a share of `max_reps / length(case_set)` of the pool. The
+running average starts from a seed of 100 pseudo-genes at the case average; each accepted
+pair removes one of them. Drawing stops at `100 + 110 * length(case_set)` genes, or after 5
+million draws in a row without an accepted pair.
+
+`bootstrap` calls the equivalent `get_bootstrap_noalloc`, not this function.
+
+# Arguments
+ - `case_set::Vector{String}`, `control_set::Vector{String}`: gene IDs.
+ - `factors_raw::Matrix`: gene ID in column 1, one confounding factor per further column.
+ - `max_reps::Int64`, `tolerance::Float64`: as in [`bootstrap_parameters`](@ref).
+
+# Returns
+ - The accepted control genes in order of acceptance (with repeats), or an empty vector if
+   fewer than 1000 were accepted. `get_samples` cuts the `100 * length(case_set)` genes
+   before the last one into 100 control sets; the earlier ones are burn-in.
+"""
 function get_bootstrap(
     case_set::Vector{String},
     control_set::Vector{String};
@@ -412,6 +477,34 @@ function get_bootstrap_noalloc(
     return length(good_control) < 1000 ? String[] : good_control
 end
 
+"""
+    bootstrap(param::bootstrap_parameters)
+
+Build matched control sets for a case gene list and write them to disk (Enard & Petrov
+2020; Di et al. 2021). See [`bootstrap_parameters`](@ref) for the settings.
+
+Steps: read the case IDs (`data`), the confounding factors and the `annotations` gene IDs;
+compute the distance of every gene to the closest case gene with `get_distance`; keep as
+candidate controls the genes present in `annotations` and in the factor file, at least
+`distance` bp from any case gene and not in the case set; keep only case genes present in
+both files; drop HLA and histone genes if `filter_hla_hist`. Then run `iterations`
+independent matched draws in parallel (`ThreadsX.map`, one per iteration), each cut into
+100 control sets of `length(case)` genes, for `iterations * 100` sets in total.
+
+Warns when there are fewer than 1.5 candidate controls per case gene.
+
+# Files written
+ - `<output>_control.txt`: one control set per line, `sample_i GENE GENE ...`
+   (space-separated; `i` restarts at 1 in each iteration); the format `parse_sfs` reads as
+   `gene_list`. An existing file is replaced.
+ - `<output>_case.txt`: the case genes kept after the filters, one per line.
+
+If any iteration fails to find enough matching controls (see `get_bootstrap`), it logs an
+error and writes nothing; it does not throw.
+
+# Returns
+ - `nothing`.
+"""
 function bootstrap(param::bootstrap_parameters)
     @unpack data, annotations, distance, max_reps, tolerance, iterations, confounding_factors, output, filter_hla_hist = param
 
@@ -500,15 +593,12 @@ function bootstrap(param::bootstrap_parameters)
 end
 
 """
+    empirical_pvalues(observed_values::Vector{Float64}) -> Vector{Float64}
 
-    empirical_pvalues(observed_values)
-
-Estimating empirical p-values from a vector of summary statistics
-
-# Arguments
- - `observed_values::Vector{Float64}` : Vector of summary statistics to convert into empirical p-values.
-# Returns
- - Vector{Float64} : Empirical p-values. Large values will show small p-values.
+Rank-based empirical p-value of each value against the whole vector, upper tail:
+`ordinalrank(-x) / n`. The largest value gets `1 / n`, the smallest `1`; ties are broken by
+position. For the p-value of a case against its control sets use
+[`empirical_test`](@ref).
 """
 function empirical_pvalues(observed_values::Vector{Float64})
   return ordinalrank(observed_values * -1)/length(observed_values)
@@ -517,18 +607,22 @@ end
 """
     case_control_table(case, control; analysis)
 
-Stack the ABC-MK point estimates of one case set and its control sets into a long table,
-the input of [`empirical_test`](@ref) and `plot_violins_empirical`. Build one table per
+Stack the estimates of one case set and its control sets into a long table, the input of
+[`empirical_test`](@ref) and [`plot_violins_empirical`](@ref). Build one table per
 analysis and `vcat` them.
 
 # Arguments
- - `case`, `control`: `abcmk` outputs (their `:inference` is used) or `:inference`
-   DataFrames. `case` must hold one set.
- - `analysis`: name of the comparison, e.g. the gene category.
+ - `case`, `control`: [`abcmk`](@ref) outputs (their `:inference` entry is used) or
+   DataFrames with one row per set (e.g. `fww_mk` on a vector of SFS). `case` must hold
+   exactly one row: wrap a single result with `DataFrame([result])`.
+ - `analysis`: name of the comparison, e.g. the gene category (stored as a String).
 
 # Returns
  - `DataFrame`: `analysis`, `type` (`"case"`/`"control"`), `set` (1 for the case, 1..n for
-   the controls), then the parameter columns both inputs share (α, α_strong, α_weak, ...).
+   the controls), then the columns both inputs share (α, α_strong, α_weak, ... for ABC-MK).
+
+Throws `ArgumentError` if `case` has more than one row, if the inputs share no column, or
+if a Dict input has no `:inference` entry.
 """
 function case_control_table(case, control; analysis)
     df_case = _inference_df(case)
@@ -556,8 +650,9 @@ _empirical_params(omega::Bool) = omega ? [:ωₐ, :ωₐ_strong, :ωₐ_weak] : 
 
 Empirical p-value of each case against its own controls, per analysis and parameter:
 `p = (1 + #{control >= case}) / (1 + n)` for `alternative = :greater` (Davison & Hinkley
-1997), so it is never 0 and its minimum is `1 / (1 + n)`. Non-finite control values are
-dropped.
+1997), so it is never 0 and its minimum is `1 / (1 + n)`. `:less` counts `control <= case`;
+`:two_sided` is `min(1, 2 * min(p_greater, p_less))`. Non-finite control values are dropped
+and `n` counts the finite ones.
 
 # Arguments
  - `tbl::DataFrame`: output of [`case_control_table`](@ref), one or more analyses.
@@ -568,6 +663,9 @@ dropped.
 # Returns
  - `DataFrame`: `analysis, param, case, control_median, n_control, p, stars`, with stars
    `*` p < 0.05, `**` p < 0.01, `***` p < 0.001.
+
+Throws `ArgumentError` for an unknown `alternative`, a missing column, an analysis without
+exactly one case row or without controls, or a parameter with no finite control value.
 """
 function empirical_test(
     tbl::AbstractDataFrame;

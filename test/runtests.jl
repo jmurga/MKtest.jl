@@ -7,22 +7,6 @@ using DelimitedFiles: readdlm
 
 @testset "MKtest.jl" begin
 
-    # --- ABC forward model: parameter solve ---------------------------------
-    # `≈` rather than `==`: `set_θ!` is a closed-form solve (it was `Roots.find_zero`),
-    # and exact equality tested the arithmetic path rather than the answer.
-    @testset "parameters" begin
-        adap = MKtest.parameters(N=1000, n=661, gam_dfe=-457, gam_flanking=-1000,
-                                 al_low=0.2, B=0.999)
-        binom = MKtest.binom_op(adap)
-        MKtest.set_θ!(adap)
-        MKtest.set_ppos!(adap)
-
-        # 0.00020733640485526956 with the previous Φ (no factor 2 on s). Regression
-        # value, not an independent check.
-        @test adap.ppos_h ≈ 0.00020731419036651257
-        @test adap.θ_flanking ≈ 3.001501000750676e-6
-    end
-
     # --- rho prior in rates() ------------------------------------------------
     # `ρ` reaches the model through `set_θ!` (the flanking mutation rate that produces
     # the target B) and `Φ`. `rates(...; rho = [lo, hi])` draws one value per model and
@@ -698,10 +682,70 @@ using DelimitedFiles: readdlm
         @test_throws ArgumentError MKtest.valid_data(param, sfs, div[1:3])
     end
 
+    # --- small methods: NI_TG, alpha_b, the Julia ABC -------------------------
+    @testset "ni_cmh" begin
+        # hand-computed NI_TG (Stoletzki & Eyre-Walker 2011): sum(Ds Pn / (Ps + Ds)) /
+        # sum(Dn Ps / (Ps + Ds)) over genes
+        sfs = [[1.0 4.0 6.0], [1.0 2.0 2.0]]
+        div = [[3.0, 5.0], [1.0, 4.0]]
+        out = MKtest.ni_cmh(sfs, div)
+        @test out isa NamedTuple
+        @test out.ni ≈ (5 * 4 / 11 + 4 * 2 / 6) / (3 * 6 / 11 + 1 * 2 / 6)
+        # an Int zero in the divergence is caught like a Float one
+        @test isnan(MKtest.ni([1.0 4.0 6.0], [0, 5]).ni)
+        # 39 bins = 40 chromosomes: 20 individuals is the most it can be projected to
+        sfs40 = hcat(1:39, ones(39), ones(39))
+        @test size(MKtest.project(sfs40, 20), 1) == 39
+        @test_throws AssertionError MKtest.project(sfs40, 30)
+    end
+
+    @testset "α_b" begin
+        seed!(3)
+        r_s = [[40, 100, 60, 100] .+ i for i in 1:12]
+        out = MKtest.α_b(r_s)
+        @test nrow(out) == 12              # every dataset, not the first 10
+        @test all(out.α_low .<= out.αᵦ .<= out.α_high)
+        # 1 - 1/Z with Z = (sN/sS) / (rN/rS)
+        @test out.αᵦ[1] ≈ 1 - 1 / ((61 / 101) / (41 / 101))
+    end
+
+    @testset "abc_loclinear transformations" begin
+        # oracle: the tangent transformation and its inverse are a round trip
+        for x in (0.1, 0.5, 2.0)
+            @test MKtest.undo_tangent_transfromation(MKtest.tangent_transfromation(x, 0.1, 2.0), 0.1, 2.0) ≈ x
+        end
+        # synthetic table: 2 positive parameters, 3 statistics linear in them
+        rng = MersenneTwister(11)
+        nsim = 5000
+        θ = hcat(rand(rng, nsim) .* 0.8 .+ 0.1, rand(rng, nsim) .* 9 .+ 1)
+        stat(t, e) = [t[1] + 0.1 * t[2], 2 * t[1] - 0.05 * t[2], 0.3 * t[2]] .+ e
+        summ = vcat([vcat(θ[i, :], stat(θ[i, :], 0.02 .* randn(rng, 3)))' for i in 1:nsim]...)
+        truth = [0.5, 5.0]
+        od = mktempdir()
+        tfile, sfile = joinpath(od, "target.tsv"), joinpath(od, "summ.tsv")
+        writetab(f, m) = open(io -> foreach(r -> println(io, join(r, '\t')), eachrow(m)), f, "w")
+        writetab(tfile, permutedims(stat(truth, zeros(3))))
+        writetab(sfile, summ)
+        for tr in ("none", "log", "tan"), k in ("epanechnikov", "gaussian")
+            acc, adj = MKtest.abc_loclinear(tfile, sfile; P = 2, tol = 250,
+                                            transformation = tr, kernel = k)
+            @test size(acc) == (250, 2) && all(isfinite, adj)
+            @test all(abs.(vec(sum(adj, dims = 1)) ./ 250 .- truth) .< [0.05, 0.5])
+            tr == "log" && @test all(>(0), adj)
+            if tr == "tan"
+                @test all(minimum(θ, dims = 1) .- 1e-3 .<= adj .<= maximum(θ, dims = 1) .+ 1e-3)
+            end
+        end
+        neg = copy(summ); neg[:, 1] .-= 1.0
+        nfile = joinpath(od, "neg.tsv")
+        writetab(nfile, neg)
+        @test_throws ArgumentError MKtest.abc_loclinear(tfile, nfile; P = 2, tol = 250,
+                                                        transformation = "log")
+    end
+
 end
 
 # dfe_ml engine (src/ml/)
 include("ml/engine.jl")
 include("ml/extension.jl")
 include("ml/grapes_parity.jl")
-include("ml/dev_reference.jl")

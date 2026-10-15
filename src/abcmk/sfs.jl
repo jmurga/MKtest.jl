@@ -8,19 +8,17 @@
 ############Neutral#############
 
 """
+    sfs_neut(param, binom) -> Vector{Float64}
 
-	sfs_neut(param,binom)
-
-Expected rate of neutral allele frequency reduce by background selection. The spectrum depends on the number of individual []
+Expected synonymous (neutral) SFS of the sample, at derived allele counts `1:nn-1`,
+under background selection (`Ne = B N`):
 
 ```math
-\\mathbb{E}[Ps_{(x)}] = \\sum{x^{*}=x}{x^{*}=1}f_{B}(x)
+\\mathbb{E}[P_s(i)] = B\\, \\theta_{coding}\\, p_{syn} \\sum_{j} \\mathrm{binom}[i, j] \\frac{1}{j}
 ```
-# Input
- - `param::parameters`: mutable structure containing the model.
- - `SparseMatrixCSC{Float64, Int64}`: convoluted SFS given the B value.
-# Return:
- - `Vector{Float64}`: expected rate of neutral alleles frequencies.
+
+`binom` is the projection matrix of [`binom_op`](@ref) for `param.B`. Per-frequency
+counts, not cumulative.
 """
 function sfs_neut(param::parameters, binom::SparseMatrixCSC{Float64,Int64})
     # binom * (1/j) is cached by binom_op; computed here if it is missing.
@@ -42,20 +40,16 @@ end
 ############Positive############
 # Variable gamma in function changed to s to avoid problem with exported SpecialFunctions.gamma
 """
+    sfs_pos(param, s::Int64, p::Float64, binom) -> Vector{Float64}
 
-	sfs_pos(param,s,p,binom)
+Expected SFS of beneficial nonsynonymous mutations with coefficient `s` (`2N` times the
+heterozygote coefficient), at derived allele counts `1:nn-1`, under background selection.
 
-Expected beneficial SFS under background selection. Background selection reduces Ne to
-`B·N`: the spectrum is scaled by `B`, like `sfs_neut` and `sfs_neg`, and the sojourn time
-is evaluated at `γ·B`. `Φ` (eq. 9 of the paper) multiplies the whole spectrum.
-
-# Arguments
- - `param::parameters`: mutable structure containing the model.
- - `s::Int64`: selection coefficient (`2N·s_het`).
- - `p::Float64`: positive selected alleles probabilty.
- - `binom::SparseMatrixCSC{Float64, Int64}`: convoluted SFS given the B value.
-# Return:
- - `Array{Float64}`: expected positive selected alleles frequencies.
+Background selection reduces `Ne` to `B N`: the spectrum is scaled by `B`, like
+[`sfs_neut`](@ref) and [`sfs_neg`](@ref), the sojourn time is evaluated at `γ B`, and
+[`Φ`](@ref) multiplies the whole spectrum. `p` is the probability that a new mutation
+belongs to this class (`ppos_l` or `ppos_h`); `p = 0` returns zeros. `binom` is the
+projection matrix of [`binom_op`](@ref) for `param.B`.
 """
 function sfs_pos(
     param::parameters,
@@ -180,17 +174,16 @@ end
 
 ######Slightly deleterious######
 """
+    sfs_neg(param, p::Float64, binom) -> Vector{Float64}
 
-	sfs_neg(param,p,binom)
+Expected SFS of deleterious nonsynonymous mutations, integrated over the gamma DFE
+(`param.shape`, `param.scale / B`), at derived allele counts `1:nn-1`, under background
+selection (`Ne = B N`).
 
-Expected rate of positive selected allele frequency reduce by background selection. Spectrum drawn on a gamma DFE. It depends on the number of individuals.
-
-# Arguments
- - `param::parameters`: mutable structure containing the model
- - `p::Float64`: positive selected alleles probabilty.
- - `binom::SparseMatrixCSC{Float64, Int64}`: convoluted SFS given the B value.
-# Return:
- - `Array{Float64}`: expected negative selected alleles frequencies.
+`p` is the probability that a new nonsynonymous mutation is beneficial, so `1 - p` are
+deleterious (callers pass `ppos_l + ppos_h`). The sum over population frequencies stops
+once a term falls below `1e-12` of the largest one. `binom` is the projection matrix of
+[`binom_op`](@ref) for `param.B`.
 """
 function sfs_neg(param::parameters, p::Float64, binom::SparseMatrixCSC{Float64,Int64})
     beta = param.scale / (1.0 * param.B)

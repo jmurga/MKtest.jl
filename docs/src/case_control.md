@@ -91,9 +91,10 @@ MKtest.bootstrap(bp)
 This is the control-set building of Enard & Petrov (2020) and Di et al. (2021): each
 control set grows gene by gene so that its average of every confounding factor stays
 within `tolerance` (default 5%) of the case set's average. Candidates are genes at least
-`distance` bp from any case gene (`bedtools closest -d` on `annotations`; the default 1
-excludes overlapping genes), and each control gene is used at most about `max_reps`
-times across the sets. Each iteration gives 100 sets
+`distance` bp from the closest case gene (`bedtools closest -d` on `annotations`,
+measured between gene midpoints; the default 1 only excludes the case genes
+themselves), and a control gene can make up at most `max_reps / n_case` of the control
+genes drawn in one iteration (about `max_reps` copies per set). Each iteration gives 100 sets
 (`iterations = 10`: 1000 sets). Human HLA and histone genes are left out
 (`filter_hla_hist = true`). `my_case_control.txt` has the one-set-per-line format above,
 which `parse_sfs` reads directly.
