@@ -347,7 +347,7 @@ struct PoissonKernel <: AbstractLikelihoodKernel end
     NegativeBinomialKernel()
 
 Negative binomial with mean `mu` and one shared dispersion `a` (`Var = mu + mu^2/a`),
-polyDFE's kernel (Tataru et al. 2017). `a` is estimated on a log scale in
+polyDFE's kernel (Tataru et al. 2017). `a` (parameter `nb_dispersion`) is estimated on a log scale in
 `[1e-4, 1e6]`; the upper bound is wider than polyDFE's 1000 because on human data
 that bound binds. `a -> Inf` is the Poisson limit.
 """
@@ -359,7 +359,7 @@ struct NegativeBinomialKernel <: AbstractLikelihoodKernel end
 The kernel's own free parameters as `name = (lower, upper)`. Empty by default.
 """
 kernel_parameters(::AbstractLikelihoodKernel) = NamedTuple()
-kernel_parameters(::NegativeBinomialKernel) = (a = (QUASI_ZERO, 1.0e6),)
+kernel_parameters(::NegativeBinomialKernel) = (nb_dispersion = (QUASI_ZERO, 1.0e6),)
 
 """
     kernel_start(k) -> Vector{Float64}

@@ -25,7 +25,7 @@ function _parse_params(s::AbstractString)
     d = Dict{Symbol,Float64}()
     for kv in split(s, ";"; keepempty = false)
         k, v = split(kv, "=")
-        d[Symbol(k)] = parse(Float64, v)
+        d[MKtest.from_legacy_name(k)] = parse(Float64, v)   # the record uses dev's old names
     end
     return d
 end
@@ -62,10 +62,10 @@ _devref_integ(name) = name == "RombergIntegrator" ? MKtest.RombergIntegrator() :
                     MKtest.dfe_ml(s, d, m; integrator = integ, cache = cache)
                 end
                 if f["model"] == "GammaZero"
-                    @test abs(r.loglik[1] - ll_dev) < 1e-5
-                    @test abs(r.alpha[1] - parse(Float64, f["alpha"])) < 1e-5
+                    @test abs(r.inference.loglik[1] - ll_dev) < 1e-5
+                    @test abs(r.inference.alpha[1] - parse(Float64, f["alpha"])) < 1e-5
                 end
-                @info "dev reference $key" lnL_dev = ll_dev lnL_new = r.loglik[1] alpha_dev = f["alpha"] alpha_new = r.alpha[1]
+                @info "dev reference $key" lnL_dev = ll_dev lnL_new = r.inference.loglik[1] alpha_dev = f["alpha"] alpha_new = r.inference.alpha[1]
             end
         end
     end

@@ -150,19 +150,19 @@ end
         # the kernel's parameter is appended after the DFE and the orientation error
         lp = MKtest.build_layout(GammaZero(), pk, true)
         ln = MKtest.build_layout(GammaZero(), nb, true)
-        @test lp.names == [:negGshape, :negGmean, :syno_orientation_error]
-        @test ln.names == [:negGshape, :negGmean, :syno_orientation_error, :a]
+        @test lp.names == [:del_shape, :del_mean, :misorient]
+        @test ln.names == [:del_shape, :del_mean, :misorient, :nb_dispersion]
         @test length(ln.opt_idx) == length(lp.opt_idx) + 1
         @test lp.kernel_idx == 0 && ln.kernel_idx == 4
         @test ln.n_spec == lp.n_spec == 2
         @test ln.log_scale == [false, true, false, true]
         # `fixed` reaches the kernel parameter like any other
-        lf = MKtest.build_layout(GammaZero(), nb, true; fixed = (a = 500.0,))
+        lf = MKtest.build_layout(GammaZero(), nb, true; fixed = (nb_dispersion = 500.0,))
         @test !(4 in lf.opt_idx)
         # unknown names are errors, not silent no-ops
         @test_throws ArgumentError MKtest.build_layout(GammaZero(), pk, true; fixed = (foo = 1.0,))
-        @test_throws ArgumentError MKtest.build_layout(GammaZero(), pk, true; bounds = (negGmean = (10.0, 1.0),))
-        @test_throws ArgumentError MKtest.build_layout(GammaZero(), pk, false; fixed = (syno_orientation_error = 0.0,))
+        @test_throws ArgumentError MKtest.build_layout(GammaZero(), pk, true; bounds = (del_mean = (10.0, 1.0),))
+        @test_throws ArgumentError MKtest.build_layout(GammaZero(), pk, false; fixed = (misorient = 0.0,))
     end
 
     # --- discrete DFE components and the extra shapes ---------------------------
@@ -182,7 +182,7 @@ end
         @test all(isfinite, deep) && all(>(0.0), deep)
         @test deep[1] / deep[20] > 100
 
-        @test MKtest.dfe_param_names(NeuGamma()) == [:p_neu, :negGshape, :negGmean]
+        @test MKtest.dfe_param_names(NeuGamma()) == [:neu_prop, :del_shape, :del_mean]
         @test collect(MKtest.discrete_components(NeuGamma(), [0.3, 0.2, 1000.0])) == [(0.0, 0.3)]
         sgrid = collect(range(-500.0, 100.0; length = 401))
         a, b = zeros(401), zeros(401)
@@ -200,7 +200,7 @@ end
 
         m6 = FixedSpikes()
         @test length(m6.positions) == 6
-        @test MKtest.dfe_param_names(m6) == [:w1, :w2, :w3, :w4, :w5]
+        @test MKtest.dfe_param_names(m6) == [:spike_w1, :spike_w2, :spike_w3, :spike_w4, :spike_w5]
         for v in ([0.5, 0.5, 0.5, 0.5, 0.5], [0.01, 0.99, 0.5, 0.2, 0.8],
                   [1e-6, 1e-6, 1e-6, 1e-6, 1e-6], [1 - 1e-6, 0.3, 0.3, 0.3, 0.3])
             w = MKtest.spike_weights(m6, v)
@@ -213,7 +213,7 @@ end
         @test all(iszero, z)
         @test sum(w for (_, w) in MKtest.discrete_components(m6, [0.5, 0.5, 0.5, 0.5, 0.5])) ≈ 1.0
         m3 = FixedSpikes([0.0, -50.0, -5000.0])
-        @test MKtest.dfe_param_names(m3) == [:w1, :w2]
+        @test MKtest.dfe_param_names(m3) == [:spike_w1, :spike_w2]
         @test MKtest.dfe_name(m3) == "FixedSpikes"
 
         # dev raised a MethodError here: FixedSpikes' density was typed ::Vector, and
@@ -225,8 +225,8 @@ end
         @test sum(w for (_, w) in MKtest.discrete_components(wf, [0.5, 0.5, 0.5, 0.5, 0.5, 0.1])) ≈ 0.9
 
         # FGMBesselK: GRAPES' bounds, a normalised density, GRAPES' S = 0 convention
-        @test MKtest.dfe_param_names(FGMBesselK()) == [:BKm, :BKnsz2, :BKsigma, :BKscale]
-        @test MKtest.dfe_parameters(FGMBesselK()).BKm == (1.0, 10.0)
+        @test MKtest.dfe_param_names(FGMBesselK()) == [:fgm_m, :fgm_nsz2, :fgm_sigma, :fgm_scale]
+        @test MKtest.dfe_parameters(FGMBesselK()).fgm_m == (1.0, 10.0)
         @test MKtest.dfe_log_scale(FGMBesselK()) == (false, false, false, true)
         fine = collect(range(-1000.0, 1000.0; length = 40001))
         dd = zeros(length(fine))
@@ -242,8 +242,8 @@ end
     # --- WithLethal and the two alpha definitions -------------------------------
     @testset "WithLethal and the alpha split" begin
         wl = WithLethal(GammaZero())
-        @test MKtest.dfe_param_names(wl) == [:negGshape, :negGmean, :p_lethal]
-        @test MKtest.dfe_parameters(wl).p_lethal == (0.0, 0.99)
+        @test MKtest.dfe_param_names(wl) == [:del_shape, :del_mean, :lethal_prop]
+        @test MKtest.dfe_parameters(wl).lethal_prop == (0.0, 0.99)
         @test MKtest.dfe_log_scale(wl) == (false, true, false)
         @test MKtest.dfe_name(wl) == "WithLethal{GammaZero}"
         @test all(length(sp) == 3 for sp in MKtest.dfe_start_points(wl))
@@ -263,21 +263,21 @@ end
               0.65 * MKtest.dfe_mass_below(GammaZero(), [0.2, 1000.0], 5.0)
 
         wn = WithLethal(NeuGamma())
-        @test MKtest.dfe_param_names(wn) == [:p_neu, :negGshape, :negGmean, :p_lethal]
+        @test MKtest.dfe_param_names(wn) == [:neu_prop, :del_shape, :del_mean, :lethal_prop]
         @test collect(MKtest.discrete_components(wn, [0.4, 0.2, 1000.0, 0.25])) == [(0.0, 0.75 * 0.4)]
-        # wrapping twice would give two parameters named p_lethal: refused
+        # wrapping twice would give two parameters named lethal_prop: refused
         ww = WithLethal(WithLethal(GammaZero()))
         @test_throws ArgumentError MKtest.dfe_param_names(ww)
 
         # the alpha split: with a free Dn, alpha_div IS alpha
         r = MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero())
-        @test r.alpha_div[1] ≈ r.alpha[1]
+        @test r.inference.alpha_div[1] ≈ r.inference.alpha[1]
         # no beneficial class, so the DFE predicts no adaptive substitution
-        @test r.alpha_dfe[1] == 0.0
+        @test r.inference.alpha_dfe[1] == 0.0
         r2 = MKtest.dfe_ml(ML_SFS, ML_DIV, GammaExpo())
-        @test r2.alpha_dfe[1] > 0.0
+        @test r2.inference.alpha_dfe[1] > 0.0
 
-        cmp = MKtest.dfe_model_comparison(vcat(r, r2; cols = :union))
+        cmp = MKtest.dfe_model_comparison(vcat(r, r2))
         @test sort(cmp.aic.model) == ["GammaExpo", "GammaZero"]
         @test nrow(cmp.lrt) <= 1
         if nrow(cmp.lrt) == 1
@@ -285,17 +285,17 @@ end
             @test cmp.lrt.df[1] == 2
         end
 
-        # at p_lethal = 0 (fixed) the wrapper is its base, fit included
-        rl = MKtest.dfe_ml(ML_SFS, ML_DIV, wl; fixed = (p_lethal = 0.0,))
-        @test rl.loglik[1] ≈ r.loglik[1] atol=1e-9
-        @test rl.n_params[1] == r.n_params[1]
+        # at lethal_prop = 0 (fixed) the wrapper is its base, fit included
+        rl = MKtest.dfe_ml(ML_SFS, ML_DIV, wl; fixed = (lethal_prop = 0.0,))
+        @test rl.inference.loglik[1] ≈ r.inference.loglik[1] atol=1e-9
+        @test rl.inference.n_params[1] == r.inference.n_params[1]
 
         # no divergence data: nothing throws, alpha_div is undefined
         r3 = MKtest.dfe_ml(ML_SFS, [0.0, 0.0, 1.0e6, 3.0e5], GammaZero(); div_model = MKtest.NoDivergence())
-        @test isnan(r3.alpha_div[1])
-        @test isfinite(r3.loglik[1]) && r3.loglik[1] < 0
+        @test isnan(r3.inference.alpha_div[1])
+        @test isfinite(r3.inference.loglik[1]) && r3.inference.loglik[1] < 0
         # without divergence the SFS alone is scored: the saturated Dn/Ds terms are absent
-        @test r3.loglik[1] != MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero()).loglik[1]
+        @test r3.inference.loglik[1] != MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero()).inference.loglik[1]
     end
 
     # --- IntervalCDF quadrature -------------------------------------------------
@@ -376,8 +376,8 @@ end
         r0 = MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero())
         rm = MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero(); quadrature = MidpointDensity())
         rc = MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero(); quadrature = IntervalCDF())
-        @test r0.loglik[1] === rm.loglik[1]
-        @test isfinite(rc.loglik[1])
+        @test r0.inference.loglik[1] === rm.inference.loglik[1]
+        @test isfinite(rc.inference.loglik[1])
     end
 
     @testset "a user-defined quadrature works end to end" begin
@@ -394,8 +394,8 @@ end
         @test mass(TrapezoidDensity(), p) < exact
         @test mass(TrapezoidDensity(), p) != mass(MidpointDensity(), p)
         r = MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero(); quadrature = TrapezoidDensity())
-        @test isfinite(r.loglik[1])
-        @test r.loglik[1] != MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero()).loglik[1]
+        @test isfinite(r.inference.loglik[1])
+        @test r.inference.loglik[1] != MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero()).inference.loglik[1]
     end
 
     # --- AIC and LRT core -------------------------------------------------------
@@ -417,39 +417,77 @@ end
     @testset "dfe_ml output" begin
         c = DFECache()
         r = MKtest.dfe_ml([ML_SFS, ML_SFS], [ML_DIV, ML_DIV], GammaZero(); cache = c)
-        @test nrow(r) == 2 && r.dataset == [1, 2]
+        @test r isa MKtest.DFEResult
         @test length(c) == 1                       # one table for both datasets
-        for col in (:model, :n, :converged, :loglik, :aic, :n_params, :free_params, :theta,
-                    :negGshape, :negGmean, :syno_orientation_error, :alpha, :alpha_ci_low,
-                    :alpha_ci_high, :omega_a, :omega_na, :omega_obs, :alpha_div, :alpha_dfe,
-                    :integrator, :kernel, :quadrature, :s_grid, :ne_model, :div_model,
-                    :dominance, :demography, :expectation, :optimizer)
-            @test col in propertynames(r)
+        inf = r.inference
+        @test nrow(inf) == 2 && inf.dataset == [1, 2] && inf.fit == [1, 2]
+        for col in (:fit, :dataset, :model, :config, :n, :converged, :loglik, :n_params, :theta,
+                    :alpha, :alpha_ci, :omega_a, :omega_a_ci, :omega_na, :omega_na_ci, :omega_obs,
+                    :alpha_div, :alpha_dfe)
+            @test col in propertynames(inf)
         end
-        @test r.n[1] == 40
-        @test r.free_params[1] == "negGshape,negGmean,syno_orientation_error"
-        @test r.n_params[1] == 3
-        @test r.aic[1] ≈ 2 * 3 - 2 * r.loglik[1]
-        @test r.loglik[1] == r.loglik[2]           # same data, same answer
-        # GRAPES' likelihood CI is on by default (threshold 1.92), and 0 switches it off
-        @test r.alpha_ci_low[1] < r.alpha[1] < r.alpha_ci_high[1]
-        @test !(:alpha_fww in propertynames(r))    # FWW is MKtest.fww_mk, not part of dfe_ml
-        r0ci = MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero(); alpha_ci_threshold = 0, cache = c)
-        @test isnan(r0ci.alpha_ci_low[1]) && isnan(r0ci.alpha_ci_high[1])
-        # the CI is GRAPES' rule: one lnL threshold drop in E[Dn]; a larger threshold is wider
+        # no AIC (it lives in dfe_model_comparison), no FWW, no axis settings in the fits
+        for col in (:aic, :free_params, :alpha_fww, :integrator, :del_shape)
+            @test !(col in propertynames(inf))
+        end
+        @test inf.n[1] == 40 && inf.n_params[1] == 3
+        @test inf.loglik[1] == inf.loglik[2]       # same data, same answer
+        # GRAPES' likelihood CI, on by default, as a (lo, hi) tuple
+        @test inf.alpha_ci[1][1] < inf.alpha[1] < inf.alpha_ci[1][2]
+
+        # params: long and fixed-schema
+        pr = r.params
+        @test propertynames(pr) == [:fit, :dataset, :model, :parameter, :kind, :value, :lower, :upper, :free, :at_bound]
+        @test pr.parameter[pr.fit .== 1] == ["del_shape", "del_mean", "misorient"]
+        @test pr.kind[pr.fit .== 1] == ["dfe", "dfe", "nuisance"]
+        @test MKtest.param_values(r, :del_shape) == pr.value[pr.parameter .== "del_shape"]
+        # the synthetic data push del_shape onto its lower bound, and the table says so
+        @test pr.at_bound[(pr.fit .== 1) .& (pr.parameter .== "del_shape")] == [true]
+
+        # sfs: observed, fitted, r_j
+        sf = r.sfs[r.sfs.fit .== 1, :]
+        @test nrow(sf) == 39 && sf.j == 1:39 && sf.pn_obs == ML_SFS[:, 2] && sf.ps_obs == ML_SFS[:, 3]
+        @test sf.r_j[1] == 1.0 && MKtest.rj(r, 1) == sf.r_j
+        @test MKtest.expected_sfs(r, 1) == Matrix(sf[:, [:j, :pn_obs, :ps_obs, :pn_exp, :ps_exp]])
+        # theta and r_j are profiled from Ps + Pn jointly, so each bin's total is matched
+        @test sf.pn_exp .+ sf.ps_exp ≈ sf.pn_obs .+ sf.ps_obs
+
+        # divergence: alpha is the strongly-adaptive share of Dn
+        dv = r.divergence[1, :]
+        @test dv.Dn_total == ML_DIV[1]
+        @test dv.Dn_sdel + dv.Dn_wdel + dv.Dn_wadv + dv.Dn_sadv ≈ dv.Dn_total
+        @test dv.Dn_sadv / dv.Dn_total ≈ inf.alpha[1]
+
+        # config: once, with the settings
+        @test nrow(r.config) == 1 && r.config.integrator[1] == repr(MKtest.ExactSojourn())
+        @test r.config.alpha_ci_threshold[1] == 1.92
+
+        # labels, and 0 switching the CI off
+        rl = MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero(); labels = ["setA"], alpha_ci_threshold = 0, cache = c)
+        @test rl.inference.dataset == ["setA"]
+        @test all(isnan, rl.inference.alpha_ci[1]) && all(isnan, rl.inference.omega_a_ci[1])
         rw = MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero(); alpha_ci_threshold = 4.0, cache = c)
-        @test rw.alpha_ci_low[1] < r.alpha_ci_low[1] && rw.alpha_ci_high[1] > r.alpha_ci_high[1]
+        @test rw.inference.alpha_ci[1][1] < inf.alpha_ci[1][1] && rw.inference.alpha_ci[1][2] > inf.alpha_ci[1][2]
+        @test_throws ArgumentError MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero(); labels = ["a", "b"])
 
-        # fixed parameters keep their column and leave n_params
-        rf = MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero(); fixed = (negGshape = 0.3,), cache = c)
-        @test rf.negGshape[1] == 0.3 && rf.n_params[1] == 2
+        # fixed parameters keep their row, not free; unknown names are errors
+        rf = MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero(); fixed = (del_shape = 0.3,), cache = c)
+        @test MKtest.param_values(rf, :del_shape) == [0.3] && rf.inference.n_params[1] == 2
+        @test rf.params.free[rf.params.parameter .== "del_shape"] == [false]
         @test_throws ArgumentError MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero(); fixed = (foo = 1.0,))
+        @test_throws ArgumentError MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero(); fixed = (negGshape = 0.3,))
 
-        # Route A
+        # vcat renumbers fits and merges identical configs
+        both = vcat(r, rf)
+        @test both.inference.fit == [1, 2, 3] && nrow(both.config) == 2   # `fixed` differs
+        @test vcat(r, r).inference.config == [1, 1, 1, 1]
+        w = MKtest.params_wide(vcat(r, MKtest.dfe_ml(ML_SFS, ML_DIV, GammaExpo(); cache = c)))
+        @test ismissing(w.ben_prop[1]) && !ismissing(w.ben_prop[end])
+
+        # Route A adds the parameter ne_ratio
         ra = MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero(); ne_model = MKtest.AncestralNeRatio(:free), cache = c)
-        @test 1.0 <= ra.Ne_ratio[1] <= 50.0
-        @test ra.n_params[1] == 4
-        @test occursin("Ne_ratio", ra.free_params[1])
+        @test 1.0 <= MKtest.param_values(ra, :ne_ratio)[1] <= 50.0
+        @test ra.inference.n_params[1] == 4
         @test_throws ArgumentError MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero();
             ne_model = MKtest.AncestralNeRatio(:free), div_model = MKtest.DFEConstrainedDivergence())
         @test_throws ArgumentError MKtest.AncestralNeRatio(:fixed)
@@ -460,9 +498,28 @@ end
         b = MKtest.get_precomputed(c, 20; dominance = MKtest.Dominance(0.5))
         @test a !== b && a.expected_counts == b.expected_counts
 
-        # the comparison on a stacked table, and the fitting form
-        both = MKtest.dfe_model_comparison(ML_SFS, ML_DIV; models = [GammaZero(), GammaExpo()])
-        @test nrow(both.fits) == 2 && nrow(both.aic) == 2
-        @test all(both.aic.dataset .== 1)
+        # the comparison: on a result, and the fitting form; never across likelihoods
+        cmpf = MKtest.dfe_model_comparison(ML_SFS, ML_DIV; models = [GammaZero(), GammaExpo()])
+        @test cmpf.result isa MKtest.DFEResult && nrow(cmpf.aic) == 2 && all(cmpf.aic.dataset .== 1)
+        mixed = vcat(MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero(); integrator = RombergIntegrator()),
+                     MKtest.dfe_ml(ML_SFS, ML_DIV, GammaExpo()))
+        cm = MKtest.dfe_model_comparison(mixed)
+        @test nrow(cm.lrt) == 0 && length(unique(cm.aic.group)) == 2
+
+        # CSV round trip, intervals included
+        dir = mktempdir()
+        paths = MKtest.write_dfe_result(joinpath(dir, "res"), both)
+        @test length(paths) == 5
+        back = MKtest.read_dfe_result(joinpath(dir, "res"))
+        @test isequal(back.inference.alpha_ci, both.inference.alpha_ci)
+        @test back.params.value == both.params.value && back.sfs.r_j == both.sfs.r_j
+
+        # the legacy names translate
+        @test MKtest.from_legacy_name("negGmean") == :del_mean
+        @test MKtest.from_legacy_name("syno_orientation_error") == :misorient
+        @test MKtest.from_legacy_name("w2") == :spike_w2
+        @test MKtest.from_legacy_name(:del_mean) == :del_mean
+        @test MKtest.grapes_param_name(:ben_prop) == "pos_prop"
+        @test MKtest.grapes_param_name(:del_sigma) == "del_sigma"
     end
 end

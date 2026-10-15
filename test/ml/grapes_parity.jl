@@ -38,7 +38,8 @@ _model_of(name) = Dict("GammaZero" => MKtest.GammaZero(), "GammaExpo" => MKtest.
             m = _model_of(row.model)
             s = MKtest.project(sfs, row.n_ind)
             lay = MKtest.build_layout(m, MKtest.PoissonKernel(), true)
-            cols = ["p_" * string(nm) for nm in lay.names]
+            # the fixture holds GRAPES' own names (p_negGmean, ...); map ours to them
+            cols = ["p_" * MKtest.grapes_param_name(nm) for nm in lay.names]
             missing_cols = [c for c in cols if !(c in names(tab)) || ismissing(row[c])]
             @test isempty(missing_cols)
             isempty(missing_cols) || (@warn "GRAPES output lacks $missing_cols for $(row.model)"; continue)
@@ -51,10 +52,10 @@ _model_of(name) = Dict("GammaZero" => MKtest.GammaZero(), "GammaExpo" => MKtest.
             # fit parity
             jf = MKtest.dfe_ml(s, div, m; integrator = rb, cache = cache)
             if row.model == "GammaZero"
-                @test abs(jf.loglik[1] - row.lnL) < PARITY_TOL
-                @test abs(jf.alpha[1] - row.alpha) < PARITY_TOL
+                @test abs(jf.inference.loglik[1] - row.lnL) < PARITY_TOL
+                @test abs(jf.inference.alpha[1] - row.alpha) < PARITY_TOL
             else
-                @test jf.loglik[1] >= row.lnL - PARITY_TOL
+                @test jf.inference.loglik[1] >= row.lnL - PARITY_TOL
             end
 
             # did the binary stay at one of its start points?
@@ -64,10 +65,10 @@ _model_of(name) = Dict("GammaZero" => MKtest.GammaZero(), "GammaExpo" => MKtest.
 
             # the default integrator: finite and converged; the difference is recorded
             je = MKtest.dfe_ml(s, div, m; cache = cache)
-            @test isfinite(je.loglik[1]) && je.converged[1]
+            @test isfinite(je.inference.loglik[1]) && je.inference.converged[1]
 
-            push!(report, (row.n_ind, row.model, row.lnL, ll_at, jf.loglik[1], row.alpha, jf.alpha[1],
-                           je.loglik[1], je.alpha[1], stalled))
+            push!(report, (row.n_ind, row.model, row.lnL, ll_at, jf.inference.loglik[1], row.alpha, jf.inference.alpha[1],
+                           je.inference.loglik[1], je.inference.alpha[1], stalled))
         end
         show(stdout, report; allrows = true, allcols = true)
         println()
