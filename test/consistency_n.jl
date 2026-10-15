@@ -13,7 +13,8 @@
 # Tolerance band, FIXED BEFORE THE FIRST RUN (2026-10-15):
 #   1. every fit converged;
 #   2. GammaZero alpha at each k within +/- 0.05 (absolute) of its k = 200 value;
-#   3. GammaZero negGmean at each k within a factor of 2 of its k = 200 value;
+#   3. GammaZero del_mean (negGmean before 2026-10-15) at each k within a factor of 2 of its
+#      k = 200 value;
 #   4. each other model's lnL >= the GammaZero lnL at the same k - 1e-6 (the LRT
 #      sanity check: GammaZero is nested in GammaExpo, GammaGamma and DisplGamma;
 #      ScaledBeta is not nested and is only reported).
@@ -39,7 +40,9 @@ for k in KS
     sk = MKtest.project(sfs, k)
     for m in MODELS
         t0 = time()
-        r = MKtest.dfe_ml(sk, div, m; cache = cache)
+        res = MKtest.dfe_ml(sk, div, m; cache = cache)
+        r = innerjoin(select(res.inference, Not(:alpha_ci, :omega_a_ci, :omega_na_ci)),
+                      MKtest.params_wide(res); on = [:fit, :dataset, :model])
         r[!, :k] .= k
         r[!, :wall_s] .= time() - t0
         push!(fits, r)
@@ -56,15 +59,15 @@ g0 = sort(all_fits[all_fits.model .== "GammaZero", :], :k)
 ref = g0[g0.k .== 200, :]
 c1 = all(all_fits.converged)
 c2 = all(abs.(g0.alpha .- ref.alpha[1]) .<= 0.05)
-c3 = all(max.(g0.negGmean ./ ref.negGmean[1], ref.negGmean[1] ./ g0.negGmean) .<= 2.0)
+c3 = all(max.(g0.del_mean ./ ref.del_mean[1], ref.del_mean[1] ./ g0.del_mean) .<= 2.0)
 c4 = all(begin
              sub = all_fits[(all_fits.k .== k) .& in.(all_fits.model, Ref(NESTING_GAMMAZERO)), :]
              all(sub.loglik .>= g0.loglik[g0.k .== k][1] - 1e-6)
          end for k in KS)
 println()
-println(select(g0, :k, :n, :loglik, :alpha, :negGshape, :negGmean, :converged))
+println(select(g0, :k, :n, :loglik, :alpha, :del_shape, :del_mean, :converged))
 for (lbl, ok) in (("1 all converged", c1), ("2 GammaZero alpha within 0.05 of k = 200", c2),
-                  ("3 GammaZero negGmean within x2 of k = 200", c3),
+                  ("3 GammaZero del_mean within x2 of k = 200", c3),
                   ("4 nested models lnL >= GammaZero lnL", c4))
     println(rpad(lbl, 45), ok ? "PASS" : "FAIL")
 end

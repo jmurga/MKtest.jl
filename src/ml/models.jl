@@ -277,7 +277,7 @@ end
 """
     GammaZero()
 
-Gamma DFE of deleterious mutations (`negGshape`, `negGmean`), no beneficial class.
+Gamma DFE of deleterious mutations (`del_shape`, `del_mean`), no beneficial class.
 GRAPES' GammaZero.
 """
 struct GammaZero <: AbstractDFEModel end
@@ -285,23 +285,23 @@ struct GammaZero <: AbstractDFEModel end
 """
     GammaExpo()
 
-Gamma deleterious DFE plus an exponential beneficial class of weight `pos_prop` and
-mean `posGmean`. GRAPES' GammaExpo.
+Gamma deleterious DFE plus an exponential beneficial class of weight `ben_prop` and
+mean `ben_mean`. GRAPES' GammaExpo.
 """
 struct GammaExpo <: AbstractDFEModel end
 
 """
     GammaGamma()
 
-Gamma deleterious DFE plus a gamma beneficial class (`pos_prop`, `posGshape`,
-`posGmean`). GRAPES' GammaGamma.
+Gamma deleterious DFE plus a gamma beneficial class (`ben_prop`, `ben_shape`,
+`ben_mean`). GRAPES' GammaGamma.
 """
 struct GammaGamma <: AbstractDFEModel end
 
 """
     ExpoZero()
 
-Exponential deleterious DFE (`negGmean`). GRAPES' ExpoZero.
+Exponential deleterious DFE (`del_mean`). GRAPES' ExpoZero.
 """
 struct ExpoZero <: AbstractDFEModel end
 
@@ -322,7 +322,7 @@ struct ExpoGamma <: AbstractDFEModel end
 """
     DisplGamma()
 
-Displaced gamma (`negGshape`, `negGmean`, displacement `s0 <= 0`): the gamma variable
+Displaced gamma (`del_shape`, `del_mean`, displacement `del_shift <= 0`): the gamma variable
 is `-S - s0`, so a little mass sits at positive S. GRAPES' DisplGamma.
 """
 struct DisplGamma <: AbstractDFEModel end
@@ -330,36 +330,38 @@ struct DisplGamma <: AbstractDFEModel end
 """
     ScaledBeta()
 
-A beta density on S in [-25, 25] (`Ba`, `Bb`) scaled by `med_prop`. GRAPES' ScaledBeta.
+A beta density on S in [-25, 25] (`beta_a`, `beta_b`) scaled by `beta_mass`. GRAPES' ScaledBeta.
 """
 struct ScaledBeta <: AbstractDFEModel end
 
 """
     LogNormalZero()
 
-Lognormal |S| of deleterious mutations (`negLNmean`, `negLNsigma`).
+Lognormal |S| of deleterious mutations (`del_mean`, `del_sigma` = the sd of log |S|).
 """
 struct LogNormalZero <: AbstractDFEModel end
 
-# `pos_prop`'s upper bound 0.1 is GRAPES' MAX_ORIENTATION_ERROR reused as a mixture
+# Parameter names follow `<component>_<quantity>` (component del / ben / neu / lethal, or a
+# family prefix; quantity prop / mean / shape / sigma / shift); means are of |S|, S = 4 Ne s.
+# `ben_prop`'s upper bound 0.1 is GRAPES' MAX_ORIENTATION_ERROR reused as a mixture
 # weight bound. It is kept because GRAPES parity depends on it; widen per fit with
-# `bounds = (pos_prop = (1e-6, 0.5),)`.
-dfe_parameters(::GammaZero)  = (negGshape = (0.05, 100.0), negGmean = (1.0, 1e7))
-dfe_parameters(::GammaExpo)  = (negGshape = (0.05, 100.0), negGmean = (1.0, 1e7),
-                                pos_prop = (1e-6, 0.1), posGmean = (1e-5, 1e4))
-dfe_parameters(::GammaGamma) = (negGshape = (0.05, 100.0), negGmean = (1.0, 1e7),
-                                pos_prop = (1e-6, 0.1), posGshape = (0.05, 100.0),
-                                posGmean = (1e-5, 1e4))
-dfe_parameters(::ExpoZero)   = (negGmean = (1.0, 1e7),)
-dfe_parameters(::ExpoExpo)   = (negGmean = (1.0, 1e7), pos_prop = (1e-6, 0.1),
-                                posGmean = (1e-5, 1e4))
-dfe_parameters(::ExpoGamma)  = (negGmean = (1.0, 1e7), pos_prop = (1e-6, 0.1),
-                                posGshape = (0.05, 100.0), posGmean = (1e-5, 1e4))
-dfe_parameters(::DisplGamma) = (negGshape = (0.05, 100.0), negGmean = (1.0, 1e7),
-                                s0 = (-100.0, 0.0))
-dfe_parameters(::ScaledBeta) = (Ba = (QUASI_ZERO, 10000.0), Bb = (QUASI_ZERO, 10000.0),
-                                med_prop = (0.0, 1.0))
-dfe_parameters(::LogNormalZero) = (negLNmean = (1.0, 1e7), negLNsigma = (0.1, 10.0))
+# `bounds = (ben_prop = (1e-6, 0.99),)`.
+dfe_parameters(::GammaZero)  = (del_shape = (0.05, 100.0), del_mean = (1.0, 1e7))
+dfe_parameters(::GammaExpo)  = (del_shape = (0.05, 100.0), del_mean = (1.0, 1e7),
+                                ben_prop = (1e-6, 0.1), ben_mean = (1e-5, 1e4))
+dfe_parameters(::GammaGamma) = (del_shape = (0.05, 100.0), del_mean = (1.0, 1e7),
+                                ben_prop = (1e-6, 0.1), ben_shape = (0.05, 100.0),
+                                ben_mean = (1e-5, 1e4))
+dfe_parameters(::ExpoZero)   = (del_mean = (1.0, 1e7),)
+dfe_parameters(::ExpoExpo)   = (del_mean = (1.0, 1e7), ben_prop = (1e-6, 0.1),
+                                ben_mean = (1e-5, 1e4))
+dfe_parameters(::ExpoGamma)  = (del_mean = (1.0, 1e7), ben_prop = (1e-6, 0.1),
+                                ben_shape = (0.05, 100.0), ben_mean = (1e-5, 1e4))
+dfe_parameters(::DisplGamma) = (del_shape = (0.05, 100.0), del_mean = (1.0, 1e7),
+                                del_shift = (-100.0, 0.0))
+dfe_parameters(::ScaledBeta) = (beta_a = (QUASI_ZERO, 10000.0), beta_b = (QUASI_ZERO, 10000.0),
+                                beta_mass = (0.0, 1.0))
+dfe_parameters(::LogNormalZero) = (del_mean = (1.0, 1e7), del_sigma = (0.1, 10.0))
 
 # GRAPES' scales (shape and proportions linear, means log), not the lower > 0 rule.
 dfe_log_scale(::GammaZero)  = (false, true)
@@ -372,7 +374,7 @@ dfe_log_scale(::DisplGamma) = (false, true, false)
 dfe_log_scale(::ScaledBeta) = (false, false, false)
 dfe_log_scale(::LogNormalZero) = (true, false)
 
-# GRAPES' effective starting points (all GammaExpo starts use negGmean = 10000, as
+# GRAPES' effective starting points (all GammaExpo starts use del_mean = 10000, as
 # GRAPES does through a typo in its source).
 dfe_start_points(::GammaZero) = [[1.0, 1000.0], [0.5, 100000.0], [0.2, 10000000.0], [0.3, 20000.0]]
 dfe_start_points(::GammaExpo) = [
@@ -408,12 +410,12 @@ dfe_density!(out::_FVec, ::LogNormalZero, p::_FVec, s::_FVec) = density_lognorma
 """
     NeuGamma()
 
-A point mass `p_neu` at S = 0 plus `1 - p_neu` on a gamma deleterious DFE (fitdadi's
+A point mass `neu_prop` at S = 0 plus `1 - neu_prop` on a gamma deleterious DFE (fitdadi's
 `neugamma`). The neutral class is a discrete component, not a grid cell.
 """
 struct NeuGamma <: AbstractDFEModel end
 
-dfe_parameters(::NeuGamma) = (p_neu = (0.0, 1.0), negGshape = (0.05, 100.0), negGmean = (1.0, 1e7))
+dfe_parameters(::NeuGamma) = (neu_prop = (0.0, 1.0), del_shape = (0.05, 100.0), del_mean = (1.0, 1e7))
 dfe_log_scale(::NeuGamma) = (false, false, true)
 dfe_start_points(::NeuGamma) = [
     [0.1, 1.0, 1000.0], [0.25, 0.5, 100000.0], [0.5, 0.2, 10000000.0], [0.05, 0.3, 20000.0]]
@@ -443,8 +445,8 @@ closed-form CDF; masses use numerical quadrature, as GRAPES does.
 """
 struct FGMBesselK <: AbstractDFEModel end
 
-dfe_parameters(::FGMBesselK) = (BKm = (1.0, 10.0), BKnsz2 = (1.0, 10000.0),
-                                BKsigma = (0.05, 100.0), BKscale = (QUASI_ZERO, 1e4))
+dfe_parameters(::FGMBesselK) = (fgm_m = (1.0, 10.0), fgm_nsz2 = (1.0, 10000.0),
+                                fgm_sigma = (0.05, 100.0), fgm_scale = (QUASI_ZERO, 1e4))
 dfe_log_scale(::FGMBesselK) = (false, false, false, true)
 dfe_start_points(::FGMBesselK) = [
     [2.0, 100.0, 0.5, 1000.0], [2.0, 10.0, 0.3, 100.0],
@@ -491,7 +493,7 @@ dfe_density!(out::_FVec, ::FGMBesselK, p::_FVec, s::_FVec) = density_fgm_besselk
 
 All mass on a fixed ladder of S values with free weights (Kousathanas & Keightley
 2013); the default ladder is `(0, -1, -10, -100, -1000, -10000)`. The K weights are
-parameterised by K-1 stick-breaking fractions `w1 ... w{K-1}` in (0, 1); use
+parameterised by K-1 stick-breaking fractions `spike_w1 ... spike_w{K-1}` in (0, 1); use
 `spike_weights(m, p)` for the weights.
 """
 struct FixedSpikes{K} <: AbstractDFEModel
@@ -504,7 +506,7 @@ FixedSpikes(pos::AbstractVector{<:Real}) = FixedSpikes(Tuple(Float64.(pos)))
 
 dfe_name(::FixedSpikes) = "FixedSpikes"
 dfe_parameters(::FixedSpikes{K}) where {K} =
-    NamedTuple{ntuple(i -> Symbol("w", i), K - 1)}(ntuple(_ -> (1e-6, 1.0 - 1e-6), K - 1))
+    NamedTuple{ntuple(i -> Symbol("spike_w", i), K - 1)}(ntuple(_ -> (1e-6, 1.0 - 1e-6), K - 1))
 dfe_log_scale(::FixedSpikes{K}) where {K} = ntuple(_ -> false, K - 1)
 
 # Mass on the neutral end, on the deleterious end, and the flat simplex point.
@@ -538,10 +540,10 @@ discrete_components(m::FixedSpikes, p::AbstractVector{Float64}) = zip(m.position
 """
     WithLethal(base)
 
-Adds a lethal class of weight `p_lethal` to any DFE: mutations that never segregate
+Adds a lethal class of weight `lethal_prop` to any DFE: mutations that never segregate
 and never fix (GRAPES' `-p_lethal`, Galtier & Rousselle 2020). Appends the parameter
-`p_lethal` in [0, 0.99] and scales the base density, point masses and tail masses by
-`1 - p_lethal`, which is where GRAPES applies it. Under `SaturatedDivergence` it is
+`lethal_prop` in [0, 0.99] and scales the base density, point masses and tail masses by
+`1 - lethal_prop`, which is where GRAPES applies it. Under `SaturatedDivergence` it is
 identified by the level of Pn against Ps only.
 """
 struct WithLethal{M<:AbstractDFEModel} <: AbstractDFEModel
@@ -551,9 +553,9 @@ end
 dfe_name(m::WithLethal) = "WithLethal{" * dfe_name(m.base) * "}"
 function dfe_parameters(m::WithLethal)
     base = dfe_parameters(m.base)
-    # NamedTuple merging would silently drop a second `p_lethal`.
-    haskey(base, :p_lethal) && throw(ArgumentError("WithLethal: the base model already has a p_lethal parameter"))
-    return (base..., p_lethal = (0.0, 0.99))
+    # NamedTuple merging would silently drop a second `lethal_prop`.
+    haskey(base, :lethal_prop) && throw(ArgumentError("WithLethal: the base model already has a lethal_prop parameter"))
+    return (base..., lethal_prop = (0.0, 0.99))
 end
 dfe_log_scale(m::WithLethal) = (dfe_log_scale(m.base)..., false)
 dfe_start_points(m::WithLethal) = [vcat(s, 0.1) for s in dfe_start_points(m.base)]
@@ -790,18 +792,18 @@ end
 # -----------------------------------------------------------------------------
 
 # Parameters on the S scale (multiplied by r), and parameters with no S unit.
-# `med_prop` is GRAPES' one exception: ScaledBeta's support is fixed at [-25, 25],
+# `beta_mass` (GRAPES' med_prop) is the one exception: ScaledBeta's support is fixed at [-25, 25],
 # so GRAPES divides its weight by r instead.
-const _S_SCALE_NAMES = (:negGmean, :posGmean, :s0, :negLNmean, :BKscale)
-const _UNITLESS_NAMES = (:negGshape, :posGshape, :pos_prop, :p_neu, :p_lethal, :Ba, :Bb,
-                         :negLNsigma, :BKm, :BKnsz2, :BKsigma)
+const _S_SCALE_NAMES = (:del_mean, :ben_mean, :del_shift, :fgm_scale)
+const _UNITLESS_NAMES = (:del_shape, :ben_shape, :ben_prop, :neu_prop, :lethal_prop, :beta_a, :beta_b,
+                         :del_sigma, :fgm_m, :fgm_nsz2, :fgm_sigma)
 
 """
     dfe_ne_multipliers(m::AbstractDFEModel, r) -> Vector{Float64}
 
 Per-parameter factors that rescale the DFE from the current to the ancestral Ne
-`r * Ne`: S-scale parameters times `r` (`negGmean`, `posGmean`, `s0`, `negLNmean`,
-`BKscale`), `med_prop` divided by `r` (GRAPES), unitless parameters unchanged. A
+`r * Ne`: S-scale parameters times `r` (`del_mean`, `ben_mean`, `del_shift`,
+`fgm_scale`), `beta_mass` divided by `r` (GRAPES' med_prop rule), unitless parameters unchanged. A
 model with other parameter names must define this method to be used with an Ne
 ratio other than 1.
 """
@@ -812,7 +814,7 @@ function dfe_ne_multipliers(m::AbstractDFEModel, r::Float64)
     for (i, k) in enumerate(nm)
         if k in _S_SCALE_NAMES
             mult[i] = r
-        elseif k === :med_prop
+        elseif k === :beta_mass
             mult[i] = 1.0 / r
         elseif !(k in _UNITLESS_NAMES)
             throw(ArgumentError("$(dfe_name(m)): parameter $k has no known scaling with Ne; " *
@@ -830,3 +832,49 @@ dfe_ne_multipliers(m::FixedSpikes, r::Float64) = r == 1.0 ? ones(_nparams(m)) :
 # mass and CDF methods free of a runtime `applicable` lookup for them.
 _has_distribution(::Union{GammaZero,GammaExpo,GammaGamma,ExpoZero,ExpoExpo,ExpoGamma,DisplGamma,
                           ScaledBeta,LogNormalZero,NeuGamma,FGMBesselK,FixedSpikes,WithLethal}) = false
+
+# -----------------------------------------------------------------------------
+# Parameter names: the scheme, GRAPES' names, and the names used before 2026-10-15
+# -----------------------------------------------------------------------------
+
+# Every name dfe_ml used before the `<component>_<quantity>` scheme (2026-10-15), mapped to
+# the current one. GRAPES' own names are among them. Results written before that date
+# (Task 2 and 3 outputs, the frozen test fixtures) use the old names.
+const LEGACY_PARAM_NAMES = Dict{String,Symbol}(
+    "negGshape" => :del_shape, "negGmean" => :del_mean,
+    "pos_prop" => :ben_prop, "posGmean" => :ben_mean, "posGshape" => :ben_shape,
+    "s0" => :del_shift, "negLNmean" => :del_mean, "negLNsigma" => :del_sigma,
+    "p_neu" => :neu_prop, "Ba" => :beta_a, "Bb" => :beta_b, "med_prop" => :beta_mass,
+    "BKm" => :fgm_m, "BKnsz2" => :fgm_nsz2, "BKsigma" => :fgm_sigma, "BKscale" => :fgm_scale,
+    "p_lethal" => :lethal_prop, "syno_orientation_error" => :misorient,
+    "a" => :nb_dispersion, "Ne_ratio" => :ne_ratio)
+
+"""
+    from_legacy_name(name) -> Symbol
+
+The current dfe_ml parameter name for an old (or GRAPES) one: `"negGmean"` ->
+`:del_mean`, `"w3"` -> `:spike_w3`. Current names map to themselves.
+"""
+function from_legacy_name(name::Union{AbstractString,Symbol})
+    s = String(name)
+    haskey(LEGACY_PARAM_NAMES, s) && return LEGACY_PARAM_NAMES[s]
+    m = match(r"^w(\d+)$", s)
+    m !== nothing && return Symbol("spike_w", m[1])
+    return Symbol(s)
+end
+
+"""
+    grapes_param_name(name) -> String
+
+GRAPES' name of a dfe_ml parameter (for `MKtest.grapes()` output columns `"<Model>:<name>"`
+and `-fixed_param` files): `:del_mean` -> `"negGmean"`, `:misorient` ->
+`"syno_orientation_error"`. Parameters GRAPES does not have keep their dfe_ml name.
+"""
+grapes_param_name(name::Union{AbstractString,Symbol}) = get(_TO_GRAPES, Symbol(name), String(name))
+
+const _TO_GRAPES = Dict{Symbol,String}(
+    :del_shape => "negGshape", :del_mean => "negGmean", :ben_prop => "pos_prop",
+    :ben_mean => "posGmean", :ben_shape => "posGshape", :del_shift => "s0",
+    :beta_a => "Ba", :beta_b => "Bb", :beta_mass => "med_prop",
+    :fgm_m => "BKm", :fgm_nsz2 => "BKnsz2", :fgm_sigma => "BKsigma", :fgm_scale => "BKscale",
+    :lethal_prop => "p_lethal", :misorient => "syno_orientation_error")

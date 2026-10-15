@@ -77,7 +77,7 @@ end
         m = NormalDFE()
         # bounds and scales derived from dfe_parameters alone
         lay = MKtest.build_layout(m, MKtest.PoissonKernel(), true)
-        @test lay.names == [:μ, :σ, :syno_orientation_error]
+        @test lay.names == [:μ, :σ, :misorient]
         @test lay.bounds[1:2] == [(-1e4, 1e5), (1.0, 1e5)]
         @test lay.log_scale[1:2] == [false, true]
         @test length(MKtest.dfe_start_points(m)) == 8
@@ -105,8 +105,8 @@ end
 
         # a fit runs on the shared synthetic data
         r = MKtest.dfe_ml(ML_SFS, ML_DIV, NormalDFE())
-        @test r.converged[1] && isfinite(r.loglik[1])
-        @test r.model[1] == "NormalDFE"
+        @test r.inference.converged[1] && isfinite(r.inference.loglik[1])
+        @test r.inference.model[1] == "NormalDFE"
 
         # Smoke test, NOT evidence of accuracy: data drawn from the engine's own
         # expectation under NormalDFE(300, 400). The optimizer must reach a
@@ -117,19 +117,19 @@ end
             div = [900.0, 1200.0, 1.0e6, 3.0e5]
             rs = MKtest.dfe_ml(sfs, div, m)
             ll_true = maximum(MKtest._loglik_at(m, sfs, div, [ptrue..., oer]) for oer in (0.0, 0.01, 0.05))
-            @test rs.loglik[1] >= ll_true - 1e-6
-            @info "NormalDFE smoke seed $seed: truth (300, 400), fit ($(round(rs.μ[1]; digits = 1)), $(round(rs.σ[1]; digits = 1))), lnL $(round(rs.loglik[1]; digits = 3)) vs truth $(round(ll_true; digits = 3))"
+            @test rs.inference.loglik[1] >= ll_true - 1e-6
+            @info "NormalDFE smoke seed $seed: truth (300, 400), fit ($(round(MKtest.param_values(rs, :μ)[1]; digits = 1)), $(round(MKtest.param_values(rs, :σ)[1]; digits = 1))), lnL $(round(rs.inference.loglik[1]; digits = 3)) vs truth $(round(ll_true; digits = 3))"
         end
     end
 
     @testset "WithLethal as written in the brief" begin
         uw = UserDFEs.WithLethal(MKtest.GammaZero())
         bw = MKtest.WithLethal(MKtest.GammaZero())
-        @test MKtest.dfe_param_names(uw) == [:negGshape, :negGmean, :p_lethal]
+        @test MKtest.dfe_param_names(uw) == [:del_shape, :del_mean, :p_lethal]
         # same likelihood as its base at p_lethal = 0, and as the built-in wrapper
         for θ in ([0.2, 1000.0, 0.01], [0.5, 30000.0, 0.0])
             ll_base = MKtest._loglik_at(MKtest.GammaZero(), ML_SFS, ML_DIV, θ)
-            # `≈`, not `==`: the user model's default log scale on negGshape sends the
+            # `≈`, not `==`: the user model's default log scale on del_shape sends the
             # value through exp(log(x)), which is not always the identity in floating point
             @test MKtest._loglik_at(uw, ML_SFS, ML_DIV, [θ[1:2]..., 0.0, θ[3]]) ≈ ll_base rtol=1e-12
             for pl in (0.0, 0.3)
@@ -141,11 +141,11 @@ end
         # so the optimizer path differs; same optimum)
         r0 = MKtest.dfe_ml(ML_SFS, ML_DIV, MKtest.GammaZero())
         ru = MKtest.dfe_ml(ML_SFS, ML_DIV, uw; fixed = (p_lethal = 0.0,))
-        @test ru.loglik[1] ≈ r0.loglik[1] atol=1e-4
+        @test ru.inference.loglik[1] ≈ r0.inference.loglik[1] atol=1e-4
         # free p_lethal fits and stays in its bounds
         rf = MKtest.dfe_ml(ML_SFS, ML_DIV, uw)
-        @test isfinite(rf.loglik[1]) && 0.0 <= rf.p_lethal[1] <= 0.99
-        @test rf.loglik[1] >= ru.loglik[1] - 1e-6
+        @test isfinite(rf.inference.loglik[1]) && 0.0 <= MKtest.param_values(rf, :p_lethal)[1] <= 0.99
+        @test rf.inference.loglik[1] >= ru.inference.loglik[1] - 1e-6
     end
 
     @testset "one user subtype per axis" begin
@@ -154,7 +154,7 @@ end
 
         # kernel
         rk = MKtest.dfe_ml(ML_SFS, ML_DIV, g0; kernel = UserDFEs.SameAsPoisson())
-        @test rk.loglik[1] == r0.loglik[1]
+        @test rk.inference.loglik[1] == r0.inference.loglik[1]
 
         # integrator: only `integrate` defined, the table equals Romberg's
         c = MKtest.DFECache()
@@ -164,19 +164,19 @@ end
 
         # S grid
         rg = MKtest.dfe_ml(ML_SFS, ML_DIV, g0; s_grid = UserDFEs.UniformGrid())
-        # a different grid is a different quadrature: on this data negGshape sits at its
+        # a different grid is a different quadrature: on this data del_shape sits at its
         # 0.05 bound, a density far too spiky at S -> 0- for 0.5-wide cells, so alpha
         # moves; the check is that the grid reaches the fit
-        @test isfinite(rg.loglik[1]) && rg.converged[1]
-        @test rg.loglik[1] != r0.loglik[1]
+        @test isfinite(rg.inference.loglik[1]) && rg.inference.converged[1]
+        @test rg.inference.loglik[1] != r0.inference.loglik[1]
 
         # Ne model and divergence model
         rn = MKtest.dfe_ml(ML_SFS, ML_DIV, MKtest.GammaExpo(); ne_model = UserDFEs.RatioTwo())
         rn2 = MKtest.dfe_ml(ML_SFS, ML_DIV, MKtest.GammaExpo(); ne_model = MKtest.AncestralNeRatio(2.0))
-        @test rn.alpha[1] == rn2.alpha[1]
+        @test rn.inference.alpha[1] == rn2.inference.alpha[1]
         rd = MKtest.dfe_ml(ML_SFS, ML_DIV, g0; div_model = UserDFEs.PredictedDn())
         rd2 = MKtest.dfe_ml(ML_SFS, ML_DIV, g0; div_model = MKtest.DFEConstrainedDivergence())
-        @test rd.loglik[1] == rd2.loglik[1]
+        @test rd.inference.loglik[1] == rd2.inference.loglik[1]
 
         # dominance
         h1 = MKtest.get_precomputed(c, 20; dominance = UserDFEs.HalfH())
@@ -186,27 +186,27 @@ end
         # demography
         re = MKtest.dfe_ml(ML_SFS, ML_DIV, g0; demography = UserDFEs.NoRj())
         re2 = MKtest.dfe_ml(ML_SFS, ML_DIV, g0; demography = MKtest.Equilibrium())
-        @test re.loglik[1] == re2.loglik[1]
-        @test re.loglik[1] <= r0.loglik[1] + 1e-8  # fewer free r_j cannot fit better
+        @test re.inference.loglik[1] == re2.inference.loglik[1]
+        @test re.inference.loglik[1] <= r0.inference.loglik[1] + 1e-8  # fewer free r_j cannot fit better
 
         # optimizer
         ro = MKtest.dfe_ml(ML_SFS, ML_DIV, g0; optimizer = UserDFEs.WrappedNM())
         ro2 = MKtest.dfe_ml(ML_SFS, ML_DIV, g0; optimizer = MKtest.NelderMeadOptimizer())
-        @test ro.loglik[1] == ro2.loglik[1]
-        @test abs(ro.loglik[1] - r0.loglik[1]) < 1e-2
+        @test ro.inference.loglik[1] == ro2.inference.loglik[1]
+        @test abs(ro.inference.loglik[1] - r0.inference.loglik[1]) < 1e-2
 
         # summaries
         rs = MKtest.dfe_ml(ML_SFS, ML_DIV, g0; summaries = (UserDFEs.ThetaTwice(),))
-        @test rs.theta_x2[1] == 2 * rs.theta[1]
-        @test !(:alpha in propertynames(rs))       # only the summaries asked for
+        @test rs.inference.theta_x2[1] == 2 * rs.inference.theta[1]
+        @test !(:alpha in propertynames(rs.inference))   # only the summaries asked for
 
         # expectation with exterior terms: lethal_mass is the mass beyond the outer
         # cell EDGE (dev evaluated it at the outer grid point)
         lg = MKtest.LogGammaGrid(; Npts = 200)
         rx = MKtest.dfe_ml(ML_SFS, ML_DIV, g0; expectation = UserDFEs.PRFExterior(), s_grid = lg)
         pre = MKtest.get_precomputed(MKtest.DFECache(), 40; grid = lg, expectation = UserDFEs.PRFExterior())
-        p = [rx.negGshape[1], rx.negGmean[1]]
-        @test rx.lethal_mass[1] == MKtest.dfe_mass_above(g0, p, pre.s_ext_hi)
+        p = [MKtest.param_values(rx, :del_shape)[1], MKtest.param_values(rx, :del_mean)[1]]
+        @test rx.extra[:exterior].lethal_mass[1] == MKtest.dfe_mass_above(g0, p, pre.s_ext_hi)
         @test pre.s_ext_hi > abs(pre.s_grid[1])
     end
 

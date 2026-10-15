@@ -123,7 +123,7 @@ function build_data_input(sfs_mat::AbstractMatrix, div::AbstractVector, fold::Bo
 end
 
 # -----------------------------------------------------------------------------
-# Parameter layout: the DFE parameters, then syno_orientation_error, then the
+# Parameter layout: the DFE parameters, then misorient, then the
 # kernel's parameter. Fixed parameters keep their slot and are not optimised.
 # -----------------------------------------------------------------------------
 

@@ -17,14 +17,14 @@ for row in eachrow(sort(tab, [:model, :n_ind]))
     haskey(models, row.model) || continue
     m = models[row.model]; s = MKtest.project(sfs, row.n_ind)
     lay = MKtest.build_layout(m, MKtest.PoissonKernel(), true)
-    θg = Float64[row["p_" * string(nm)] for nm in lay.names]
+    θg = Float64[row["p_" * MKtest.grapes_param_name(nm)] for nm in lay.names]
     llg, ag, _ = alpha_at(m, s, θg)
     jf = MKtest.dfe_ml(s, div, m; integrator = rb)
-    θj = Float64[jf[1, nm] for nm in lay.names]
+    θj = [MKtest.param_values(jf, nm)[1] for nm in lay.names]
     println(rpad("n=$(row.n_ind) $(row.model)", 16),
         " GRAPES: lnL ", round(row.lnL; digits = 3), " alpha ", row.alpha,
         " | Julia at GRAPES params: lnL ", round(llg; digits = 3), " alpha ", round(ag; digits = 4),
-        " | Julia optimum: lnL ", round(jf.loglik[1]; digits = 3), " alpha ", round(jf.alpha[1]; digits = 4))
+        " | Julia optimum: lnL ", round(jf.inference.loglik[1]; digits = 3), " alpha ", round(jf.inference.alpha[1]; digits = 4))
     println("    GRAPES params ", Dict(zip(lay.names, round.(θg; sigdigits = 4))))
     println("    Julia  params ", Dict(zip(lay.names, round.(θj; sigdigits = 4))))
 end

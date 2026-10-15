@@ -4,12 +4,13 @@ tab = CSV.read(expanduser("~/.julia/dev/MKtest_grapes/test/fixtures/grapes_parit
 sfs, div, _ = MKtest.parse_sfs(expanduser("~/.julia/dev/MKtest_grapes/data/MKdata_tgp_may2023.txt"); sample_size = 661)
 div = Float64.(vec(div))
 writedlm(joinpath(out, "div.tsv"), permutedims(div), '\t')
+# the column names are GRAPES' (as in the recorded params.tsv)
 rows = String["k\tsource\tnegGshape\tnegGmean\tpos_prop\tposGmean\tsyno_orientation_error"]
 for k in (10, 20)
     s = MKtest.project(sfs, k)
     writedlm(joinpath(out, "sfs_k$(k).tsv"), s, '\t')
     j = MKtest.dfe_ml(s, div, MKtest.GammaExpo(); integrator = MKtest.RombergIntegrator())
-    push!(rows, join([k, "julia", j.negGshape[1], j.negGmean[1], j.pos_prop[1], j.posGmean[1], j.syno_orientation_error[1]], '\t'))
+    push!(rows, join([k, "julia", MKtest.param_values(j, :del_shape)[1], MKtest.param_values(j, :del_mean)[1], MKtest.param_values(j, :ben_prop)[1], MKtest.param_values(j, :ben_mean)[1], MKtest.param_values(j, :misorient)[1]], '\t'))
     g = tab[(tab.n_ind .== k) .& (tab.model .== "GammaExpo"), :][1, :]
     push!(rows, join([k, "grapes", g.p_negGshape, g.p_negGmean, g.p_pos_prop, g.p_posGmean, g.p_syno_orientation_error], '\t'))
 end

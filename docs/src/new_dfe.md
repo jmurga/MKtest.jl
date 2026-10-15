@@ -14,13 +14,18 @@ struct NormalDFE <: AbstractDFEModel end
 MKtest.dfe_parameters(::NormalDFE) = (μ = (-1e4, 1e5), σ = (1, 1e5))   # name = (lower, upper)
 MKtest.distribution(::NormalDFE, μ, σ) = truncated(Normal(μ, σ), 0, Inf)
 
-fit = MKtest.dfe_ml(sfs, div, NormalDFE())
-fit.μ, fit.σ, fit.alpha
+r = MKtest.dfe_ml(sfs, div, NormalDFE())
+r.params                         # rows mu, sigma, misorient
+MKtest.param_values(r, :μ)       # the fitted mu
+r.inference.alpha
 ```
 
-- `dfe_parameters` returns a NamedTuple: the keys are the parameter names (they become
-  output columns and the names `fixed` and `bounds` accept), the values are the bounds,
-  and the order is the parameter order.
+- `dfe_parameters` returns a NamedTuple: the keys are the parameter names (the
+  `parameter` column of `r.params`, and the names `fixed` and `bounds` accept), the values
+  are the bounds, and the order is the parameter order. For a model you share, follow
+  the package's `<component>_<quantity>` scheme (`del_mean`, `del_sigma`, `ben_prop`, ...;
+  see [the parameter names](dfe_ml.md#Parameter-names)), so its rows line up with the
+  built-in models'.
 - `distribution` receives the parameter values in that order and returns the law of |S|
   of deleterious mutations (S < 0), as any `Distributions.UnivariateDistribution` with
   support on [0, Inf).
@@ -53,7 +58,7 @@ struct WithLethal{M} <: AbstractDFEModel
     dfe::M
 end
 
-MKtest.dfe_parameters(m::WithLethal) = (MKtest.dfe_parameters(m.dfe)..., p_lethal = (0.0, 0.99))
+MKtest.dfe_parameters(m::WithLethal) = (MKtest.dfe_parameters(m.dfe)..., lethal_prop = (0.0, 0.99))
 MKtest.dfe_density!(out, m::WithLethal, p, s) =
     (MKtest.dfe_density!(out, m.dfe, p[1:end-1], s); out .*= 1 - p[end])
 
@@ -66,7 +71,8 @@ numerical quadrature of this density.
 
 `MKtest.WithLethal` is the built-in version of the same wrapper. It is written without
 allocations (a view instead of `p[1:end-1]`), keeps the base model's log scales and
-starting points, and refuses to wrap a model that already has `p_lethal`.
+starting points, and refuses to wrap a model that already has `lethal_prop` (merging two
+NamedTuples would silently keep only one).
 
 ## 3. Optional methods
 
@@ -77,7 +83,7 @@ starting points, and refuses to wrap a model that already has `p_lethal`.
 | `MKtest.dfe_name(m)` | the type name | the output table should say something else |
 | `MKtest.discrete_components(m, p)` | none | the DFE has point masses, as `(S, weight)` pairs (`NeuGamma`, `FixedSpikes`) |
 | `MKtest.dfe_mass_below(m, p, b)`, `dfe_mass_above(m, p, a)`, `dfe_cdf_continuous!(out, m, p, edges)` | from `distribution`, else numerical | a closed form is faster or more accurate |
-| `MKtest.dfe_ne_multipliers(m, r)` | rescale parameters named `negGmean`, `posGmean`, `s0`, `negLNmean`, `BKscale` by r | the model is used with an Ne ratio other than 1 and has other S-scale parameters |
+| `MKtest.dfe_ne_multipliers(m, r)` | rescale parameters named `del_mean`, `ben_mean`, `del_shift`, `fgm_scale` by r | the model is used with an Ne ratio other than 1 and has other S-scale parameters |
 
 Write the trailing arguments of an overriding method untyped (as in `dfe_density!(out,
 m::WithLethal, p, s)`): the engine's generic fallbacks are untyped beyond the model, so

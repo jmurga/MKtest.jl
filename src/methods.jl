@@ -838,10 +838,10 @@ end
 _axis_string(x) = repr(x)
 
 """
-    dfe_ml(sfs, divergence, model::AbstractDFEModel; kwargs...) -> DataFrame
+    dfe_ml(sfs, divergence, model::AbstractDFEModel; kwargs...) -> DFEResult
 
 Maximum-likelihood fit of the DFE `model` and alpha to the SFS and divergence of one
-or several datasets, with GRAPES' model (Galtier 2016). One row per dataset.
+or several datasets, with GRAPES' model (Galtier 2016). One fit per dataset.
 
 # Arguments
  - `sfs`: a matrix `[DAC Pn Ps]` with every bin `1..n-1` (unfolded; `n` chromosomes),
@@ -853,13 +853,14 @@ or several datasets, with GRAPES' model (Galtier 2016). One row per dataset.
 # Keywords (data)
  - `project_sfs::Union{Nothing,Int} = nothing`: project the SFS to this many diploid
    individuals (`2 project_sfs` chromosomes) with `project` first.
- - `fold::Bool = false`: fold the SFS (`syno_orientation_error` is then not fitted).
+ - `fold::Bool = false`: fold the SFS (`misorient` is then not fitted).
+ - `labels = nothing`: names of the datasets (the `dataset` column); default `1:N`.
  - `Ln_poly`, `Ls_poly`: site counts of the polymorphism data, when they differ from
    the divergence ones (default: `Ln`, `Ls`).
 
 # Keywords (model axes; each is independent of the others)
  - `ne_model::AbstractNeModel = ConstantNe()`: `AncestralNeRatio(r)` or
-   `AncestralNeRatio(:free)` (adds the column `Ne_ratio`).
+   `AncestralNeRatio(:free)` (adds the parameter `ne_ratio`).
  - `div_model::AbstractDivergenceModel = SaturatedDivergence()`:
    `DFEConstrainedDivergence()` (GRAPES `-no_div_param`) or `NoDivergence()`
    (`-no_div_data`).
@@ -874,12 +875,12 @@ or several datasets, with GRAPES' model (Galtier 2016). One row per dataset.
    `default_s_grid(expectation)` (`GrapesGrid()`).
  - `kernel::AbstractLikelihoodKernel = PoissonKernel()`; or `NegativeBinomialKernel()`.
  - `optimizer::AbstractOptimizer = LBFGSOptimizer()`; or `NelderMeadOptimizer()`.
- - `summaries = (DFEMAlpha(),)`: the `AbstractAlphaSummary` column sets.
+ - `summaries = (DFEMAlpha(),)`: the `AbstractAlphaSummary` column sets of `inference`.
 
 # Keywords (fit)
- - `fixed::NamedTuple = (;)`: pin parameters by name, e.g. `(pos_prop = 0.0,)`.
- - `bounds::NamedTuple = (;)`: replace bounds by name, e.g. `(pos_prop = (1e-6, 0.5),)`.
- - `no_syn_orient_error::Bool = false`: do not fit `syno_orientation_error`.
+ - `fixed::NamedTuple = (;)`: pin parameters by name, e.g. `(ben_prop = 0.0,)`.
+ - `bounds::NamedTuple = (;)`: replace bounds by name, e.g. `(ben_prop = (1e-6, 0.99),)`.
+ - `no_syn_orient_error::Bool = false`: do not fit `misorient`.
  - `nb_rand_start::Int = 0`: extra random starting points (seeded, reproducible).
  - `nearly_neutral::Real = 5`: S threshold of adaptive substitutions in alpha.
  - `alpha_ci_threshold::Real = 1.92`: log-likelihood drop of the alpha CI (half the
@@ -889,14 +890,11 @@ or several datasets, with GRAPES' model (Galtier 2016). One row per dataset.
    calls (safe across threads).
 
 # Returns
-A `DataFrame`, one row per dataset, with the columns `dataset`, `model`, `n`
-(chromosomes), `converged`, `loglik`, `aic`, `n_params`, `free_params` (the
-optimised names, comma separated), `theta`, one column per parameter (DFE, then
-`syno_orientation_error`, then the kernel's), `Ne_ratio` under `AncestralNeRatio(:free)`,
-the summary columns (`alpha`, `alpha_ci_low`, `alpha_ci_high`, `omega_a`, ...,
-`omega_obs`, `alpha_div`, `alpha_dfe`), and one column per axis setting
-(`expectation`, `integrator`, `quadrature`, `s_grid`, `dominance`, `demography`,
-`ne_model`, `div_model`, `kernel`, `optimizer`).
+A [`DFEResult`](@ref): `inference` (alpha, omegas, lnL, convergence: one row per fit),
+`params` (every fitted parameter, long), `sfs` (observed and fitted SFS, `r_j`),
+`divergence` (expected Dn by S class), `config` (the settings) and `extra`. Parameter names
+follow `<component>_<quantity>` (`del_shape`, `del_mean`, `ben_prop`, `ben_mean`, ...,
+`misorient`); `from_legacy_name` maps the GRAPES / pre-2026-10-15 names.
 """
 function dfe_ml(sfs, divergence, model::AbstractDFEModel;
                 project_sfs::Union{Nothing,Int} = nothing,
@@ -920,6 +918,7 @@ function dfe_ml(sfs, divergence, model::AbstractDFEModel;
                 nb_rand_start::Int = 0,
                 nearly_neutral::Real = 5,
                 alpha_ci_threshold::Real = 1.92,
+                labels = nothing,
                 cache::DFECache = DFECache())
     sfs_l = _sfs_list(sfs)
     div_l = _div_list(divergence)
@@ -931,7 +930,11 @@ function dfe_ml(sfs, divergence, model::AbstractDFEModel;
     dem = demography === nothing ? default_demography(expectation) : demography
     grid = s_grid === nothing ? default_s_grid(expectation) : s_grid
 
-    rows = Vector{OrderedDict{Symbol,Any}}(undef, length(sfs_l))
+    datasets = labels === nothing ? collect(1:length(sfs_l)) : collect(labels)
+    length(datasets) == length(sfs_l) ||
+        throw(ArgumentError("got $(length(datasets)) labels for $(length(sfs_l)) datasets"))
+
+    pieces = Vector{Any}(undef, length(sfs_l))
     for i in eachindex(sfs_l)
         n_i = Int(round(maximum(sfs_l[i][:, 1]))) + 1
         pre = get_precomputed(cache, n_i; integrator = integrator, grid = grid,
@@ -939,22 +942,25 @@ function dfe_ml(sfs, divergence, model::AbstractDFEModel;
         data = build_data_input(sfs_l[i], div_l[i], fold, uses_divergence(div_model);
                                 Ln_poly = Float64(Ln_poly), Ls_poly = Float64(Ls_poly),
                                 neutral_shape = pre.neutral_shape)
-        row = fit_model(data, pre, model; kernel = kernel, quad = quadrature, optimizer = optimizer,
-                        ne_model = ne_model, div_model = div_model, demography = dem,
-                        no_syn_orient_error = no_syn_orient_error, fixed = fixed, bounds = bounds,
-                        nb_rand_start = nb_rand_start, nearly_neutral = Float64(nearly_neutral),
-                        alpha_ci_threshold = Float64(alpha_ci_threshold), summaries = summaries)
-        out = OrderedDict{Symbol,Any}(:dataset => i)
-        merge!(out, row)
-        for (k, v) in (:expectation => expectation, :integrator => integrator,
-                       :quadrature => quadrature, :s_grid => grid, :dominance => dominance,
-                       :demography => dem, :ne_model => ne_model, :div_model => div_model,
-                       :kernel => kernel, :optimizer => optimizer)
-            _put!(out, k, _axis_string(v))
-        end
-        rows[i] = out
+        pieces[i] = fit_model(data, pre, model; kernel = kernel, quad = quadrature, optimizer = optimizer,
+                              ne_model = ne_model, div_model = div_model, demography = dem,
+                              no_syn_orient_error = no_syn_orient_error, fixed = fixed, bounds = bounds,
+                              nb_rand_start = nb_rand_start, nearly_neutral = Float64(nearly_neutral),
+                              alpha_ci_threshold = Float64(alpha_ci_threshold), summaries = summaries)
     end
-    return DataFrame([NamedTuple{Tuple(keys(r))}(Tuple(values(r))) for r in rows])
+    config = OrderedDict{Symbol,Any}(
+        :expectation => _axis_string(expectation), :integrator => _axis_string(integrator),
+        :quadrature => _axis_string(quadrature), :s_grid => _axis_string(grid),
+        :dominance => _axis_string(dominance), :demography => _axis_string(dem),
+        :ne_model => _axis_string(ne_model), :div_model => _axis_string(div_model),
+        :kernel => _axis_string(kernel), :optimizer => _axis_string(optimizer),
+        :nearly_neutral => Float64(nearly_neutral), :alpha_ci_threshold => Float64(alpha_ci_threshold),
+        :ci_method => "likelihood_ratio", :nb_rand_start => nb_rand_start,
+        :fixed => _axis_string(fixed), :bounds => _axis_string(bounds),
+        :no_syn_orient_error => no_syn_orient_error, :fold => fold,
+        :project_sfs => project_sfs === nothing ? 0 : project_sfs,
+        :mktest_version => string(pkgversion(@__MODULE__)))
+    return _assemble_result(pieces, datasets, config)
 end
 
 # -----------------------------------------------------------------------------
@@ -1007,46 +1013,53 @@ function _aic_lrt_tables(names::Vector{String}, n_params::Vector{Int},
             lrt = sort!(lrt_df, [:loglik_null, :loglik_alt], rev = true))
 end
 
-_free_set(s::AbstractString) = Set(split(s, ","; keepempty = false))
 
 """
-    dfe_model_comparison(fits::DataFrame) -> (aic = DataFrame, lrt = DataFrame)
+    dfe_model_comparison(r::DFEResult) -> (aic = DataFrame, lrt = DataFrame)
     dfe_model_comparison(sfs, divergence; models, cache = DFECache(), kwargs...)
-        -> (aic = DataFrame, lrt = DataFrame, fits = DataFrame)
+        -> (aic = DataFrame, lrt = DataFrame, result = DFEResult)
 
-AIC (with Akaike weights) and likelihood-ratio tests between DFE models fitted to
-the same data, per dataset. `fits` is `dfe_ml` output for several models stacked
-(`vcat(...; cols = :union)`). Model `i` is nested in `j` when its `free_params` are
-a strict subset of `j`'s (GammaZero in GammaExpo, ExpoZero in GammaZero,
-GammaZero in `WithLethal(GammaZero())`), and non-converged fits are left out of the
-LRTs. Both tables carry a `dataset` column and are sorted by log-likelihood within
-dataset; pick the AIC-best model with `argmin(aic)`.
+AIC (with Akaike weights) and likelihood-ratio tests between DFE models fitted to the same
+data under the same likelihood function: fits are grouped by `dataset` and by the settings
+that define the likelihood (expectation, integrator, quadrature, grid, dominance,
+demography, Ne model, divergence model, kernel, fold, projection), so models fitted with
+different optimizers, starts, `fixed` values or `bounds` are compared, and models fitted
+under different integrators are not. Model `i` is nested in `j` when its free parameters
+are a strict subset of `j`'s (GammaZero in GammaExpo, ExpoZero in GammaZero, GammaZero in
+`WithLethal(GammaZero())`); non-converged fits stay in the AIC table but not in the LRTs.
+Both tables carry `dataset` and `group` (the likelihood setting) and are sorted by
+log-likelihood within a group: pick the AIC-best model with `argmin(aic)`, not row 1.
 
 The second form fits `models` (default: the eleven continuous shapes) with `dfe_ml`,
-sharing one `DFECache`, and forwards `kwargs` to it.
+sharing one `DFECache`, and forwards `kwargs` to it. `fixed` and `bounds` are given to
+each model restricted to the parameters it has, so `bounds = (ben_prop = (1e-6, 0.99),)`
+widens the beneficial class of the models that have one.
 """
-function dfe_model_comparison(fits::DataFrame)
-    for c in (:dataset, :model, :loglik, :n_params, :free_params, :converged)
-        hasproperty(fits, c) || throw(ArgumentError("dfe_model_comparison: column $c missing; pass dfe_ml output"))
-    end
+function dfe_model_comparison(r::DFEResult)
+    inf = r.inference
+    keycfg = select(r.config, :config, intersect(collect(_LIKELIHOOD_SETTINGS), propertynames(r.config)))
+    lik = Dict(row.config => Tuple(row[Not(:config)]) for row in eachrow(keycfg))
+    groups = unique([lik[c] for c in inf.config])
+    free = Dict(f => Set(r.params.parameter[(r.params.fit .== f) .& r.params.free]) for f in inf.fit)
     aics, lrts = DataFrame[], DataFrame[]
-    for ds in unique(fits.dataset)
-        sub = fits[fits.dataset .== ds, :]
+    for ds in unique(inf.dataset), (gi, g) in enumerate(groups)
+        sub = inf[(inf.dataset .== ds) .& ([lik[c] == g for c in inf.config]), :]
+        nrow(sub) == 0 && continue
         names = String.(sub.model)
-        allunique(names) || throw(ArgumentError("dataset $ds: model names repeat: $names"))
-        free = _free_set.(sub.free_params)
-        nested(i, j) = free[i] ⊊ free[j]
-        extra = Pair{Symbol,Vector}[:converged => collect(Bool, sub.converged)]
+        allunique(names) || throw(ArgumentError("dataset $ds: model names repeat within one likelihood setting: $names"))
+        fs = [free[f] for f in sub.fit]
+        nested(i, j) = fs[i] ⊊ fs[j]
+        extra = Pair{Symbol,Vector}[:fit => collect(sub.fit), :converged => collect(Bool, sub.converged)]
         for c in (:alpha, :omega_a)
             hasproperty(sub, c) && push!(extra, c => collect(sub[!, c]))
         end
         t = _aic_lrt_tables(names, collect(Int, sub.n_params), collect(Float64, sub.loglik), nested;
                             extra_cols = extra, skip = .!collect(Bool, sub.converged))
-        insertcols!(t.aic, 1, :dataset => fill(ds, nrow(t.aic)))
-        insertcols!(t.lrt, 1, :dataset => fill(ds, nrow(t.lrt)))
+        insertcols!(t.aic, 1, :dataset => fill(ds, nrow(t.aic)), :group => fill(gi, nrow(t.aic)))
+        insertcols!(t.lrt, 1, :dataset => fill(ds, nrow(t.lrt)), :group => fill(gi, nrow(t.lrt)))
         push!(aics, t.aic); push!(lrts, t.lrt)
     end
-    return (aic = vcat(aics...), lrt = vcat(lrts...))
+    return (aic = vcat(aics...; cols = :union), lrt = vcat(lrts...; cols = :union))
 end
 
 const _DEFAULT_COMPARISON_MODELS = (ExpoZero(), GammaZero(), ExpoExpo(), GammaExpo(), ExpoGamma(),
@@ -1055,14 +1068,68 @@ const _DEFAULT_COMPARISON_MODELS = (ExpoZero(), GammaZero(), ExpoExpo(), GammaEx
 
 function dfe_model_comparison(sfs, divergence;
                               models = collect(AbstractDFEModel, _DEFAULT_COMPARISON_MODELS),
+                              fixed::NamedTuple = NamedTuple(), bounds::NamedTuple = NamedTuple(),
                               cache::DFECache = DFECache(), kwargs...)
-    fits = DataFrame[]
+    # `fixed` and `bounds` reach each model restricted to the names it has (a bound on
+    # `ben_prop` applies to GammaExpo, not to GammaZero); a name no model has is an error.
+    names_of(m) = (n = MKtest.dfe_param_names(m); push!(n, :misorient);
+                   haskey(kwargs, :kernel) && append!(n, collect(keys(kernel_parameters(kwargs[:kernel])))); n)
+    allnames = union((names_of(m) for m in models)...)
+    for k in (keys(fixed)..., keys(bounds)...)
+        k in allnames || throw(ArgumentError("$k is not a parameter of any model in the comparison"))
+    end
+    pick(nt, m) = (n = names_of(m); NamedTuple(k => v for (k, v) in pairs(nt) if k in n))
+    fits = DFEResult[]
     for m in models
         @info "Fitting $(dfe_name(m))"
-        push!(fits, dfe_ml(sfs, divergence, m; cache = cache, kwargs...))
+        push!(fits, dfe_ml(sfs, divergence, m; cache = cache, fixed = pick(fixed, m),
+                           bounds = pick(bounds, m), kwargs...))
     end
-    all_fits = vcat(fits...; cols = :union)
-    t = dfe_model_comparison(all_fits)
-    return (aic = t.aic, lrt = t.lrt, fits = all_fits)
+    result = vcat(fits...)
+    t = dfe_model_comparison(result)
+    return (aic = t.aic, lrt = t.lrt, result = result)
 end
+
+"""
+    write_dfe_result(prefix, r::DFEResult) -> Vector{String}
+
+Write every table of `r` as CSV: `<prefix>_inference.csv`, `_params.csv`, `_sfs.csv`,
+`_divergence.csv`, `_config.csv`, and `_extra_<name>.csv` per extra table. Interval
+columns (`(lo, hi)` tuples) are written as `<name>_low` / `<name>_high`. Returns the paths.
+For one file with the tuples intact, `JLD2.save("r.jld2", "result", r)`.
+"""
+function write_dfe_result(prefix::AbstractString, r::DFEResult)
+    paths = String[]
+    for k in (:inference, :params, :sfs, :divergence, :config)
+        f = "$(prefix)_$(k).csv"
+        CSV.write(f, _split_intervals(getfield(r, k)))
+        push!(paths, f)
+    end
+    for (name, t) in r.extra
+        f = "$(prefix)_extra_$(name).csv"
+        CSV.write(f, _split_intervals(t))
+        push!(paths, f)
+    end
+    return paths
+end
+
+"""
+    read_dfe_result(prefix) -> DFEResult
+
+Read the tables written by `write_dfe_result`, joining `<name>_low` / `<name>_high` back
+into `(lo, hi)` tuples.
+"""
+function read_dfe_result(prefix::AbstractString)
+    rd(k) = _join_intervals(CSV.read("$(prefix)_$(k).csv", DataFrame))
+    dir, base = splitdir(prefix)
+    dir = isempty(dir) ? "." : dir
+    extra = OrderedDict{Symbol,DataFrame}()
+    for f in sort(readdir(dir))
+        pre, suf = base * "_extra_", ".csv"
+        (startswith(f, pre) && endswith(f, suf)) || continue
+        extra[Symbol(f[length(pre)+1:end-length(suf)])] = _join_intervals(CSV.read(joinpath(dir, f), DataFrame))
+    end
+    return DFEResult(rd(:inference), rd(:params), rd(:sfs), rd(:divergence), rd(:config), extra)
+end
+
 # <<< dfe_ml entry points

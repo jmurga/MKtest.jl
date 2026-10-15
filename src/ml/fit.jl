@@ -7,7 +7,8 @@
     build_layout(model, kernel, include_oer; fixed = (;), bounds = (;)) -> ParamLayout
 
 The parameter vector of a fit: the DFE parameters (`dfe_parameters` order), then
-`syno_orientation_error` (when the SFS is unfolded and it is not switched off), then
+`misorient` (the ancestral misorientation rate, when the SFS is unfolded and it is not
+switched off), then
 the kernel's parameter. `bounds` replaces bounds and `fixed` pins values, both by
 name; an unknown name is an error.
 """
@@ -23,7 +24,7 @@ function build_layout(model::AbstractDFEModel, kernel::AbstractLikelihoodKernel,
 
     oer_idx = 0
     if include_oer
-        push!(names, :syno_orientation_error); push!(bnds, (0.0, 0.1)); push!(ls, false)
+        push!(names, :misorient); push!(bnds, (0.0, 0.1)); push!(ls, false)
         oer_idx = length(names)
     end
 
@@ -62,7 +63,7 @@ function _opt_bounds(lay::ParamLayout)
              lay.log_scale[i] ? log(lay.bounds[i][2]) : lay.bounds[i][2]) for i in lay.opt_idx]
 end
 
-# The model's starts (with syno_orientation_error = 0.01 and the kernel's start),
+# The model's starts (with misorient = 0.01 and the kernel's start),
 # clamped to the bounds, then the centre of the box in optimizer space, then
 # `nb_rand_start` uniform draws in optimizer space (MersenneTwister(42), so a fit is
 # reproducible).
@@ -180,7 +181,8 @@ What a finished fit hands to `summarize`:
 
 - `data::DataInput`, `pre::PrecomputedData`, `model`, `params` (DFE parameters at the
   optimum, natural scale), `full_params` (with the nuisance parameters), `names`;
-- `theta`, `loglik`, `exp_neut`, `exp_sel` (fitted expected SFS), `kernel`, `disp`;
+- `theta`, `loglik`, `exp_neut`, `exp_sel` (fitted expected SFS, synonymous and
+  nonsynonymous), `r_j` (the fitted per-bin nuisance), `kernel`, `disp`;
 - the divergence decomposition at the ancestral Ne: `totN` (the denominator: the
   observed Dn under `SaturatedDivergence`, the DFE prediction otherwise), `pred_totN`
   (always the DFE prediction), `exp_div_N1`, `exp_div_N2`, `exp_div_N3` (expected Dn
@@ -200,6 +202,7 @@ struct FitContext{M<:AbstractDFEModel,P<:PrecomputedData,K<:AbstractLikelihoodKe
     loglik::Float64
     exp_neut::Vector{Float64}
     exp_sel::Vector{Float64}
+    r_j::Vector{Float64}
     kernel::K
     disp::Float64
     totN::Float64
@@ -243,7 +246,7 @@ function FitContext(f::_FitOutcome; nearly_neutral::Float64,
     nn = Float64(nearly_neutral)
     return FitContext(data, pre, obj.model, copy(obj.param_spec), copy(obj.full_param),
                       copy(obj.layout.names), theta, f.loglik, copy(obj.exp_neut), copy(obj.exp_sel),
-                      obj.kernel, _kernel_disp(obj), totN, pred(opt_lambda, Inf),
+                      copy(obj.r), obj.kernel, _kernel_disp(obj), totN, pred(opt_lambda, Inf),
                       pred(opt_lambda, -nn), pred(opt_lambda, 0.0), pred(opt_lambda, nn),
                       effL, opt_lambda, nn, alpha_ci_threshold, !obj.constrained_div)
 end
@@ -269,14 +272,14 @@ function summarize(::DFEMAlpha, c::FitContext)
         ona_lo = (omega_a + omega_na) * (1.0 - a_hi)
         ona_hi = (omega_a + omega_na) * (1.0 - a_lo)
     end
-    return (alpha = alpha, alpha_ci_low = a_lo, alpha_ci_high = a_hi,
-            omega_a = omega_a, omega_a_ci_low = oa_lo, omega_a_ci_high = oa_hi,
-            omega_na = omega_na, omega_na_ci_low = ona_lo, omega_na_ci_high = ona_hi,
+    return (alpha = alpha, alpha_ci = (a_lo, a_hi),
+            omega_a = omega_a, omega_a_ci = (oa_lo, oa_hi),
+            omega_na = omega_na, omega_na_ci = (ona_lo, ona_hi),
             omega_obs = omega_obs, alpha_div = alpha_div, alpha_dfe = alpha_dfe)
 end
 
 # Warn for every free DFE parameter whose estimate sits on a bound: a clamped value
-# is not an estimate. (Nuisance parameters are skipped: syno_orientation_error = 0 is
+# is not an estimate. (Nuisance parameters are skipped: misorient = 0 is
 # a common, legitimate optimum.)
 function _warn_pinned_bounds(lay::ParamLayout, full::Vector{Float64}, model::AbstractDFEModel)
     hits = String[]
@@ -370,30 +373,48 @@ function fit_model(data::DataInput, pre::PrecomputedData, model::AbstractDFEMode
                      alpha_ci_threshold = alpha_ci_threshold)
 
     n_params = fit.n_opt + (route_a ? 1 : 0)
-    free = [string(lay.names[i]) for i in lay.opt_idx]
-    route_a && push!(free, "Ne_ratio")
+    obj = fit.obj
 
-    row = OrderedDict{Symbol,Any}(
+    # one fit, as the pieces of the result tables (see DFEResult)
+    inference = OrderedDict{Symbol,Any}(
         :model => dfe_name(model), :n => data.n, :converged => fit.converged,
-        :loglik => fit.loglik, :aic => 2.0 * n_params - 2.0 * fit.loglik,
-        :n_params => n_params, :free_params => join(free, ","), :theta => fit.theta)
-    for (i, nm) in enumerate(lay.names)
-        _put!(row, nm, fit.obj.full_param[i])
-    end
-    route_a && _put!(row, :Ne_ratio, r_ml)
-    if fit.obj.exterior
-        # Mass beyond the outer cell edge, all assigned to that row; reported so a fit
-        # resting on it is visible.
-        _put!(row, :lethal_mass, dfe_mass_above(model, ctx.params, pre.s_ext_hi))
-        _put!(row, :neutral_mass, pre.s_ext_lo > 0 ? dfe_mass_below(model, ctx.params, pre.s_ext_lo) : 0.0)
-    end
+        :loglik => fit.loglik, :n_params => n_params, :theta => fit.theta)
     for s in summaries
         for (k, v) in pairs(summarize(s, ctx))
-            _put!(row, k, v)
+            _put!(inference, k, v)
         end
     end
-    return row
+
+    params = [(parameter = string(nm), kind = i <= lay.n_spec ? "dfe" : "nuisance",
+               value = obj.full_param[i], lower = lay.bounds[i][1], upper = lay.bounds[i][2],
+               free = i in lay.opt_idx,
+               at_bound = (i in lay.opt_idx) && _on_bound(obj.full_param[i], lay.bounds[i]))
+              for (i, nm) in enumerate(lay.names)]
+    route_a && push!(params, (parameter = "ne_ratio", kind = "nuisance", value = r_ml,
+                              lower = 1.0, upper = 50.0, free = true,
+                              at_bound = _on_bound(r_ml, (1.0, 50.0))))
+
+    sfs = (j = collect(1:data.n_bins), pn_obs = copy(data.specN), ps_obs = copy(data.specS),
+           pn_exp = ctx.exp_sel, ps_exp = ctx.exp_neut, r_j = ctx.r_j)
+
+    # Expected Dn by S class (GRAPES' prop_subst_*): S <= -nn, (-nn, 0], (0, nn], > nn.
+    # alpha = Dn_sadv / Dn_total, with Dn_total the observed Dn under SaturatedDivergence.
+    divergence = (Dn_obs = data.fixN, Ds_obs = data.fixS, Dn_total = ctx.totN,
+                  Dn_pred = ctx.pred_totN, lambda = ctx.lambda,
+                  Dn_sdel = ctx.exp_div_N1, Dn_wdel = ctx.exp_div_N2 - ctx.exp_div_N1,
+                  Dn_wadv = ctx.exp_div_N3 - ctx.exp_div_N2, Dn_sadv = ctx.totN - ctx.exp_div_N3)
+
+    extra = Dict{Symbol,NamedTuple}()
+    if obj.exterior
+        # Mass beyond the outer cell edges, assigned analytically (fitdadi's exterior
+        # terms); reported so a fit that rests on it is visible.
+        extra[:exterior] = (lethal_mass = dfe_mass_above(model, ctx.params, pre.s_ext_hi),
+                            neutral_mass = pre.s_ext_lo > 0 ? dfe_mass_below(model, ctx.params, pre.s_ext_lo) : 0.0)
+    end
+    return (inference = inference, params = params, sfs = sfs, divergence = divergence, extra = extra)
 end
+
+_on_bound(v, (lo, hi)) = isapprox(v, hi; rtol = 1e-4) || isapprox(v, lo; rtol = 1e-4, atol = lo == 0 ? 1e-10 : 0.0)
 
 function _put!(row::OrderedDict{Symbol,Any}, k::Symbol, v)
     haskey(row, k) && throw(ArgumentError("output column $k is produced twice (a parameter or summary name clashes)"))
@@ -431,7 +452,7 @@ function _objective_for(model::AbstractDFEModel, sfs::AbstractMatrix, div;
 end
 
 # `theta`: natural-scale values of every parameter of the layout, in order (DFE
-# parameters, then syno_orientation_error, then the kernel's).
+# parameters, then misorient, then the kernel's).
 function _loglik_at(model::AbstractDFEModel, sfs::AbstractMatrix, div, theta::AbstractVector{<:Real};
                     kwargs...)
     obj = _objective_for(model, sfs, div; kwargs...)

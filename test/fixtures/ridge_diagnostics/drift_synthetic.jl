@@ -19,7 +19,7 @@ for seed in (1, 2)
     for k in (10, 20, 50, 100, 200)
         s = k == 200 ? s400 : MKtest.project(s400, k)
         r = MKtest.dfe_ml(s, div, MKtest.GammaZero())
-        push!(out, "k=$k shape $(round(r.negGshape[1]; digits=3)) mean $(round(Int, r.negGmean[1])) alpha $(round(r.alpha[1]; digits=4))")
+        push!(out, "k=$k shape $(round(MKtest.param_values(r, :del_shape)[1]; digits=3)) mean $(round(Int, MKtest.param_values(r, :del_mean)[1])) alpha $(round(r.inference.alpha[1]; digits=4))")
     end
     println("seed $seed (truth shape 0.09, mean 1650):\n  ", join(out, "\n  "))
 end
