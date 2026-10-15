@@ -14,8 +14,8 @@ design is `docs/agents/briefs/task1_phase0_report.md` on dev.
 | `grids.jl` | `GrapesGrid`, `LogGammaGrid`, cell bounds, exterior edges, `fill_dfe_vals!` |
 | `cache.jl` | `PRFSojourn` counts, `PrecomputedData`, `DnCorrectionTable`, `DFECache`, `get_precomputed`, `dn_correction`, `discrete_row` |
 | `likelihood.jl` | `DataInput`, `ParamLayout`, `LikelihoodObjective` and `_loglik!`, CI, expected divergence |
-| `fit.jl` | `build_layout`, starting points, `run_optimizer`, `_fit`, `FitContext`, summaries, Route A, `fit_model` |
-| `api.jl` | `dfe_ml`, `dfe_model_comparison`, `_aic_lrt_tables`, internal `_objective_for` / `_loglik_at` |
+| `fit.jl` | `build_layout`, starting points, `run_optimizer`, `_fit`, `FitContext`, summaries, Route A, `fit_model`, internal `_objective_for` / `_loglik_at` (used by tests and fixtures) |
+| `src/methods.jl` (marked block at the end) | the entry points `dfe_ml`, `dfe_model_comparison`, `_aic_lrt_tables` and the input helpers; the gate skips that block |
 
 ## Algorithm (GRAPES)
 

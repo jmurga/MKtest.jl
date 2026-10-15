@@ -416,3 +416,47 @@ function _put!(row::OrderedDict{Symbol,Any}, k::Symbol, v)
     row[k] = v
     return row
 end
+
+# -----------------------------------------------------------------------------
+# Internal: the objective of one dataset, and the log-likelihood at given
+# parameters (used by the parity tests and fixtures)
+# -----------------------------------------------------------------------------
+
+function _objective_for(model::AbstractDFEModel, sfs::AbstractMatrix, div;
+                        integrator::AbstractIntegrator = ExactSojourn(),
+                        grid::AbstractSGrid = GrapesGrid(),
+                        dominance::AbstractDominance = Additive(),
+                        expectation::AbstractSFSExpectation = PRFSojourn(),
+                        kernel::AbstractLikelihoodKernel = PoissonKernel(),
+                        quadrature::AbstractDFEQuadrature = MidpointDensity(),
+                        div_model::AbstractDivergenceModel = SaturatedDivergence(),
+                        demography::AbstractDemography = NuisanceRj(),
+                        ne_ratio::Float64 = 1.0, fold::Bool = false,
+                        no_syn_orient_error::Bool = false,
+                        fixed::NamedTuple = NamedTuple(), cache::DFECache = DFECache())
+    n = Int(round(maximum(sfs[:, 1]))) + 1
+    pre = get_precomputed(cache, n; integrator = integrator, grid = grid,
+                          dominance = dominance, expectation = expectation)
+    data = build_data_input(sfs, first(_div_list(div)), fold, uses_divergence(div_model);
+                            neutral_shape = pre.neutral_shape)
+    lay = build_layout(model, kernel, (!fold) && (!no_syn_orient_error); fixed = fixed)
+    return LikelihoodObjective(data, pre, model, lay; constrained_div = !divergence_free(div_model),
+                               no_syn_orient_error = no_syn_orient_error,
+                               free_rj = free_rj(demography), ne_ratio = ne_ratio,
+                               kernel = kernel, quad = quadrature)
+end
+
+# `theta`: natural-scale values of every parameter of the layout, in order (DFE
+# parameters, then syno_orientation_error, then the kernel's).
+function _loglik_at(model::AbstractDFEModel, sfs::AbstractMatrix, div, theta::AbstractVector{<:Real};
+                    kwargs...)
+    obj = _objective_for(model, sfs, div; kwargs...)
+    lay = obj.layout
+    length(theta) == length(lay.names) ||
+        throw(ArgumentError("_loglik_at: $(length(theta)) values for the parameters $(lay.names)"))
+    for (i, idx) in enumerate(lay.fixed_idx)
+        obj.full_param[idx] = lay.fixed_vals[i]
+    end
+    x = [_to_opt(Float64(theta[i]), lay.log_scale[i]) for i in lay.opt_idx]
+    return -obj(x)
+end
