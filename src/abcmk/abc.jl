@@ -27,18 +27,37 @@ function _dataset_files(output_folder::String, prefix::String)
 end
 
 """
-	ABCreg(output_folder, S, P, tol, abcreg)
+    ABCreg(; output_folder, S, P = 12, tol, rm_summaries = false, abcreg = nothing,
+           T = false, L = false) -> Vector{DataFrame}
 
-Performing ABC inference using ABCreg. Please, be sure the input folder contain the observed and summary statistics produc  ed by MKtest.summary_statistics().
+Run the ABCreg binary (rejection plus local-linear regression ABC,
+[Thornton 2009](https://doi.org/10.1186/1471-2156-10-35)) on every dataset of
+`output_folder`, as written by [`summary_statistics`](@ref), and read the adjusted
+posteriors.
 
-# Arguments
- - `output_folder::String` : folder containing the observed data and summary estatistics. It will be used to output the posterior distributions
- - `P::Int64` : number of parameters to infer.
- - `S::Int64` : number of summary stastitics to perform the inference.
- - `tol::Real` : number of accepted values at ABC inference, a positive whole number (`1000`, `1e3`).
- - `abcreg::String` : path to ABCreg binary.
-# Output
- - `posteriors:Vector{Matrix{Float64}}`: posteriors distributions estimated by ABCreg.
+Each pair `alphas_i.txt.gz` / `summstat_i.txt.gz` is run on its own thread, accepting the
+`tol` closest table rows; ABCreg writes `out_i*.post.gz`. If the summaries have no ω
+columns, `P` is reduced by 4.
+
+# Keywords
+ - `output_folder::String`: folder with the observed α(x) and the summaries.
+ - `S::Int64`: number of summary statistics, `length(param.dac)`.
+ - `P::Int64 = 12`: number of parameters (leading columns of the summaries).
+ - `tol::Real`: number of accepted rows, a positive whole number (`1000`, `1e3`).
+ - `rm_summaries::Bool = false`: delete the `summstat_*`, `alphas_*` and `out_*` files
+   afterwards.
+ - `abcreg::Union{Nothing,String} = nothing`: path to the binary; `nothing` uses the
+   copy shipped in `scripts/reg`.
+ - `T`, `L::Bool = false`: not passed to ABCreg; only checked against each other.
+
+# Returns
+One `DataFrame` per dataset, in dataset order, with columns
+`α_weak, α_strong, α, ωₐ_weak, ωₐ_strong, ωₐ, ωₙₐ, γ₋, β, γ₊, γ₊₊, B` (12), or
+the same without the four ω columns (8) when the summaries have none. `γ₋` is the mean
+deleterious coefficient (absolute value), `β` the DFE shape, `γ₊`/`γ₊₊` the weakly and
+strongly beneficial coefficients, and `B` is B x 1000.
+Datasets whose ABCreg output is missing or empty are dropped with a warning, so the
+rows after them no longer match the dataset numbers.
 """
 function ABCreg(;
     output_folder::String,
@@ -51,7 +70,7 @@ function ABCreg(;
     L::Bool=false
 )
 
-    @assert (T == true & L != true)  |  (T != true & L == true)  "Cannot perform both transformation at the same time"
+    @assert !(T && L) "Cannot perform both transformation at the same time"
 
     if isnothing(abcreg)
         abcreg = abspath(joinpath(@__DIR__, "..", "..", "scripts", "reg"))
@@ -148,21 +167,29 @@ end
 
 
 """
-	summary_abc(posteriors; stat)
+    summary_abc(posteriors; stat = "Mode") -> OrderedDict
 
-Posterior statistics: Min., 2.5% Perc., Median, Mean, Mode, 97.5% Perc. and Max. of every
-parameter. The mode follows the R package abc (maximum of a kernel density estimate).
+Summarise each posterior: minimum, 2.5% quantile, median, mean, mode, 97.5% quantile and
+maximum of every column. The mode is the maximum of a kernel density estimate, as in the
+R package abc. [`abcmk`](@ref) calls it with `stat = "median"`.
 
 # Arguments
- - `posteriors::Vector{DataFrame}` or `Vector{Matrix{Float64}}`: one posterior per dataset,
-   with 8 (no ω) or 12 columns.
- - `stat::String`: statistic returned as the point estimate: "Min.", "Median", "Mean",
-   "Mode" or "Max" (case-insensitive). Default "Mode".
-# Output
- - `OrderedDict` with
-   - `:inference`: one row per dataset with the chosen statistic.
-   - `:quantiles`: the same values as strings with the 95% interval, `"0.2 [0.1-0.3]"`.
-   - `:stats`: all statistics, a `Stats` column then one row per statistic and dataset.
+ - `posteriors`: `Vector{DataFrame}` (as [`ABCreg`](@ref) returns) or
+   `Vector{Matrix{Float64}}` with 8 or 12 columns, one posterior per dataset.
+
+# Keywords
+ - `stat::String = "Mode"`: point estimate, one of `"Min."`, `"Median"`, `"Mean"`,
+   `"Mode"` or `"Max"` (case-insensitive; `"min"` also works). Anything else throws an
+   `ArgumentError`.
+
+# Returns
+An `OrderedDict` with
+ - `:inference`: `DataFrame`, one row per dataset with the chosen statistic of every
+   parameter;
+ - `:quantiles`: the same as strings with the 95% interval, `"0.2 [0.1-0.3]"`, rounded to
+   3 digits;
+ - `:stats`: `DataFrame` with a `Stats` column and, per dataset, 7 rows (one per
+   statistic).
 """
 function summary_abc(posteriors::Vector{DataFrame}; stat::String = "Mode")
     @info "Computing statistics over posteriors distributions"
@@ -216,6 +243,39 @@ end
 #############
 
 
+"""
+    abc(; output_folder, S, P = 12, tol, transformation = "none",
+        kernel = "epanechnikov", rm_summaries = false) -> OrderedDict
+
+Pure-Julia ABC on every dataset of `output_folder`, as written by
+[`summary_statistics`](@ref): rejection followed by local-linear regression adjustment
+with heteroscedastic correction, a port of the R package abc (`method = "loclinear"`).
+The alternative to [`ABCreg`](@ref) in `abcmk(...; abc_method = "abc")`.
+
+Each pair `alphas_i.txt.gz` / `summstat_i.txt.gz` goes through `abc_loclinear`,
+one dataset per thread (BLAS runs on one thread meanwhile). If the summaries have no ω
+columns, `P` is reduced by 4.
+
+# Keywords
+ - `output_folder::String`: folder with the observed α(x) and the summaries.
+ - `S::Int64`: number of summary statistics, `length(param.dac)`.
+ - `P::Int64 = 12`: number of parameters (leading columns of the summaries).
+ - `tol::Real`: number of accepted rows, a positive whole number.
+ - `transformation::String = "none"`: parameter transformation before the regression,
+   `"none"`, `"log"` or `"tan"` (see `abc_loclinear`).
+ - `kernel::String = "epanechnikov"`: weighting kernel, `"epanechnikov"`, `"gaussian"`,
+   `"rectangular"`, `"triangular"`, `"biweight"` or `"cosine"`.
+ - `rm_summaries::Bool = false`: delete the `summstat_*` and `alphas_*` files afterwards.
+
+# Returns
+`OrderedDict("rejection" => posteriors, "loclinear" => adjusted)`: two
+`Vector{DataFrame}`, one per dataset, with the accepted and the regression-adjusted
+values. Columns
+`α_weak, α_strong, α, ωₐ_weak, ωₐ_strong, ωₐ, ωₙₐ, γ₋, β, γ₊, γ₊₊, B` (12), or
+the same without the four ω columns (8) when the summaries have none. `γ₋` is the mean
+deleterious coefficient (absolute value), `β` the DFE shape, `γ₊`/`γ₊₊` the weakly and
+strongly beneficial coefficients, and `B` is B x 1000.
+"""
 function abc(; output_folder::String,
     S::Int64,
     P::Int64 = 12,
@@ -225,10 +285,7 @@ function abc(; output_folder::String,
     rm_summaries::Bool = false
 )
 
-    # Change BLAS threads to 1 to proper parallel.
-    nthreads_og = get_num_threads()
-    set_num_threads(1)
-
+    kernel, transformation = lowercase(kernel), lowercase(transformation)
     @assert lowercase(kernel) ∈ ["gaussian", "epanechnikov", "rectangular", "triangular", "biweight", "cosine"] "Kernel is incorrectly defined. Use gaussian, epanechnikov, rectangular, triangular, biweight or cosine"
     @assert lowercase(transformation) ∈ ["none", "log", "tan"] "Apply one of the following transformations: none, log, tan"
 
@@ -237,6 +294,11 @@ function abc(; output_folder::String,
     param_summaries = _dataset_files(output_folder, "summstat_")
 
     tol = _as_count(tol, "tol")
+
+    # Change BLAS threads to 1 to proper parallel; restored even if a fit throws.
+    nthreads_og = get_num_threads()
+    set_num_threads(1)
+    try
 
     # Change P if omega was not estimated
     if size(CSV.read(param_summaries[1],matrix,header=false), 2) != (P + S)
@@ -257,8 +319,6 @@ function abc(; output_folder::String,
         rm.(filter(x -> occursin("summstat", x) || occursin("alphas_", x), readdir(output_folder, join = true)))
     end
 
-    set_num_threads(nthreads_og)
-
     if P != 12
         c_names = [:α_weak, :α_strong, :α, :γ₋, :β,:γ₊,:γ₊₊,:B]
     else
@@ -269,6 +329,9 @@ function abc(; output_folder::String,
     posteriors_adjusted = map(x -> DataFrame(x,c_names),posteriors_adjusted)
 
     return OrderedDict("rejection"=>posteriors, "loclinear"=>posteriors_adjusted)
+    finally
+        set_num_threads(nthreads_og)
+    end
 end
 
 function normalise(x::Union{SubArray,Float64},y::SubArray)
@@ -305,7 +368,7 @@ function rejection(target::Vector{Float64},sumstat::Matrix{Float64},param::Matri
     elseif(kernel == "rectangular")
         @.  dist[n_idx]/n_limit
     elseif(kernel == "gaussian")
-        @.  1/sqrt(2*pi)*exp(-0.5*(dist/(ds/2))^2)
+        @.  1/sqrt(2*pi)*exp(-0.5*(dist[n_idx]/(n_limit/2))^2)
     elseif(kernel == "triangular")
         @.  1 - abs(dist[n_idx]/n_limit)
     elseif(kernel == "biweight")
@@ -341,9 +404,43 @@ end
 
 function undo_tangent_transfromation(x::Float64, minval::Float64, maxval::Float64)
     # Undo the Hamilton tangent transformation
-    return (minval - 1e-4) + (2 / π) * ((maxval + 1e-4) - (minval - 1e-4)) * atan(exp(y))
+    return (minval - 1e-4) + (2 / π) * ((maxval + 1e-4) - (minval - 1e-4)) * atan(exp(x))
 end
 
+"""
+    abc_loclinear(target_file, param_summaries_file; P, tol, transformation = "none",
+                  kernel = "epanechnikov") -> (accepted, adjusted)
+
+Rejection and local-linear regression ABC for one dataset, a port of `abc(...,
+method = "loclinear")` from the R package abc.
+
+`target_file` holds the observed summary statistics (one row) and
+`param_summaries_file` the table, `P` parameter columns followed by the summary
+statistics, as written by [`summary_statistics`](@ref).
+
+1. Each statistic is scaled by its median absolute deviation over the table, and the
+   `tol` rows closest to the target in Euclidean distance are accepted.
+2. Accepted rows are weighted by `kernel` with bandwidth the largest accepted distance:
+   `"epanechnikov"` (default), `"gaussian"`, `"rectangular"`, `"triangular"`,
+   `"biweight"` or `"cosine"` (lower case).
+3. The parameters are transformed: `"none"`, `"log"` (zeros replaced by the smallest
+   non-zero value; throws an `ArgumentError` if any accepted value is negative, e.g. a
+   negative `ωₙₐ`) or `"tan"` (the tangent transformation of Hamilton et al.
+   2005, bounded by the table's range).
+4. A weighted linear regression of each parameter on the statistics corrects the accepted
+   values toward the target; a second regression of the log squared residuals rescales
+   them (heteroscedastic correction).
+5. Both sets are back-transformed.
+
+# Keywords
+ - `P::Int64`: number of parameter columns.
+ - `tol::Int64`: number of accepted rows.
+ - `transformation::String = "none"`, `kernel::String = "epanechnikov"`: as above.
+
+# Returns
+`(accepted, adjusted)`: two `tol x P` matrices, the rejection sample and the
+regression-adjusted posterior.
+"""
 function abc_loclinear(target_file::String,param_summaries_file::String;P::Int64,tol::Int64,transformation::String="none",kernel::String= "epanechnikov")
 
     # Reading into matrix using Tables.matrix
@@ -357,6 +454,7 @@ function abc_loclinear(target_file::String,param_summaries_file::String;P::Int64
 
     # transformation="none";kernel="epanechnikov";tol=0.025
 
+    kernel, transformation = lowercase(kernel), lowercase(transformation)
     @assert lowercase(kernel) ∈ ["gaussian", "epanechnikov", "rectangular", "triangular", "biweight", "cosine"] "Kernel is incorrectly defined. Use gaussian, epanechnikov, rectangular, triangular, biweight or cosine"
     @assert lowercase(transformation) ∈ ["none", "log","tan"] "Apply one of the following transformations: none, log, tan"
 
@@ -375,8 +473,8 @@ function abc_loclinear(target_file::String,param_summaries_file::String;P::Int64
 
     ## Transform parameters
     ## ######################
-    if any(param .<= 0 .&& transformation == "log")
-        @warn "log transform: values out of bounds - correcting..."
+    if transformation == "log" && any(<(0), param_accepted)
+        throw(ArgumentError("log transformation needs non-negative parameters; use \"tan\" or \"none\""))
     end
 
     for (i,v) ∈ enumerate(eachcol(param_accepted))
@@ -385,7 +483,6 @@ function abc_loclinear(target_file::String,param_summaries_file::String;P::Int64
         elseif transformation == "log"
             if(minimum(v) <= 0)
                 v[findall(iszero, v)] .= minimum(filter(!iszero,v))
-                @show minimum(filter(!iszero,v))
             end
             @. v .= log(v)
         elseif transformation == "tan"
@@ -431,11 +528,11 @@ function abc_loclinear(target_file::String,param_summaries_file::String;P::Int64
     # Back transform parameter values
     for i=1:num_params
         if(transformation == "log")
-            param_accepted[:,i] .= exp(param_accepted[:,i])
-            param_adjusted[:,i] .= exp(param_adjusted[:,i])
+            param_accepted[:,i] .= exp.(param_accepted[:,i])
+            param_adjusted[:,i] .= exp.(param_adjusted[:,i])
         elseif(transformation == "tan")
-            param_accepted[:,i] .= undo_tangent_transfromation(param_accepted[:,i],mins[i],maxs[i])
-            param_adjusted[:,i] .= undo_tangent_transfromation(param_adjusted[:,i],mins[i],maxs[i])
+            param_accepted[:,i] .= undo_tangent_transfromation.(param_accepted[:,i],mins[i],maxs[i])
+            param_adjusted[:,i] .= undo_tangent_transfromation.(param_adjusted[:,i],mins[i],maxs[i])
         end
     end
 

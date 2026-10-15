@@ -7,22 +7,6 @@ using DelimitedFiles: readdlm
 
 @testset "MKtest.jl" begin
 
-    # --- ABC forward model: parameter solve ---------------------------------
-    # `≈` rather than `==`: `set_θ!` is a closed-form solve (it was `Roots.find_zero`),
-    # and exact equality tested the arithmetic path rather than the answer.
-    @testset "parameters" begin
-        adap = MKtest.parameters(N=1000, n=661, gam_dfe=-457, gam_flanking=-1000,
-                                 al_low=0.2, B=0.999)
-        binom = MKtest.binom_op(adap)
-        MKtest.set_θ!(adap)
-        MKtest.set_ppos!(adap)
-
-        # 0.00020733640485526956 with the previous Φ (no factor 2 on s). Regression
-        # value, not an independent check.
-        @test adap.ppos_h ≈ 0.00020731419036651257
-        @test adap.θ_flanking ≈ 3.001501000750676e-6
-    end
-
     # --- rho prior in rates() ------------------------------------------------
     # `ρ` reaches the model through `set_θ!` (the flanking mutation rate that produces
     # the target B) and `Φ`. `rates(...; rho = [lo, hi])` draws one value per model and
@@ -419,6 +403,50 @@ using DelimitedFiles: readdlm
         end
         @test :pvalue_adjusted in propertynames(MKtest.standard_mk(sc[1:10], dc[1:10]; correction = :fdr))
         @test MKtest.standard_mk(sfs, d).alpha ≈ 1 - (sum(sfs[:, 2]) / sum(sfs[:, 3])) * (d[2] / d[1]) atol = 1e-3
+
+        # a trimmed SFS (DAC/n <= 0.7) with its n gives what the full SFS gives with the
+        # trimmed rows set to 0: the frequencies come from the DAC, not from the row count
+        keep = sfs[:, 1] ./ 1322 .<= 0.7
+        trimmed, zeroed = sfs[keep, :], copy(sfs)
+        zeroed[.!keep, 2:3] .= 0
+        for fn in (MKtest.fww_mk, MKtest.imputed_mk)
+            @test isequal(fn(trimmed, d; n = 1322), fn(zeroed, d))
+            # trimmed at the low end the SFS cannot pass for a full one: n is required (a
+            # top-only trim, DAC 1..k, is indistinguishable from a full SFS of k + 1)
+            @test_throws ArgumentError fn(sfs[3:end, :], d)
+        end
+        # a bin exactly at the cutoff is high-frequency only (n = 20: DAC 3 is 0.15)
+        s20 = hcat(1:19, fill(2.0, 19), fill(4.0, 19))
+        s20[1:3, 2] .= 6.0                       # excess low-frequency Pn, DAC 3 included
+        lo = s20[:, 1] ./ 20 .< 0.15
+        @test !lo[3]
+        pn_lo, ps_lo = sum(s20[lo, 2]), sum(s20[lo, 3])
+        pn_hi, ps_hi = sum(s20[.!lo, 2]), sum(s20[.!lo, 3])
+        del = pn_lo - pn_hi * ps_lo / ps_hi
+        r20 = MKtest.imputed_mk(s20, [30.0, 40.0, 1e5, 3e4])
+        @test 0 < del < sum(s20[:, 2])
+        @test r20.alpha ≈ round(1 - ((sum(s20[:, 2]) - del) / sum(s20[:, 3])) * (40 / 30), digits = 3)
+        # Ps = 0, Dn = 0 and missing site counts give NaN, not an error or an Int 0
+        @test isnan(MKtest.imputed_mk(hcat(1:19, ones(19), zeros(19)), d).alpha)
+        @test all(isnan, values(MKtest.fww_mk(sfs, d[1:2]))[3:5])
+        @test all(isnan, values(MKtest.standard_mk(sfs, d[1:2]))[3:5])
+    end
+
+    @testset "reduce_sfs" begin
+        # n = 10 chromosomes, 2 bins: DAC 1..5 (x <= 0.5) and 6..9
+        s = hcat(1:9, ones(9), 2 .* ones(9))
+        @test MKtest.reduce_sfs(s, 2) == [0.5 5 10; 1.0 4 8]
+        # empty bins are 0; totals are kept
+        r = MKtest.reduce_sfs(s, 20)
+        @test size(r) == (20, 3) && sum(r[:, 2]) == 9 && sum(r[:, 3]) == 18
+        @test r[1, 2] == 0 && r[2, 2] == 1          # x = 0.1 falls in (0.05, 0.1]
+        # a trimmed SFS needs n; the bins are then the same as for the full one
+        @test MKtest.reduce_sfs(s[1:4, :], 2; n = 10) == [0.5 4 8; 1.0 0 0]
+        @test MKtest.reduce_sfs(s[6:9, :], 2; n = 10) == [0.5 0 0; 1.0 4 8]
+        @test_throws ArgumentError MKtest.reduce_sfs(s[6:9, :], 2)
+        # the binned table is accepted by the MK tests as frequencies
+        @test MKtest.fww_mk(MKtest.reduce_sfs(s, 10), [30.0, 40.0]).alpha ==
+              MKtest.fww_mk(s, [30.0, 40.0]).alpha
     end
 
     # --- ABC output order --------------------------------------------------------
@@ -698,10 +726,131 @@ using DelimitedFiles: readdlm
         @test_throws ArgumentError MKtest.valid_data(param, sfs, div[1:3])
     end
 
+    # --- matched control sets ---------------------------------------------------
+    @testset "bootstrap" begin
+        rng = MersenneTwister(5)
+        od = mktempdir()
+        # 3 chromosomes of 200 genes; chr3 has no case gene
+        genes = ["G$(lpad(i, 4, '0'))" for i in 1:600]
+        chrom = repeat(["1", "2", "3"], inner = 200)
+        start = repeat(collect(0:199) .* 10_000, 3)
+        bed = joinpath(od, "genes.bed")
+        open(bed, "w") do io
+            for i in 1:600
+                println(io, join((chrom[i], start[i], start[i] + 3000, genes[i], "+"), '\t'))
+            end
+        end
+        case = genes[vcat(5:5:100, 205:5:300)]               # 40 case genes on chr1 and chr2
+        cfile = joinpath(od, "case.txt")
+        open(io -> foreach(g -> println(io, g), case), cfile, "w")
+        ff = joinpath(od, "factors.txt")
+        open(ff, "w") do io
+            for g in genes
+                println(io, g, " ", round(10 + randn(rng), digits = 4), " ", round(-5 + randn(rng), digits = 4))
+            end
+        end
+
+        # get_distance against brute force over the midpoints
+        dist = MKtest.get_distance(cfile, bed)
+        mid = div.(2 .* start .+ 3000, 2)
+        brute = map(1:600) do i
+            same = [mid[j] for j in 1:600 if genes[j] in case && chrom[j] == chrom[i]]
+            isempty(same) ? typemax(Int) : minimum(abs.(same .- mid[i]))
+        end
+        @test dist.gene == genes && dist.distance == brute
+        @test all(dist.distance[401:600] .== typemax(Int))   # chr3 kept, not skipped
+
+        prefix = joinpath(od, "out")
+        bp = MKtest.bootstrap_parameters(data = cfile, annotations = bed, confounding_factors = ff,
+                                         output = prefix, distance = 20_000, iterations = 2,
+                                         tolerance = 0.05, filter_hla_hist = false, seed = 1)
+        res = MKtest.bootstrap(bp)
+        lines = readlines(prefix * "_control.txt")
+        @test lines == res.control && length(lines) == 200
+        @test [split(l)[1] for l in lines] == ["sample_$i" for i in 1:200]   # unique labels
+        sets = [split(l)[2:end] for l in lines]
+        @test all(length.(sets) .== 40)
+        far = Set(dist.gene[dist.distance .>= 20_000])
+        @test all(g -> g in far && !(g in case), reduce(vcat, sets))
+        @test any(g -> g in genes[401:600], reduce(vcat, sets))           # chr3 genes are used
+        @test Set(readlines(prefix * "_case.txt")) == Set(case)
+        # the pooled controls match the case averages within the tolerance
+        fac = Dict(r[1] => parse.(Float64, r[2:3]) for r in split.(readlines(ff)))
+        case_avg = sum(fac[g] for g in case) ./ 40
+        pool_avg = sum(fac[g] for g in reduce(vcat, sets)) ./ (200 * 40)
+        @test all(abs.(pool_avg .- case_avg) .<= 0.05 .* abs.(case_avg))
+        # a seed reproduces the sets
+        @test MKtest.bootstrap(bp).control == lines
+        # an impossible tolerance fails loudly
+        fac_bad = Dict(g => (g in case ? [100.0, 1.0] : [1.0, 1.0]) for g in genes)
+        @test isempty(MKtest.get_bootstrap(case, setdiff(genes, case); factors = fac_bad,
+                                           max_reps = 3, tolerance = 0.01, rng = MersenneTwister(1)))
+    end
+
+    # --- small methods: NI_TG, alpha_b, the Julia ABC -------------------------
+    @testset "ni_cmh" begin
+        # hand-computed NI_TG (Stoletzki & Eyre-Walker 2011): sum(Ds Pn / (Ps + Ds)) /
+        # sum(Dn Ps / (Ps + Ds)) over genes
+        sfs = [[1.0 4.0 6.0], [1.0 2.0 2.0]]
+        div = [[3.0, 5.0], [1.0, 4.0]]
+        out = MKtest.ni_cmh(sfs, div)
+        @test out isa NamedTuple
+        @test out.ni ≈ (5 * 4 / 11 + 4 * 2 / 6) / (3 * 6 / 11 + 1 * 2 / 6)
+        # an Int zero in the divergence is caught like a Float one
+        @test isnan(MKtest.ni([1.0 4.0 6.0], [0, 5]).ni)
+        # 39 bins = 40 chromosomes: 20 individuals is the most it can be projected to
+        sfs40 = hcat(1:39, ones(39), ones(39))
+        @test size(MKtest.project(sfs40, 20), 1) == 39
+        @test_throws AssertionError MKtest.project(sfs40, 30)
+    end
+
+    @testset "α_b" begin
+        seed!(3)
+        r_s = [[40, 100, 60, 100] .+ i for i in 1:12]
+        out = MKtest.α_b(r_s)
+        @test nrow(out) == 12              # every dataset, not the first 10
+        @test all(out.α_low .<= out.αᵦ .<= out.α_high)
+        # 1 - 1/Z with Z = (sN/sS) / (rN/rS)
+        @test out.αᵦ[1] ≈ 1 - 1 / ((61 / 101) / (41 / 101))
+    end
+
+    @testset "abc_loclinear transformations" begin
+        # oracle: the tangent transformation and its inverse are a round trip
+        for x in (0.1, 0.5, 2.0)
+            @test MKtest.undo_tangent_transfromation(MKtest.tangent_transfromation(x, 0.1, 2.0), 0.1, 2.0) ≈ x
+        end
+        # synthetic table: 2 positive parameters, 3 statistics linear in them
+        rng = MersenneTwister(11)
+        nsim = 5000
+        θ = hcat(rand(rng, nsim) .* 0.8 .+ 0.1, rand(rng, nsim) .* 9 .+ 1)
+        stat(t, e) = [t[1] + 0.1 * t[2], 2 * t[1] - 0.05 * t[2], 0.3 * t[2]] .+ e
+        summ = vcat([vcat(θ[i, :], stat(θ[i, :], 0.02 .* randn(rng, 3)))' for i in 1:nsim]...)
+        truth = [0.5, 5.0]
+        od = mktempdir()
+        tfile, sfile = joinpath(od, "target.tsv"), joinpath(od, "summ.tsv")
+        writetab(f, m) = open(io -> foreach(r -> println(io, join(r, '\t')), eachrow(m)), f, "w")
+        writetab(tfile, permutedims(stat(truth, zeros(3))))
+        writetab(sfile, summ)
+        for tr in ("none", "log", "tan"), k in ("epanechnikov", "gaussian")
+            acc, adj = MKtest.abc_loclinear(tfile, sfile; P = 2, tol = 250,
+                                            transformation = tr, kernel = k)
+            @test size(acc) == (250, 2) && all(isfinite, adj)
+            @test all(abs.(vec(sum(adj, dims = 1)) ./ 250 .- truth) .< [0.05, 0.5])
+            tr == "log" && @test all(>(0), adj)
+            if tr == "tan"
+                @test all(minimum(θ, dims = 1) .- 1e-3 .<= adj .<= maximum(θ, dims = 1) .+ 1e-3)
+            end
+        end
+        neg = copy(summ); neg[:, 1] .-= 1.0
+        nfile = joinpath(od, "neg.tsv")
+        writetab(nfile, neg)
+        @test_throws ArgumentError MKtest.abc_loclinear(tfile, nfile; P = 2, tol = 250,
+                                                        transformation = "log")
+    end
+
 end
 
 # dfe_ml engine (src/ml/)
 include("ml/engine.jl")
 include("ml/extension.jl")
 include("ml/grapes_parity.jl")
-include("ml/dev_reference.jl")

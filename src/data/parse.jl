@@ -3,42 +3,54 @@
 ########################
 
 """
-    parse_sfs(data; sample_size, cutoff, gene_list, mode, sfs_columns, div_columns, l_columns, ploidy)
+    parse_sfs(data; sample_size, cutoff = [0.0, 1.0], gene_list = nothing, mode = :case,
+              sfs_columns = [3, 5], div_columns = [6, 7], l_columns = [8, 9], ploidy = 2)
 
-Function to parse polymorphism and divergence by subset of genes. The input data is based on supplementary material described at [Uricchio et al. 2019](https://doi.org/10.1038/s41559-019-0890-6). Please be sure the file is tabulated.
+Read a gene table into a raw SFS, the divergence counts and the alpha(x) table.
 
-| GeneId | Pn | DAF seppareted by commas | Ps | DAF separated by commas | Dn | Ds |
-|--------|----|--------------------------|----|-------------------------|----|----|
-| XXXX   | 0  | ,0,0,0,0,0,0,0,0         | 0  | ,0,0,0,0,0,0,0,0        | 0  | 0  |
-| XXXX   | 0  | ,0,0,0,0,0,0,0,0         | 0  | ,0,0,0,0,0,0,0,0        | 0  | 0  |
-| XXXX   | 0  | ,0,0,0,0,0,0,0,0         | 0  | ,0,0,0,0,0,0,0,0        | 0  | 0  |
+`data` is a tab-separated table with one row per gene and no header (Uricchio et al.
+2019, https://doi.org/10.1038/s41559-019-0890-6), or the same table as a `DataFrame`:
 
-# Arguments
- - `data`: path to the tab-separated polymorphism and divergence table, or a `DataFrame`.
- - `sample_size::Int64`: number of sampled individuals; the SFS has `sample_size * ploidy - 1` bins.
- - `cutoff::Vector{Float64}`: frequency range to filter the SFS. Default `[0.0, 1.0]`.
- - `gene_list::Union{Nothing,Vector{S},S}`: path to gene list file or vector of gene IDs. Default `nothing`.
-   File formats: one gene per line (e.g. `test_case.txt`, controlled by `mode`); or multiple genes
-   per row space-separated (e.g. `test_control.txt`, auto-detected -- always returns one SFS per row).
- - `mode::Symbol`: controls output when `gene_list` has one gene per line. Default `:case`.
-   - `:case` -- single merged SFS for all listed genes.
-   - `:gene` -- one SFS per gene plus an aggregated total as the last element.
- - `sfs_columns::Vector{Int64}`: column numbers for Pn and Ps frequencies. Default `[3, 5]`.
- - `div_columns::Vector{Int64}`: column numbers for Dn and Ds counts. Default `[6, 7]`.
- - `l_columns::Vector{Int64}`: column numbers for Ln and Ls site counts. Default `[8, 9]`.
- - `ploidy::Int`: chromosomes per individual. Default `2`; `1` for isolines or haploids.
+| column | content |
+|---|---|
+| 1 | gene ID |
+| 2 | Pn |
+| 3 | derived allele frequencies of the nonsynonymous polymorphisms, `,0.0008,0.0015,` |
+| 4 | Ps |
+| 5 | derived allele frequencies of the synonymous polymorphisms |
+| 6, 7 | Dn, Ds |
+| 8, 9 | Ln, Ls, the nonsynonymous and synonymous site counts (optional) |
+
+Frequencies are rounded to 4 digits (3 when `sample_size * ploidy < 100`) and matched
+to the grid `i / (sample_size * ploidy)`; zeros are ignored. A frequency off the grid
+throws a `DimensionMismatch`, except with a multi-set `gene_list`, where it is skipped.
+Without the site-count columns, Ln and Ls are 0.
+
+# Keywords
+ - `sample_size::Int64`: number of sampled individuals; the full SFS has
+   `sample_size * ploidy - 1` rows.
+ - `ploidy::Int`: chromosomes per individual, `1` for inbred lines or haploids.
+ - `cutoff::Vector{Float64}`: frequency range `[lo, hi]` kept, both ends included. Rows
+   are removed without renumbering, so column 1 stays the true DAC. A trimmed SFS cannot
+   be given to [`project`](@ref) or `dfe_ml`.
+ - `gene_list`: a `Vector` of gene IDs, or the path of a file (plain or `.gz`) with one
+   ID per line, or several space-separated IDs per line (one set per line, detected
+   automatically). IDs absent from the table are skipped silently.
+ - `mode::Symbol`: `:case` (one SFS for all selected genes) or `:gene` (one SFS per
+   gene plus their total as the last element). Ignored for a multi-set file; any other
+   value acts as `:case`.
+ - `sfs_columns`, `div_columns`, `l_columns`: column numbers of the Pn and Ps
+   frequencies, of Dn and Ds, and of Ln and Ls.
 
 # Returns
 Three values, in this order:
- - `Matrix{Float64}`: Site Frequency Spectrum (non-cumulative), `[dac, pn, ps]`. Filtering
-   by `cutoff` trims rows WITHOUT renumbering, so column 1 stays the true derived allele
-   count.
- - `Vector{Float64}`: `[Dn, Ds, Ln, Ls]` divergence counts and site counts.
- - `Matrix{Float64}`: `[dac, frequency, alpha_x]` estimated from the cumulative SFS, so
-   alpha(x) keeps the frequencies it was computed at even when `cutoff` trims the SFS.
+ - `sfs::Matrix{Float64}`: the raw (non-cumulative) SFS `[DAC Pn Ps]`.
+ - `divergence::Vector{Float64}`: `[Dn, Ds, Ln, Ls]`.
+ - `alpha_x::Matrix{Float64}`: `[DAC frequency alpha(x)]`, alpha(x) from the tail sums of
+   the (cut) SFS, `1 - (Ds / Dn) Pn(>= x) / Ps(>= x)`, rounded to 5 digits.
 
-With a multi-set `gene_list`, or `mode = :gene`, each of the three is a `Vector` of the
-above. `summary_statistics` and `abcmk` take either form.
+With a multi-set `gene_list` or `mode = :gene`, each of the three is a `Vector` with one
+element per set or gene (plus the total for `:gene`).
 """
 function parse_sfs(
     data::Union{AbstractString,DataFrame};
@@ -334,17 +346,22 @@ end
 
 
 """
-	bootstrap_data(sfs,divergence,bootstrap)
+    bootstrap_data(sfs, divergence, bootstrap)
 
-Bootstrap data following polyDFE manual.
+Poisson resamples of one SFS, as in the polyDFE manual: every count of columns 2 to end
+is replaced by a Poisson draw with that mean; column 1 (the DAC) is kept.
+
+The divergence is not resampled: each replicate gets the input `divergence` (the same
+object, not a copy).
 
 # Arguments
- - `sfs::Matrix{Float64}`: SFS data.
- - `divergence`: divergence data, `[Dn, Ds, Ln, Ls]`.
- - `bootstrap::Int64`: number of bootstrapping replicas
-# Output
- - `sfs::Vector{Matrix{Float64}}`: boostrapped sfs.
- - `divergence::Vector`: divergence data.
+ - `sfs::Matrix{Float64}`: raw SFS `[DAC Pn Ps]`.
+ - `divergence::AbstractVecOrMat`: `[Dn, Ds, Ln, Ls]`.
+ - `bootstrap::Int64`: number of replicates.
+
+# Returns
+ - `(sfs_b, divergence_b)`: a `Vector{Matrix{Float64}}` of `bootstrap` resampled SFS and
+   a `Vector` holding `divergence` `bootstrap` times.
 """
 function bootstrap_data(
     sfs::Matrix{Float64},

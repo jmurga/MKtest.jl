@@ -23,21 +23,50 @@ function _alpha_x_n(sfs::AbstractMatrix, n::Union{Nothing,Int})
     return m + 1
 end
 
-"""
-    α_x(sfs, divergence; cutoff, cumulative, n)
+# Derived allele frequency of every row: column 1 as is when it already holds
+# frequencies in (0, 1] (not all whole numbers), else DAC / n with the haploid sample size
+# of `_alpha_x_n`.
+function _row_freqs(sfs::AbstractMatrix, n::Union{Nothing,Int})
+    c = Float64.(view(sfs, :, 1))
+    all(x -> 0 < x <= 1, c) && !all(isinteger, c) && return c
+    return c ./ _alpha_x_n(sfs, n)
+end
 
-Estimate alpha(x) for each derived allele frequency.
+# omega = (Dn/Ln) / (Ds/Ls), omega_a = alpha omega, omega_d = omega - omega_a; NaN without
+# site counts.
+function _mk_omegas(divergence::AbstractVector, alpha::Real)
+    length(divergence) > 2 || return (NaN, NaN, NaN)
+    dn, ds, ln, ls = divergence[1], divergence[2], divergence[3], divergence[4]
+    omega = (dn / ln) / (ds / ls)
+    isfinite(omega) || return (NaN, NaN, NaN)
+    return (omega, omega * alpha, omega - omega * alpha)
+end
+
+"""
+    α_x(sfs, divergence; cutoff = [0.0, 1.0], cumulative = true, n = nothing)
+
+MK alpha as a function of the derived allele frequency x,
+`alpha(x) = 1 - (Pn(x) / Ps(x)) (Ds / Dn)`.
+
+The frequency of each row is `DAC / n`. Rows outside `cutoff` are removed first; with
+`cumulative = true` `Pn(x)` and `Ps(x)` are then the counts at frequency `>= x` (see
+[`cumulative_sfs`](@ref)), otherwise the counts at `x` alone.
 
 # Arguments
- - `sfs::Matrix`: SFS parsed from `parse_sfs()`; column 1 is the derived allele count.
- - `divergence::Vector`: divergence data from `parse_sfs()`.
- - `cutoff::Vector{Float64}`: frequency window `[low, high]`. Default `[0.0, 1.0]`.
- - `cumulative::Bool`: estimate from the cumulative SFS. Default `true`.
- - `n::Union{Nothing,Int}`: haploid sample size. Default `nothing`, inferred as
-   `size(sfs, 1) + 1`, with an error when the SFS was trimmed.
+ - `sfs::Matrix`: raw SFS `[DAC Pn Ps]` from [`parse_sfs`](@ref).
+ - `divergence::Vector`: `[Dn, Ds, ...]`.
+
+# Keywords
+ - `cutoff::Vector{Float64}`: frequency window `[lo, hi]`, both ends included.
+ - `cumulative::Bool`: use tail sums of the SFS.
+ - `n::Union{Nothing,Int}`: haploid sample size (`sample_size * ploidy`). By default
+   `size(sfs, 1) + 1`, which is only right for a full spectrum: an SFS whose DAC column
+   does not run `1, 2, ..., size(sfs, 1)` throws an `ArgumentError` unless `n` is given.
+   A trimmed upper end cannot be detected, so pass `n` for any SFS trimmed by
+   `parse_sfs(...; cutoff)`. An `n` not larger than the last DAC throws an `ArgumentError`.
 
 # Returns
- - `Matrix{Float64}`: `[dac, frequency, alpha_x]`, one row per retained frequency.
+ - `Matrix{Float64}` `[DAC frequency alpha(x)]`, one row per frequency kept.
 """
 function α_x(sfs::Matrix, divergence::Vector; cutoff::Vector{Float64}=[0.0, 1.0],
     cumulative::Bool=true, n::Union{Nothing,Int}=nothing)
@@ -56,12 +85,12 @@ function α_x(sfs::Matrix, divergence::Vector; cutoff::Vector{Float64}=[0.0, 1.0
 end
 
 """
-    α_x(sfs, divergence; kwargs...)
+    α_x(sfs::Vector, divergence::Vector; kwargs...)
 
-`α_x` for several SFS and divergence sets, in parallel.
+`α_x` for several datasets, in parallel threads; the keywords apply to every dataset.
 
 # Returns
- - `Vector{Matrix{Float64}}`: one `[dac, frequency, alpha_x]` table per set.
+ - `Vector{Matrix{Float64}}`: one `[DAC frequency alpha(x)]` table per dataset.
 """
 function α_x(sfs::Vector, divergence::Vector; kwargs...)
     return ThreadsX.mapi((x, y) -> α_x(x, y; kwargs...), sfs, divergence)
@@ -96,22 +125,28 @@ end
 """
     AbstractAsymptoticModel
 
-Curve fitted to alpha(x) by `asymptotic_mk`: [`ExponentialFit`](@ref) (default) or
-[`LinearFit`](@ref). Only the chosen model is fitted; if it fails the result is NaN.
+Curve fitted to alpha(x) by [`asymptotic_mk`](@ref): [`ExponentialFit`](@ref) (default)
+or [`LinearFit`](@ref). Only the chosen model is fitted; if it fails the result is NaN.
 """
 abstract type AbstractAsymptoticModel end
 
 """
     ExponentialFit()
 
-`alpha(x) = a + b·exp(-c·x)` (Messer & Petrov 2013). The asymptote is `a + b·exp(-c)`.
+Fit `alpha(x) = a + b exp(-c x)` in [`asymptotic_mk`](@ref) (Messer & Petrov 2013); the
+asymptote is `a + b exp(-c)`.
+
+The curve is first fitted with bounds `a, b ∈ [-1, 1]`, `c ∈ [1, 10]` from
+`(-1, -1, 1)`, then refitted without bounds from that solution. A fit that throws or does
+not converge gives NaN.
 """
 struct ExponentialFit <: AbstractAsymptoticModel end
 
 """
     LinearFit()
 
-`alpha(x) = a + b·x`. The asymptote is `a + b`.
+Fit `alpha(x) = a + b x` in [`asymptotic_mk`](@ref); the asymptote is `a + b`, and `c`
+is reported as 0.
 """
 struct LinearFit <: AbstractAsymptoticModel end
 
@@ -185,37 +220,47 @@ function _amk_na_filter(f::Vector{Float64}, α_i::Vector{Float64})
 end
 
 """
-    asymptotic_mk(sfs, divergence; model, cutoff, cumulative, na_rm, n)
+    asymptotic_mk(sfs, divergence; model = ExponentialFit(), cutoff = [0.0, 1.0],
+                  cumulative = true, na_rm = true, n = nothing)
     asymptotic_mk(α_table; model, cutoff, na_rm)
-    asymptotic_mk(α_x; model, f, cutoff, na_rm)
-    asymptotic_mk(sfs::Vector, divergence::Vector; ...)
+    asymptotic_mk(α_x::AbstractVector{<:Real}; model, f = nothing, cutoff, na_rm)
+    asymptotic_mk(sfs::Vector, divergence::Vector; kwargs...)
+    asymptotic_mk(α_tables::Vector{<:AbstractMatrix}; kwargs...)
+    asymptotic_mk(α_xs::Vector{<:AbstractVector}; kwargs...)
 
 Asymptotic MK test (Messer & Petrov 2013): fit a curve to alpha(x) against the derived
-allele frequency and take its value at x = 1.
+allele frequency x and take its value at x = 1.
 
-alpha(x) is computed from `sfs`/`divergence`, taken from the `[dac, frequency, alpha_x]`
-table returned by `parse_sfs` or `α_x`, or given as a vector. The `Vector` forms run per
-gene or set in parallel and return a `DataFrame` with one row each.
+alpha(x) is computed from a raw SFS `[DAC Pn Ps]` and `[Dn, Ds, ...]` with
+[`α_x`](@ref), taken from a `[DAC frequency alpha(x)]` table (the third value of
+[`parse_sfs`](@ref), or `α_x`), or given as a bare vector. The `Vector` forms fit every
+dataset in parallel threads.
 
-# Arguments
- - `model::AbstractAsymptoticModel`: `ExponentialFit()` (default) or `LinearFit()`. Only
-   this model is fitted; a fit that fails returns NaN.
- - `cutoff::Vector{Float64}`: frequency window `[low, high]`. Default `[0.0, 1.0]`. With
-   `sfs`/`divergence` the SFS is cut before the cumulative sum; with a table or vector the
-   alpha(x) values already computed are filtered. These differ under `cumulative = true`,
-   so pass the cutoff where alpha(x) is computed.
- - `cumulative::Bool`: use the cumulative SFS (sfs/divergence only). Default `true`.
- - `n::Union{Nothing,Int}`: haploid sample size (sfs/divergence only). Needed when the SFS
-   was trimmed by a cutoff; see `α_x`.
- - `f`: frequencies of the alpha(x) vector (vector form only). Default
-   `(1:length(α_x)) / (length(α_x) + 1)`, i.e. a full spectrum.
- - `na_rm::Bool`: drop `NaN`, `Inf` and `1.0` alpha(x) values before fitting. Default `true`.
+# Keywords
+ - `model::AbstractAsymptoticModel`: [`ExponentialFit`](@ref) or [`LinearFit`](@ref).
+   Only this model is fitted, with no fallback to the other.
+ - `cutoff::Vector{Float64}`: frequency window `[lo, hi]`, both ends included. From an
+   SFS, rows are cut before the tail sums; from a table or vector, the alpha(x) values
+   already computed are filtered. The two differ under `cumulative = true`, so apply the
+   cutoff where alpha(x) is computed.
+ - `cumulative::Bool`: tail sums of the SFS (SFS form only).
+ - `n::Union{Nothing,Int}`: haploid sample size (SFS form only); needed for an SFS trimmed
+   by a cutoff, see [`α_x`](@ref).
+ - `f`: frequencies of a bare alpha(x) vector. Default `(1:k) / (k + 1)` for `k` values,
+   i.e. a full spectrum; a length mismatch throws an `ArgumentError`.
+ - `na_rm::Bool`: drop `NaN`, `Inf` and `1.0` alpha(x) values (alpha = 1 means Pn = 0)
+   before fitting.
+
+A table that does not have 3 columns throws an `ArgumentError`.
 
 # Returns
- - `NamedTuple`: `(asymptotic_mk, ci_low, ci_high, a, b, c, model, f, alpha_x)`. The 95% CI
-   is the interval of the asymptote. All NaN (except `model`, `f`, `alpha_x`) when fewer
-   than three values remain or the fit fails. `c = 0` for `LinearFit`.
- - `DataFrame` with one such row per gene or set for the `Vector` forms.
+ - `NamedTuple` `(asymptotic_mk, ci_low, ci_high, a, b, c, model, f, alpha_x)`:
+   the asymptote, its 95% CI (delta method over the fit covariance, t quantile), the fitted
+   coefficients (`c = 0` for `LinearFit`), the model name (`:exponential` or `:linear`),
+   and the frequencies and alpha(x) values used. The asymptote, CI and coefficients are
+   NaN when fewer than three values remain or the fit fails.
+ - `Vector` forms: a `DataFrame` with one such row per dataset, and a warning giving the
+   number of failed fits.
 """
 function asymptotic_mk(
     sfs::Matrix,
@@ -314,44 +359,62 @@ asymptotic_mk(α_x_values::AbstractVector{<:AbstractVector{<:Real}}; kwargs...) 
 ################################
 
 """
-    imputed_mk(sfs, divergence; cutoff)
+    imputed_mk(sfs, divergence; cutoff = 0.15, n = nothing)
 
 Imputed MK test (Murga-Moreno et al. 2022, https://doi.org/10.1093/g3journal/jkac206):
-slightly deleterious polymorphisms below `cutoff` are imputed and removed from Pn.
+the slightly deleterious nonsynonymous polymorphisms below `cutoff` are estimated and
+subtracted from Pn.
+
+With low = frequency `< cutoff` and high = frequency `>= cutoff`, the deleterious count
+is `Pn_low - Pn_high (Ps_low / Ps_high)`, set to 0 when it is negative, larger than Pn,
+or `Ps_high = 0`. Then `alpha = 1 - (Pn_neutral / Ps) (Ds / Dn)` (rounded to 3 digits),
+with a Fisher exact test of `[Ps Pn_neutral; Ds Dn]` (counts rounded up to integers).
 
 # Arguments
- - `sfs::Matrix`: SFS parsed from `parse_sfs()`.
- - `divergence::Vector`: divergence data from `parse_sfs()`.
- - `cutoff::Float64`: derived allele frequency separating low-frequency variants. Default `0.15`.
+ - `sfs::Matrix`: raw SFS `[DAC Pn Ps]`; the frequency of a row is `DAC / n`. Column 1
+   may instead hold frequencies in (0, 1] (as `reduce_sfs` returns), used as they are.
+ - `divergence::Vector`: `[Dn, Ds, Ln, Ls]`; `[Dn, Ds]` alone also works.
+
+# Keywords
+ - `cutoff::Float64`: derived allele frequency separating the low-frequency class.
+ - `n::Union{Nothing,Int}`: haploid sample size. By default `size(sfs, 1) + 1`, which needs
+   the full SFS (DAC `1..n-1`). Pass it for any SFS trimmed by `parse_sfs(...; cutoff)`:
+   a trim at the low end throws without it, but a top-only trim (DAC `1..k`) cannot be
+   told apart from a full SFS of `k + 1` chromosomes and would give wrong frequencies.
 
 # Returns
- - `NamedTuple`: `(alpha, p_value, b, f, d, omega, omega_a, omega_d)`; `b`, `f`, `d` and
-   the omegas need Ln and Ls in `divergence`.
+ - `NamedTuple` `(alpha, p_value, b, f, d, omega, omega_a, omega_d)`. `b`, `f` and `d`
+   are the fractions of new nonsynonymous mutations that are slightly deleterious,
+   neutral and strongly deleterious; `omega = (Dn/Ln) / (Ds/Ls)`,
+   `omega_a = alpha omega`, `omega_d = omega - omega_a`. These six are NaN without Ln
+   and Ls (2-element `divergence`, or site counts of 0); everything is NaN when `Ps = 0`
+   or `Dn = 0`.
 """
 function imputed_mk(
     sfs::Matrix,
     divergence::Vector;
     cutoff::Float64=0.15,
+    n::Union{Nothing,Int}=nothing,
 )
 
-    sfs = copy(sfs)
-    if sum(@view sfs[:, 1]) > 1
-        n = size(sfs, 1)
-        sfs[:, 1] .= (1:n) ./ (n + 1)
-    end
+    freq = _row_freqs(sfs, n)
 
     pn = sum(sfs[:, 2])
     ps = sum(sfs[:, 3])
     dn = divergence[1]
     ds = divergence[2]
 
+    if ps == 0 || dn == 0
+        return (alpha=NaN, p_value=NaN, b=NaN, f=NaN, d=NaN, omega=NaN, omega_a=NaN, omega_d=NaN)
+    end
+
     deleterious = 0
     ### Estimating slightly deleterious with pn/ps ratio
-    flt_low = (sfs[:, 1] .<= cutoff)
+    flt_low = freq .< cutoff
     pn_low = sum(sfs[flt_low, 2])
     ps_low = sum(sfs[flt_low, 3])
 
-    flt_inter = (sfs[:, 1] .>= cutoff) .& (sfs[:, 1] .<= 1)
+    flt_inter = .!flt_low
     pn_inter = sum(sfs[flt_inter, 2])
     ps_inter = sum(sfs[flt_inter, 3])
 
@@ -371,8 +434,9 @@ function imputed_mk(
     p_value =
         pvalue(FisherExactTest(Int(ceil(ps)), Int(ceil(pn_neutral)), Int(ds), Int(dn)))
 
-    b = f = d = omega = omega_a = omega_d = NaN
-    if size(divergence, 1) > 2
+    b = f = d = NaN
+    omega, omega_a, omega_d = _mk_omegas(divergence, alpha)
+    if isfinite(omega)
         ln = divergence[3]
         ls = divergence[4]
         # ## Estimation of b: weakly deleterious
@@ -383,41 +447,34 @@ function imputed_mk(
 
         ## Estimation of d, strongly deleterious sites
         d = 1 - (f + b)
-
-        ka = dn / ln
-        ks = ds / ls
-        omega = ka / ks
-
-        # omega_a and omega_d
-        omega_a = omega * alpha
-        omega_d = omega - omega_a
     end
 
     return (alpha=alpha, p_value=p_value, b=b, f=f, d=d, omega=omega, omega_a=omega_a, omega_d=omega_d)
 end
 
 """
-    imputed_mk(sfs::Vector, divergence::Vector; cutoff, correction)
+    imputed_mk(sfs::Vector, divergence::Vector; cutoff = 0.15, n = nothing, correction = nothing)
 
-`imputed_mk` for several genes or sets, in parallel.
+`imputed_mk` for several datasets, in parallel threads.
 
-# Arguments
- - `cutoff::Float64`: as for one set. Default `0.15`.
- - `correction::Union{Symbol,Nothing}`: p-value correction, `:fdr` or `:bonferroni`.
-   Default `nothing`.
+`correction = :fdr` (Benjamini-Hochberg) or `:bonferroni` adds a `pvalue_adjusted` column
+after `p_value`; NaN p-values stay NaN and are left out of the ranking. Any other symbol
+throws an `ArgumentError`.
 
 # Returns
- - `DataFrame` with one row per gene or set.
+ - `DataFrame` with one row per dataset and the columns of the single-dataset result,
+   plus a warning giving the number of NaN alphas.
 """
 function imputed_mk(
     sfs::Vector,
     divergence::Vector;
     cutoff::Float64=0.15,
+    n::Union{Nothing,Int}=nothing,
     correction::Union{Symbol,Nothing}=nothing
 )
     df = DataFrame(ThreadsX.mapi(sfs, divergence) do x, y
         Logging.with_logger(Logging.NullLogger()) do
-            imputed_mk(x, y, cutoff=cutoff)
+            imputed_mk(x, y, cutoff=cutoff, n=n)
         end
     end)
     n_nan = sum(isnan.(df.alpha))
@@ -430,36 +487,41 @@ end
 
 
 """
-    fww_mk(sfs, divergence; cutoff)
+    fww_mk(sfs, divergence; cutoff = 0.15, n = nothing)
 
-Fay, Wyckoff and Wu MK test (https://doi.org/10.1038/4151024a): polymorphisms below
-`cutoff` are removed.
+Fay, Wyckoff and Wu MK test (Fay et al. 2002, https://doi.org/10.1038/4151024a):
+polymorphisms at frequency below `cutoff` are removed before
+`alpha = 1 - (Pn / Ps) (Ds / Dn)` (rounded to 3 digits), with a Fisher exact test of
+`[Ps Pn; Ds Dn]` on the polymorphisms kept.
 
 # Arguments
- - `sfs::Matrix`: SFS parsed from `parse_sfs()`.
- - `divergence::Vector`: divergence data from `parse_sfs()`.
- - `cutoff::Float64`: minimum derived allele frequency. Default `0.15`.
+ - `sfs::Matrix`: raw SFS `[DAC Pn Ps]`; the frequency of a row is `DAC / n`. Column 1
+   may instead hold frequencies in (0, 1] (as `reduce_sfs` returns), used as they are.
+ - `divergence::Vector`: `[Dn, Ds, Ln, Ls]`; `[Dn, Ds]` alone also works.
+
+# Keywords
+ - `cutoff::Float64`: lowest derived allele frequency kept (included).
+ - `n::Union{Nothing,Int}`: haploid sample size; see [`imputed_mk`](@ref).
 
 # Returns
- - `NamedTuple`: `(alpha, p_value, omega, omega_a, omega_d)`.
+ - `NamedTuple` `(alpha, p_value, omega, omega_a, omega_d)`, with
+   `omega = (Dn/Ln) / (Ds/Ls)`, `omega_a = alpha omega`, `omega_d = omega - omega_a`.
+   All NaN when no Ps remains or `Dn = 0`. The omegas are NaN without site counts
+   (2-element `divergence`, or counts of 0).
 """
 function fww_mk(
     sfs::Matrix,
     divergence::Vector;
     cutoff::Float64=0.15,
+    n::Union{Nothing,Int}=nothing,
 )
 
-    # DAC to freqs
-    sfs = copy(sfs)
-    if sum(@view sfs[:, 1]) > 1
-        n = size(sfs, 1)
-        sfs[:, 1] .= (1:n) ./ (n + 1)
-    end
+    freq = _row_freqs(sfs, n)
 
     dn = divergence[1]
     ds = divergence[2]
 
-    flt_inter = (sfs[:, 1] .>= cutoff) .& (sfs[:, 1] .<= 1)
+    flt_inter = freq .>= cutoff
     pn_inter = sum(sfs[flt_inter, 2])
     ps_inter = sum(sfs[flt_inter, 3])
 
@@ -472,41 +534,31 @@ function fww_mk(
     p_value =
         pvalue(FisherExactTest(Int(ps_inter), Int(ceil(pn_inter)), Int(ds), Int(dn)))
 
-    omega = omega_a = omega_d = 0
-    if size(divergence, 1) > 2
-        ln = divergence[3]
-        ls = divergence[4]
-        ka = dn / ln
-        ks = ds / ls
-
-        omega = ka / ks
-
-        # omega_a and omega_d
-        omega_a = omega * alpha
-        omega_d = omega - omega_a
-    end
+    omega, omega_a, omega_d = _mk_omegas(divergence, alpha)
 
     return (alpha=alpha, p_value=p_value, omega=omega, omega_a=omega_a, omega_d=omega_d)
 end
 
 """
-    fww_mk(sfs::Vector, divergence::Vector; cutoff, correction)
+    fww_mk(sfs::Vector, divergence::Vector; cutoff = 0.15, n = nothing, correction = nothing)
 
-`fww_mk` for several genes or sets, in parallel. `correction` is `:fdr`, `:bonferroni` or
-`nothing` (default).
+`fww_mk` for several datasets, in parallel threads. `correction` is `:fdr`
+(Benjamini-Hochberg) or `:bonferroni`, which add a `pvalue_adjusted` column, or `nothing`;
+see [`imputed_mk`](@ref).
 
 # Returns
- - `DataFrame` with one row per gene or set.
+ - `DataFrame` with one row per dataset, plus a warning giving the number of NaN alphas.
 """
 function fww_mk(
     sfs::Vector,
     divergence::Vector;
     cutoff::Float64=0.15,
+    n::Union{Nothing,Int}=nothing,
     correction::Union{Symbol,Nothing}=nothing
 )
     df = DataFrame(ThreadsX.mapi(sfs, divergence) do x, y
         Logging.with_logger(Logging.NullLogger()) do
-            fww_mk(x, y, cutoff=cutoff)
+            fww_mk(x, y, cutoff=cutoff, n=n)
         end
     end)
     n_nan = sum(isnan.(df.alpha))
@@ -520,26 +572,23 @@ end
 """
     standard_mk(sfs, divergence)
 
-Standard MK test: alpha = 1 - (Pn/Ps)(Ds/Dn), with a Fisher exact test.
+Standard MK test: `alpha = 1 - (Pn / Ps) (Ds / Dn)` (Smith & Eyre-Walker 2002, rounded to
+3 digits), with a Fisher exact test of `[Ps Pn; Ds Dn]`.
 
 # Arguments
- - `sfs::Matrix`: SFS parsed from `parse_sfs()`.
- - `divergence::Vector`: divergence data from `parse_sfs()`.
+ - `sfs::Matrix`: raw SFS `[DAC Pn Ps]`; only the column totals are used.
+ - `divergence::Vector`: `[Dn, Ds, Ln, Ls]`; `[Dn, Ds]` alone also works.
 
 # Returns
- - `NamedTuple`: `(alpha, p_value, omega, omega_a, omega_d)`.
+ - `NamedTuple` `(alpha, p_value, omega, omega_a, omega_d)`, with
+   `omega = (Dn/Ln) / (Ds/Ls)`, `omega_a = alpha omega`, `omega_d = omega - omega_a`.
+   All NaN when `Ps = 0` or `Dn = 0`. The omegas are NaN without site counts
+   (2-element `divergence`, or counts of 0).
 """
 function standard_mk(
     sfs::Matrix,
     divergence::Vector;
 )
-
-    # DAC to freqs
-    sfs = copy(sfs)
-    if (sfs[1, 1] >= 1)
-        nn = size(view(sfs, :, 1), 1)
-        sfs[:, 1] .= collect(1:nn) ./ (nn + 1)
-    end
 
     pn = sum(sfs[:, 2])
     ps = sum(sfs[:, 3])
@@ -554,30 +603,19 @@ function standard_mk(
     #  method = :lnnlike same results R, python two.sides
     p_value = pvalue(FisherExactTest(Int(ps), Int(ceil(pn)), Int(ds), Int(dn)))
 
-    omega = omega_a = omega_d = 0
-    if size(divergence, 1) > 2
-        ln = divergence[3]
-        ls = divergence[4]
-
-        ka = dn / ln
-        ks = ds / ls
-        omega = ka / ks
-
-        # omega_a and omega_d
-        omega_a = omega * alpha
-        omega_d = omega - omega_a
-    end
+    omega, omega_a, omega_d = _mk_omegas(divergence, alpha)
     return (alpha=alpha, p_value=p_value, omega=omega, omega_a=omega_a, omega_d=omega_d)
 end
 
 """
-    standard_mk(sfs::Vector, divergence::Vector; correction)
+    standard_mk(sfs::Vector, divergence::Vector; correction = nothing)
 
-`standard_mk` for several genes or sets, in parallel. `correction` is `:fdr`,
-`:bonferroni` or `nothing` (default).
+`standard_mk` for several datasets, in parallel threads. `correction` is `:fdr`
+(Benjamini-Hochberg) or `:bonferroni`, which add a `pvalue_adjusted` column, or `nothing`;
+see [`imputed_mk`](@ref).
 
 # Returns
- - `DataFrame` with one row per gene or set.
+ - `DataFrame` with one row per dataset, plus a warning giving the number of NaN alphas.
 """
 function standard_mk(
     sfs::Vector,
@@ -601,12 +639,19 @@ end
 
 """
     ni(sfs, divergence)
-    ni(sfs::Vector, divergence::Vector; correction)
+    ni(sfs::Vector, divergence::Vector; correction = nothing)
 
-Neutrality index, NI = (Pn/Ps) / (Dn/Ds), with a Fisher exact test.
+Neutrality index (Rand & Kann 1996), `NI = (Pn / Ps) / (Dn / Ds)`, with a Fisher exact
+test of `[Ps Pn; Ds Dn]`. `sfs` is a raw SFS `[DAC Pn Ps]` (only the column totals are
+used) and `divergence` is `[Dn, Ds, ...]`.
+
+NI and the p-value are NaN, with a warning, when Ds, Ps or Dn is `0.0`. The `Vector` form
+runs in parallel threads; `correction` is `:fdr`, `:bonferroni` or `nothing`, as in
+[`imputed_mk`](@ref).
 
 # Returns
- - `NamedTuple` `(ni, p_value)`, or a `DataFrame` with one row per gene or set.
+ - `NamedTuple` `(ni, p_value)`, or for the `Vector` form a `DataFrame` with one row per
+   dataset.
 """
 function ni(
     sfs::Matrix,
@@ -618,7 +663,7 @@ function ni(
     dn = divergence[1]
     ds = divergence[2]
 
-    if ds ≡ 0.0 || ps ≡ 0.0 || dn ≡ 0.0
+    if ds == 0 || ps == 0 || dn == 0
         @warn "Cannot estimate neutrility index with ds, dn or ps = 0. Returning NaN values"
         _ni = NaN
         p_value = NaN
@@ -648,11 +693,23 @@ function ni(
 end
 
 """
-    ni_cmh(sfs, divergence)
+    ni_cmh(sfs::Vector, divergence::Vector)
 
-Neutrality index over several genes with the Cochran-Mantel-Haenszel weighting of
-Stoletzki & Eyre-Walker (2011).
+One neutrality index over several datasets, with the Cochran-Mantel-Haenszel weighting
+of Stoletzki & Eyre-Walker (2011):
 
+`NI = Σ (Ds Pn / (Ps + Ds)) / Σ (Dn Ps / (Ps + Ds))`,
+
+summed over datasets; a dataset with `Ps + Ds = 0` is skipped. Unlike [`ni`](@ref), no
+test is computed.
+
+# Arguments
+ - `sfs::Vector`: raw SFS `[DAC Pn Ps]`, one per dataset (only the column totals are used).
+ - `divergence::Vector`: `[Dn, Ds, ...]`, one per dataset. A length different from `sfs`
+   throws an `AssertionError`.
+
+# Returns
+ - `NamedTuple` `(ni = ...,)`.
 """
 function ni_cmh(sfs::Vector, divergence::Vector)
 
@@ -677,18 +734,25 @@ function ni_cmh(sfs::Vector, divergence::Vector)
         end
     end
 
-    return (ni = num / den)
+    return (ni = num / den,)
 
 end
 
 """
     dos(sfs, divergence)
-    dos(sfs::Vector, divergence::Vector; correction)
+    dos(sfs::Vector, divergence::Vector; correction = nothing)
 
-Direction of selection, DoS = Dn/(Dn+Ds) - Pn/(Pn+Ps), with a Fisher exact test.
+Direction of selection (Stoletzki & Eyre-Walker 2011), `DoS = Dn/(Dn+Ds) - Pn/(Pn+Ps)`,
+with a Fisher exact test of `[Ps Pn; Ds Dn]`. `sfs` is a raw SFS `[DAC Pn Ps]` (only the
+column totals are used) and `divergence` is `[Dn, Ds, ...]`.
+
+DoS and the p-value are NaN, with a warning, when `Dn = 0`. The `Vector` form runs in
+parallel threads; `correction` is `:fdr`, `:bonferroni` or `nothing`, as in
+[`imputed_mk`](@ref).
 
 # Returns
- - `NamedTuple` `(dos, p_value)`, or a `DataFrame` with one row per gene or set.
+ - `NamedTuple` `(dos, p_value)`, or for the `Vector` form a `DataFrame` with one row per
+   dataset.
 """
 function dos(
     sfs::Matrix,
@@ -733,49 +797,65 @@ end
 
 
 """
-    abcmk(param::parameters,
-          sfs::Vector,
-          divergence::Vector;
-          h5_file::String,
-          summstat_size::Real,
-          output_folder::String,
-          alpha::Union{Nothing,Vector{Float64}} = nothing,
-          B_bins::Union{Nothing,Vector{Float64}} = nothing,
-          tol::Real=1000,
-          abc_method::String="abcreg",
-          rm_summaries::Bool=true,
-          stat::String="median",
-          sampling::AbstractPoissonSampling=RjSampling(),
-          row_prior::AbstractRowPrior=FlatAlphaPrior()) -> DataFrame
+    abcmk(param::parameters, sfs, divergence; h5_file, summstat_size, output_folder,
+          alpha = nothing, B_bins = nothing, tol = 1000, abc_method = "abcreg",
+          rm_summaries = true, stat = "median", sampling = RjSampling(),
+          row_prior = FlatAlphaPrior())
 
-Performs Approximate Bayesian Computation (ABC) using either regression adjustment (ABCreg) or a basic ABC method and returns a summary of the posterior distributions.
+ABC-MK inference (Murga-Moreno et al. 2024): posterior distributions of alpha, its weak
+and strong components and the DFE parameters for each dataset.
+
+Three steps: [`summary_statistics`](@ref) samples the rates table and writes the observed
+and simulated summary statistics of every dataset to `output_folder`
+(`alphas_<i>.txt.gz`, `summstat_<i>.txt.gz`); ABC accepts the `tol` closest simulations of
+each dataset; [`summary_abc`](@ref) summarizes the posteriors.
 
 # Arguments
-- `param::parameters`: The model parameters.
-- `sfs::Vector`: Site frequency spectrum data, one matrix per set. A single `Matrix` (one set,
-  as `parse_sfs` returns it) is also accepted.
-- `divergence::Vector`: Divergence data, one vector per set, or a single `Vector{<:Real}` with a
-  single `Matrix` SFS.
-- `h5_file::String`: Path to the HDF5 file containing the data.
-- `summstat_size::Real`: Number of summary statistics rows to sample, a positive whole number (`1e5` works).
-- `output_folder::String`: Folder where outputs will be stored.
-- `alpha::Union{Nothing,Vector{Float64}}`: Optional alpha values for the summary statistics function. Default is `nothing`.
-- `B_bins::Union{Nothing,Vector{Float64}}`: Optional B bins for the summary statistics function. Default is `nothing`.
-- `tol::Real`: Number of retained values in ABC, a positive whole number (`1e3` works). Default is `1000`.
-- `abc_method::String`: Method to use for ABC, either "abcreg" or another method. Default is `"abcreg"`.
-- `rm_summaries::Bool`: Whether to remove summaries after computation. Default is `true`.
-- `stat::String`: The statistic to summarize the posteriors, such as "mode". Default is `"median"`.
-- `sampling::AbstractPoissonSampling`: how the summary statistics are sampled from the rates
-  table. `RjSampling()` (default) or `IndependentSampling()`.
-- `row_prior::AbstractRowPrior`: which table rows are drawn. `FlatAlphaPrior()` (default) or
-  `TableRowPrior()`.
+ - `param::parameters`: the model used to build the rates table; `param.dac` gives the
+   DACs used as summary statistics and must not contain 1.
+ - `sfs`: raw SFS `[DAC Pn Ps]`, a `Vector` with one per dataset or a single `Matrix`.
+   Never pass a cumulative SFS: the tail sums are built here, and a spectrum cumulated
+   twice biases alpha.
+ - `divergence`: `[Dn, Ds, Ln, Ls]`, a `Vector` with one per dataset, or a single vector
+   with a single `Matrix`.
 
-The defaults (`RjSampling()`, `FlatAlphaPrior()`, `"median"`) are the configuration measured
-against SLiM in the two-epoch and Tennessen benchmarks (see [`RjSampling`](@ref)). ABC-MK
-v1.0.0 is `sampling = IndependentSampling(), row_prior = TableRowPrior(), stat = "mode"`.
+# Keywords
+ - `h5_file::String`: JLD2 rates file written by [`rates`](@ref).
+ - `summstat_size::Real`: rows sampled from the rates table per dataset, a positive whole
+   number (`1e5` works).
+ - `output_folder::String`: folder for the summary statistics and ABC outputs; created if
+   missing, and stale `summstat_*`, `alphas_*` and `out_*` files in it are removed.
+ - `alpha`, `B_bins`: keep only table rows with the alpha label, or B, in this range.
+ - `tol::Real`: number of accepted simulations per dataset, a positive whole number.
+ - `abc_method::String`: `"abcreg"`, the ABCreg binary at `scripts/reg` (see
+   [`ABCreg`](@ref)), or `"abc"`, the Julia local-linear ABC (its regression-adjusted
+   posteriors are used).
+ - `rm_summaries::Bool`: delete the summary statistics files afterwards (and, for
+   `"abcreg"`, the posterior files).
+ - `stat::String`: point estimate taken from each posterior: `"Min."`, `"Median"`,
+   `"Mean"`, `"Mode"` or `"Max"`, case-insensitive.
+ - `sampling::AbstractPoissonSampling`: [`RjSampling`](@ref) or
+   [`IndependentSampling`](@ref).
+ - `row_prior::AbstractRowPrior`: [`FlatAlphaPrior`](@ref) or [`TableRowPrior`](@ref).
+
+The defaults (`RjSampling()`, `FlatAlphaPrior()`, `"median"`) are the configuration
+measured against SLiM in the two-epoch and Tennessen benchmarks. ABC-MK v1.0.0 is
+`sampling = IndependentSampling(), row_prior = TableRowPrior(), stat = "mode"`.
+
+Throws an `AssertionError` for another `abc_method`, a DAC of 1 in `param.dac`, or
+filters that leave fewer than `summstat_size` table rows, and an
+`ArgumentError` when `summstat_size` or `tol` is not a positive whole number or an SFS
+has 0 counts at the DACs used. Datasets for which ABCreg fails are dropped with a
+warning, so the rows then no longer follow the dataset order.
 
 # Returns
-- `DataFrame`: A DataFrame summarizing the posterior distributions.
+`OrderedDict` from [`summary_abc`](@ref):
+ - `:inference`: `DataFrame`, one row per dataset with the `stat` of each parameter:
+   `α_weak, α_strong, α, ωₐ_weak, ωₐ_strong, ωₐ, ωₙₐ, γ₋, β, γ₊, γ₊₊, B` (the four ω
+   columns are absent when `divergence` has no Ln and Ls).
+ - `:quantiles`: the same values as strings with the 95% interval, `"0.2 [0.1-0.3]"`.
+ - `:stats`: Min., 2.5% Perc., Median, Mean, Mode, 97.5% Perc. and Max. of every
+   parameter, 7 rows per dataset with a `Stats` column.
 """
 function abcmk(
     param::parameters,
@@ -793,6 +873,7 @@ function abcmk(
     sampling::AbstractPoissonSampling=RjSampling(),
     row_prior::AbstractRowPrior=FlatAlphaPrior(),
 )
+    abc_method = lowercase(abc_method)
     @assert abc_method ∈ ["abcreg","abc"] "Please select ABCreg or abc from R package"
     summstat_size = _as_count(summstat_size, "summstat_size")
     tol = _as_count(tol, "tol")
@@ -805,7 +886,7 @@ function abcmk(
         posteriors_adj_unadj = abc(output_folder=output_folder,S=length(param.dac),tol=tol,rm_summaries=rm_summaries);
         posteriors = posteriors_adj_unadj["loclinear"]
         if all(isnan.(posteriors[1][:,1]))
-            @. replace!(posteriors, NaN=>0)
+            foreach(df -> foreach(c -> replace!(c, NaN => 0.0), eachcol(df)), posteriors)
         end
     end
 
@@ -818,7 +899,7 @@ end
 abcmk(param::parameters, sfs::AbstractMatrix{<:Real}, divergence::AbstractVector{<:Real}; kwargs...) =
     abcmk(param, [Matrix{Float64}(sfs)], [Vector{Float64}(divergence)]; kwargs...)
 
-# >>> dfe_ml entry points (added with the engine; test/verbatim_gate.sh skips this block)
+# >>> dfe_ml entry points
 # =============================================================================
 
 _sfs_list(sfs::AbstractMatrix) = [sfs]

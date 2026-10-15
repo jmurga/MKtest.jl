@@ -51,6 +51,12 @@ MKtest.imputed_mk(sfs, div; cutoff = 0.15)
 `b`, `f` and `d` are the fractions of new nonsynonymous mutations estimated to be
 slightly deleterious, neutral and strongly deleterious.
 
+Both tests take the frequency of each row as `DAC / n`, with `n` the number of
+chromosomes (`size(sfs, 1) + 1` by default). For an SFS trimmed with
+`parse_sfs(...; cutoff)` pass `n = sample_size * ploidy`: a top-only trim cannot be
+detected and would otherwise shift every frequency. A table from `reduce_sfs`, whose
+first column already holds frequencies, is used as it is.
+
 ## Asymptotic MK test
 
 alpha is computed as a function of frequency, `alpha(x)` from the polymorphisms at
@@ -85,7 +91,7 @@ MKtest.ni(sfs, div)    # (ni = 1.598, p_value = 0.0)     Rand & Kann 1996
 ```
 
 `MKtest.ni_cmh(sfs_vector, div_vector)` combines several datasets into one weighted NI
-(Stoletzki & Eyre-Walker 2011); it returns the value alone, without a test.
+(Stoletzki & Eyre-Walker 2011); it returns `(ni = ...,)`, without a test.
 
 ## Many datasets and multiple testing
 
@@ -101,14 +107,23 @@ MKtest.standard_mk(gs, gd; correction = :fdr)
 
 ## Plots
 
-With Plots.jl loaded:
+The plot functions load with Plots.jl. The asymptotic fit of the 1000 Genomes data
+above: the observed alpha(x), the fitted curve, the asymptote (dashed) and its 95% CI.
 
-```julia
-using Plots
-MKtest.plot_asymptotic_mk(amk)                    # alpha(x), the fit and its asymptote
-MKtest.plot_α_x(alpha_x; cutoff = [0.0, 0.7])     # alpha(x) curves
-MKtest.plot_α_x(sfs, div; sample_size = 50)       # from the SFS, projected first
+```@example mk
+using MKtest, Plots
+data = joinpath(pkgdir(MKtest), "data")
+sfs, div, alpha_x = MKtest.parse_sfs(joinpath(data, "MKdata_tgp_may2023.txt"); sample_size = 661)
+amk = MKtest.asymptotic_mk(sfs, div; cutoff = [0.0, 0.7])
+MKtest.plot_asymptotic_mk(amk)
 ```
 
-`plot_α_x` takes several curves at once and `control = ...` for a band of control
-curves; `output_path = "fig.pdf"` saves the figure (png, svg, pdf, ps or html).
+alpha(x) curves straight from the SFS, here projected to 50 individuals first:
+
+```@example mk
+MKtest.plot_α_x(sfs, div; sample_size = 50, cutoff = [0.0, 0.7])
+```
+
+`plot_α_x` also takes the `alpha_x` table of `parse_sfs`, several curves at once, and a
+set of control curves drawn as a band (see [Case and control sets](case_control.md));
+`output_path = "fig.pdf"` saves the figure (png, svg, pdf, ps or html).

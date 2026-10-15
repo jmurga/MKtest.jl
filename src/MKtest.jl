@@ -66,20 +66,27 @@ include("alpha_b.jl")
 
 # Plotting: the methods are in ext/MKtestPlotsExt.jl and load with `using Plots`.
 """
-    plot_α_x(a_x...; control, percentil, labels, output_path, kwargs...)
-    plot_α_x(α_table; ...)
-    plot_α_x(a_x, control; percentil, ...)
-    plot_α_x(sfs, divergence; sample_size, cumulative, ...)
-    plot_α_x(result; ...)
+    plot_α_x(a_x::AbstractVector{<:Real}...; control, percentil, cutoff, n, labels, output_path, kwargs...)
+    plot_α_x(curves::AbstractVector{<:AbstractVector{<:Real}}; ...)
+    plot_α_x(α_table::AbstractMatrix; ...)
+    plot_α_x(α_tables::AbstractVector{<:AbstractMatrix}; ...)
+    plot_α_x(result::Union{NamedTuple,DataFrame}; ...)
+    plot_α_x(a_x::AbstractVector{<:Real}, control::AbstractVector{<:AbstractVector{<:Real}}; ...)
+    plot_α_x(sfs::Matrix, divergence::Vector; sample_size, cumulative, cutoff, n, ...)
 
-Plot one or more alpha(x) curves against the derived allele count, optionally over a
+Plot one or more alpha(x) curves against the derived allele count (DAC), optionally over a
 percentile band of control curves. Requires `using Plots`.
 
 # Arguments
- - `a_x`: alpha(x) vectors, `[dac, frequency, alpha_x]` tables from `parse_sfs`/`α_x`
-   (the DAC is then the x axis), or `asymptotic_mk` results (NamedTuple or DataFrame).
- - `sfs::Matrix`, `divergence::Vector`: compute alpha(x) with `α_x`.
- - `control`: control curves, drawn as a band. Default `nothing`.
+ - `a_x`, `curves`: alpha(x) vectors; position i is DAC i (the x axis is the index).
+ - `α_table`, `α_tables`: `[dac, frequency, alpha_x]` tables from [`α_x`](@ref); the DAC
+   column is the x axis (of the first table for a vector of tables).
+ - `result`: an [`asymptotic_mk`](@ref) result, a NamedTuple (one curve) or a DataFrame
+   (one curve per row); its `f` gives the frequencies.
+ - `sfs::Matrix`, `divergence::Vector`: compute alpha(x) with [`α_x`](@ref) first.
+ - `control`: control curves (any of the curve inputs above), drawn as a grey band behind
+   the curves; each must be at least as long as the longest curve. Non-finite values are
+   skipped. Default `nothing`.
  - `percentil::AbstractVector{<:Real}`: low and high quantiles of the band. Default `[0.1, 0.9]`.
  - `cutoff::AbstractVector{<:Real}`: derived allele frequency window `[low, high]`; curves
    and band are drawn only inside it. Default `[0.0, 1.0]`. Frequencies come from the
@@ -88,12 +95,14 @@ percentile band of control curves. Requires `using Plots`.
    cumulative sum, as in `asymptotic_mk`.
  - `n::Union{Nothing,Int}`: haploid sample size behind plain vectors (default: longest
    curve + 1), or of a trimmed SFS (sfs/divergence only).
- - `labels`: legend labels, in curve order. Default `nothing` (`α1`, `α2`, ...).
+ - `labels`: legend labels, in curve order; missing ones are `α1`, `α2`, .... Default
+   `nothing`. The vararg method also takes the older `label_1`, `label_2`.
  - `output_path`: save the figure; the format comes from the extension (`.png`, `.svg`,
-   `.pdf`, `.ps`, `.html`). Default `nothing`.
+   `.pdf`, `.ps`, `.html`; any other throws `ArgumentError`). Default `nothing`.
  - `sample_size::Union{Nothing,Int}`: project the SFS first (sfs/divergence only).
  - `cumulative::Bool`: use the cumulative SFS (sfs/divergence only). Default `true`.
- - Other keywords (`xlim`, `ylim`, `size`, `title`, ...) are passed to `Plots.plot`.
+ - Other keywords (`xlim`, `ylim`, `size`, `title`, ...) are passed to `Plots.plot` and
+   override the defaults (`title = "αₓ values"`, `lw = 2`, `xlabel = "DAC"`, `ylabel = "α"`).
 
 # Returns
  - `Plots.Plot`.
@@ -101,11 +110,22 @@ percentile band of control curves. Requires `using Plots`.
 function plot_α_x end
 
 """
-    plot_asymptotic_mk(result; output_path)
-    plot_asymptotic_mk(sfs, divergence; model, cutoff, cumulative, output_path)
+    plot_asymptotic_mk(result::NamedTuple; output_path = nothing)
+    plot_asymptotic_mk(sfs::Matrix, divergence::Vector; model = ExponentialFit(),
+                       cutoff = [0.0, 1.0], cumulative = true, n = nothing, output_path = nothing)
 
-Plot an asymptotic MK fit: the observed alpha(x), the fitted curve of the model used
-(`ExponentialFit` or `LinearFit`), the asymptote and its 95% CI. Requires `using Plots`.
+Plot an asymptotic MK fit: the observed alpha(x) against the derived allele frequency, and,
+when the asymptote is finite, the fitted curve of the model used ([`ExponentialFit`](@ref)
+or [`LinearFit`](@ref), drawn over x in [0.05, 1]), the asymptote as a dashed line and its
+95% CI as a band (if finite). Requires `using Plots`.
+
+# Arguments
+ - `result`: a single-dataset [`asymptotic_mk`](@ref) result (fields `f`, `alpha_x`,
+   `asymptotic_mk`, `ci_low`, `ci_high`, `model`, `a`, `b`, `c`).
+ - `sfs`, `divergence`, `model`, `cutoff`, `cumulative`, `n`: passed to
+   [`asymptotic_mk`](@ref), whose result is then plotted.
+ - `output_path`: save the figure; format from the extension (`.png`, `.svg`, `.pdf`,
+   `.ps`, `.html`; any other throws `ArgumentError`). Default `nothing`.
 
 # Returns
  - `Plots.Plot`.
@@ -125,10 +145,12 @@ case and stars its empirical p-value. Requires `using StatsPlots`.
  - `omega::Bool`: plot ωₐ, ωₐ_strong, ωₐ_weak instead. Default `false`.
  - `params`: parameter columns, one row each; overrides `omega`.
  - `alternative::Symbol`: passed to [`empirical_test`](@ref). Default `:greater`.
- - `pvalues`: an `empirical_test` result to annotate; computed from `tbl` by default, or
-   `false` for no stars.
- - `output_path`: save the figure; format from the extension (`.png`, `.svg`, `.pdf`, ...).
- - Other keywords (`size`, `dpi`, ...) are passed to the final `plot`.
+ - `pvalues`: an `empirical_test` result to annotate; `nothing` (default) computes it from
+   `tbl` with `params` and `alternative`, `false` draws no stars.
+ - `output_path`: save the figure; format from the extension (`.png`, `.svg`, `.pdf`,
+   `.ps`, `.html`; any other throws `ArgumentError`). Default `nothing`.
+ - Other keywords (`size`, `dpi`, ...) are passed to the final `plot` and override the
+   defaults (layout one row per parameter, size scaled with the number of analyses).
 
 # Returns
  - `Plots.Plot`.

@@ -1,108 +1,81 @@
-using Fire
+using Fire   # Fire.@main: Julia >= 1.11 has its own Base.@main
+using MKtest, CSV
+
+# Command-line interface to ABC-MK. Two steps:
+#
+#   julia -t auto abcmk_cli.jl rates 1000 661 100000 --dac 2,4,5,10,20,50,200,661,925 --output rates_tgp.jld2
+#   julia -t auto abcmk_cli.jl abcmk 1000 661 data/MKdata_tgp_may2023.txt rates_tgp.jld2 abc_out --dac 2,4,5,10,20,50,200,661,925
+#
+# `rates` builds the reference table once per population, sample size and cutoff;
+# `abcmk` estimates alpha, alpha_W, alpha_S and the DFE of every dataset against it.
+# The `dac` and `cutoff` of both calls must agree. See docs/src/abcmk.md.
+
+_floats(x::String) = parse.(Float64, split(x, ","))
+_ints(x::String) = parse.(Int64, split(x, ","))
+
 """
-    julia --threads N abcmk_cli.jl rates 10000 661 --dac 1,2,4,5,10,20,50,100,200,400,500,661,925,1000 --gH 200,1000 --gL 1,10 --gam_flanking -1000,-500 --gam_dfe -1000,-100 --shape 0.184 --alpha 0.1,0.9 --iterations 1000000 --output rates.jld2
+    rates N n iterations [--dac ...] [--alpha lo,hi] [--gam_dfe lo,hi] [--gL lo,hi]
+          [--gH lo,hi] [--gam_flanking lo,hi] [--shape 0.184] [--cutoff 0.0,1.0]
+          [--output rates.jld2]
 
-Function to solve analytical fixation rates and the expected SFS. The function will create N random models from prior values. Use the arguments to defined the input range for each parameter.
-
-If rho and/or theta are not set, default values will be used (0.001).
-
-To parallelize the estimations please be sure you start up Julia using --threads/-t option and set the number of cores.
-
-The function returns a HDF5 file containing models solved and rates. The rates will be used to compute summary statistics required at ABC.
-
-Please check the documentation to get more info about models parameters or detailed arguments description https://jmurga.github.io/MKtest.jl/dev/cli/ to check model
+Build the ABC-MK reference table with `MKtest.rates`: `iterations` models drawn from
+the priors, for population size `N` and `n` diploid individuals. Start Julia with
+`-t auto` to solve the models in parallel.
 """
-@main function rates(N::Int64,
-                     samples::Int64,
+Fire.@main function rates(N::Int64,
+                     n::Int64,
                      iterations::Int64;
+                     dac::String = "2,4,5,10,20,50,200,500,700",
                      alpha::String = "0.1,0.9",
                      gam_dfe::String = "-1000,-200",
+                     gL::String = "1,10",
+                     gH::String = "100,1000",
                      gam_flanking::String = "-1000,-500",
-                     gL::String = "5,10",
-                     gH::String = "400,1000",
-                     dac::String = "1,2,4,5,10,20,50,100,200,400,500,661,925,1000",
                      shape::Float64 = 0.184,
-                     rho::Float64 = 0.001,
-                     theta::Float64 = 0.001,
                      cutoff::String = "0.0,1.0",
                      output::String = "rates.jld2")
-
-    @eval using MKtest
-
-    alpha, cutoff = map(x -> parse.(Float64, x), split.([alpha, cutoff], ","))
-    gam_dfe, gam_flanking, gL, gH, dac = map(x -> parse.(Int64, x),
-                                             split.([gam_dfe, gam_flanking, gL, gH, dac],
-                                                    ","))
-
-    adap = MKtest.parameters(N = N, n = samples, dac = dac, cutoff = cutoff)
-
-    MKtest.rates(adap,
-                 gam_dfe = gam_dfe,
-                 gam_flanking = gam_flanking,
-                 gL = gL,
-                 gH = gH,
-                 alpha = alpha,
-                 iterations = iterations,
-                 output = output)
+    param = MKtest.parameters(N = N, n = n, dac = _ints(dac), cutoff = _floats(cutoff),
+                              shape = shape)
+    MKtest.rates(param; iterations = iterations, output_file = output,
+                 alpha = _floats(alpha), gam_dfe = _ints(gam_dfe), gL = _ints(gL),
+                 gH = _ints(gH), gam_flanking = _ints(gam_flanking))
+    @info "Reference table written to $output"
 end
 
 """
-    summary_stat
+    abcmk N n data rates_file output_folder [--genes file] [--dac ...] [--cutoff 0.0,1.0]
+          [--summsize 100000] [--tol 1000] [--method abcreg] [--stat median]
 
-Estimate summary statistics using observed data and analytical rates.
+Run `MKtest.abcmk` on the datasets of `data` (one dataset, or one per line of `--genes`,
+read with `MKtest.parse_sfs`) against the table `rates_file`. Datasets that fail
+`MKtest.valid_data` are dropped. Writes `abcmk_inference.tsv` (one row per dataset) and
+`abcmk_quantiles.tsv` to `output_folder`.
 """
-@main function summaries(N::Int64,
-                         samples::Int64,
-                         data::String;
-                         genes::String = "<genes.txt>",
-                         dac::String = "2,4,5,10,20,50,200,661,925",
-                         cutoff::String = "0.0,1.0",
-                         rates::String = "rates.jld2",
-                         folder::String = "<folder>",
-                         summsize::Int64 = 100000)
-    @eval using MKtest
-
-    cutoff, dac = map(x -> parse.(Float64, x), split.([cutoff, dac], ","))
-
-    dac = Int64.(dac)
-
-    adap = MKtest.parameters(N = N, n = samples, dac = dac, cutoff = cutoff)
-
-    if genes == ""
-        genes = nothing
-    end
-
-    @info "Parsing $data"
-    sfs, divergence, alpha = MKtest.parse_sfs(data; sample_size = samples, cutoff = cutoff,
-                                              gene_list = genes)
+Fire.@main function abcmk(N::Int64,
+                     n::Int64,
+                     data::String,
+                     rates_file::String,
+                     output_folder::String;
+                     genes::String = "",
+                     dac::String = "2,4,5,10,20,50,200,500,700",
+                     cutoff::String = "0.0,1.0",
+                     summsize::Int64 = 100000,
+                     tol::Int64 = 1000,
+                     method::String = "abcreg",
+                     stat::String = "median")
+    param = MKtest.parameters(N = N, n = n, dac = _ints(dac), cutoff = _floats(cutoff))
+    sfs, div, _ = MKtest.parse_sfs(data; sample_size = n, cutoff = _floats(cutoff),
+                                   gene_list = isempty(genes) ? nothing : genes)
     if sfs isa Matrix
-        sfs, divergence = [sfs], [divergence]
+        sfs, div = [sfs], [div]
     end
-
-    summstat = MKtest.summary_statistics(adap, sfs, divergence;
-                                         h5_file = rates,
-                                         output_folder = folder,
-                                         summstat_size = summsize)
-end
-
-"""
-    abc(nsumm,tol;folder,abcreg)
-
-ABC inference and statistic. Please, be sure your analysis_folder contain the files produced by summaries. If you are using Docker or Singularity images you don't need to provide ABCreg path.
-
-"""
-@main function abc(nsumm::Int64,
-                   tol::Float64;
-                   folder::String = "<folder>",
-                   abcreg::String = "reg")
-    @eval using MKtest
-
-    posteriors = MKtest.ABCreg(analysis_folder = folder,
-                               P = 5,
-                               S = nsumm,
-                               tol = tol)
-
-    out = MKtest.summary_abc(posteriors)
-
-    @info "Posterior(s) distribution(s) was deposited at $folder"
+    ok = MKtest.valid_data(param, sfs, div)
+    all(ok) || @warn "dropping $(count(!, ok)) of $(length(ok)) datasets (valid_data)"
+    mkpath(output_folder)
+    res = MKtest.abcmk(param, sfs[ok], div[ok]; h5_file = rates_file,
+                       summstat_size = summsize, output_folder = output_folder,
+                       tol = tol, abc_method = method, stat = stat)
+    CSV.write(joinpath(output_folder, "abcmk_inference.tsv"), res[:inference]; delim = '\t')
+    CSV.write(joinpath(output_folder, "abcmk_quantiles.tsv"), res[:quantiles]; delim = '\t')
+    @info "Results written to $output_folder"
 end

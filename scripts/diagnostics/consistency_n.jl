@@ -19,15 +19,15 @@
 #      sanity check: GammaZero is nested in GammaExpo, GammaGamma and DisplGamma;
 #      ScaledBeta is not nested and is only reported).
 #
-#   cd ~/.julia/dev/MKtest_grapes && JULIA_NUM_THREADS=8 julia --project=. test/consistency_n.jl
+#   cd ~/.julia/dev/MKtest_grapes && JULIA_NUM_THREADS=8 julia --project=. scripts/diagnostics/consistency_n.jl
 #
-# Writes test/fixtures/consistency_n.csv and prints PASS/FAIL per criterion.
+# Writes scripts/diagnostics/consistency_n.csv and prints PASS/FAIL per criterion.
 
 using MKtest
 using CSV
 using DataFrames
 
-const ROOT = normpath(joinpath(@__DIR__, ".."))
+const ROOT = normpath(joinpath(@__DIR__, "..", ".."))
 const KS = (10, 20, 50, 100, 200)
 const MODELS = (MKtest.GammaZero(), MKtest.GammaExpo(), MKtest.GammaGamma(), MKtest.DisplGamma(),
                 MKtest.ScaledBeta())
@@ -53,7 +53,7 @@ all_fits = vcat(fits...; cols = :union)
 src_sha = strip(read(pipeline(`bash -c "cd '$ROOT' && find src ext -type f -name '*.jl' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1"`), String))
 all_fits[!, :src_sha] .= src_sha
 all_fits[!, :threads] .= Threads.nthreads()
-CSV.write(joinpath(ROOT, "test", "fixtures", "consistency_n.csv"), all_fits)
+CSV.write(joinpath(@__DIR__, "consistency_n.csv"), all_fits)
 
 g0 = sort(all_fits[all_fits.model .== "GammaZero", :], :k)
 ref = g0[g0.k .== 200, :]

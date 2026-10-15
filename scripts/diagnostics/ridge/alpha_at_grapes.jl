@@ -1,6 +1,6 @@
 using MKtest, CSV, DataFrames
-tab = CSV.read(expanduser("~/.julia/dev/MKtest_grapes/test/fixtures/grapes_parity_tgp.csv"), DataFrame)
-sfs, div, _ = MKtest.parse_sfs(expanduser("~/.julia/dev/MKtest_grapes/data/MKdata_tgp_may2023.txt"); sample_size = 661)
+tab = CSV.read(joinpath(@__DIR__, "..", "..", "..", "test/fixtures/grapes_parity_tgp.csv"), DataFrame)
+sfs, div, _ = MKtest.parse_sfs(joinpath(@__DIR__, "..", "..", "..", "data/MKdata_tgp_may2023.txt"); sample_size = 661)
 div = Float64.(vec(div))
 rb = MKtest.RombergIntegrator()
 models = Dict("GammaZero" => MKtest.GammaZero(), "GammaExpo" => MKtest.GammaExpo(), "GammaGamma" => MKtest.GammaGamma())

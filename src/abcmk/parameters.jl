@@ -3,27 +3,52 @@
 ################################
 
 """
-Mutable structure containing the variables required to solve the analytical approach. All the functions are solve using the internal values of the structure. You should declare a mutable structure to the perform the analytical estimations.
+    parameters(; N = 1000, n = 500, dac = [2, 4, 5, 10, 20, 50, 200, 500, 700], ...)
 
-# Parameters
- - `gam_flanking::Int64`: Selection coefficient for deleterious alleles
- - `gL::Int64`: Selection coefficient for weakly benefical alleles
- - `gH::Int64`: Selection coefficient for strongly benefical alleles
- - `al_low::Float64`: Proportion of α due to weak selection
- - `al_tot::Float64`: α
- - `θ_flanking::Float64`: Mutation rate defining BGS strength
- - `θ_coding::Float64`: Mutation rate on coding region
- - `al::Float64`: DFE shape parameter
- - `be::Float64`: DFE scale parameter
- - `B::Float64`: BGS strength
- - `B_bins::Array{Float64,1}`: BGS values to simulate
- - `ppos_l::Float64`: Fixation probabily of weakly beneficial alleles
- - `ppos_h::Float64`: Fixation probabily of strongly beneficial alleles
- - `N::Int64`: Population size
- - `n::Int64`: Sample size
- - `Lf::Int64`: Flanking region length
- - `ρ::Float64`: Recombination rate
- - `TE::Float64`
+Mutable keyword struct (`Parameters.@with_kw`) holding the ABC-MK analytical model. Every
+model function ([`rates`](@ref), [`analytical_alpha`](@ref), [`sfs_neg`](@ref), ...)
+reads these fields, and some set them. Set `N`, `n`, `dac` and `cutoff` to match the data; most
+of the others are drawn from the priors by `rates`.
+
+All selection coefficients (`gL`, `gH`, `gam_dfe`, `gam_flanking`) are `2N` times the
+heterozygote selection coefficient. `θ_*` and `ρ` are population-scaled per site
+(`4Nμ`, `4Nr`).
+
+# Fields
+ - `N::Int64 = 1000`: population size of the model.
+ - `n::Int64 = 500`: sample size in diploid individuals.
+ - `dac::Vector{Int64} = [2, 4, 5, 10, 20, 50, 200, 500, 700]`: derived allele counts at
+   which the α(x) tails are summarised. Ascending, `< nn`, within `cutoff`, and without
+   singletons (`summary_statistics` rejects `1`).
+ - `cutoff::Vector{Float64} = [0.0, 1.0]`: derived-allele frequency range of the data.
+   Also part of the reference-table key `"N/n/cutoff"`.
+ - `gL::Int64 = 10`, `gH::Int64 = 500`: weakly and strongly beneficial coefficients.
+ - `al_tot::Float64 = 0.4`: α, the fraction of nonsynonymous fixations that are
+   beneficial (at `B = 0.999`).
+ - `al_low::Float64 = 0.2`: α_W, the part of `al_tot` due to weakly beneficial fixations
+   (`0 <= al_low <= al_tot`).
+ - `shape::Float64 = 0.184`: shape of the gamma DFE of deleterious mutations.
+ - `gam_dfe::Int64 = -457`: mean of that DFE.
+ - `scale::Float64 = shape / abs(gam_dfe)`: rate of the gamma DFE. Computed at
+   construction only: update it if you change `shape` or `gam_dfe` afterwards.
+ - `B::Float64 = 0.999`: background selection value (`Ne = B N`).
+ - `gam_flanking::Int64 = -500`: selection on the linked deleterious flanking sites.
+ - `Lf::Int64 = 200000`: length of the flanking region.
+ - `ρ::Float64 = 0.001`: recombination rate.
+ - `θ_flanking::Float64 = 1e-3`: mutation rate of the flanking sites; [`set_θ!`](@ref)
+   sets it from `B`.
+ - `θ_coding::Float64 = 1e-3`: mutation rate of the coding sites.
+ - `ppos_l::Float64 = 0`, `ppos_h::Float64 = 0`: probabilities of weakly and strongly
+   beneficial mutations; [`set_ppos!`](@ref) solves them from `al_tot` and `al_low`.
+ - `syn_nonsyn_ratio::Float64 = 0.25`: fraction of new coding mutations that are
+   synonymous (`1 - syn_nonsyn_ratio` are nonsynonymous).
+ - `TE::Float64 = 5.0`: divergence time used only by `analytical_alpha`, where it cancels
+   out of α.
+ - `isolines::Bool = false`: inbred lines; `parse_private_share` then takes `n`
+   chromosomes instead of `2n`.
+ - `diploid::Bool = false`: not used.
+ - `NN::Int64 = 2N`, `nn::Int64 = 2n`: numbers of chromosomes in the population and in the
+   sample.
 """
 @with_kw mutable struct parameters
     gL::Int64 = 10
@@ -120,19 +145,16 @@ end
 ###### Solving parameters ######
 ################################
 """
-	Br(Lmax,theta)
+    Br(param, theta) -> Float64
 
-Expected reduction in nucleotide diversity. Explored at [Charlesworth B., 1994](https://doi.org/10.1017/S0016672300032365):
+Expected reduction in neutral diversity `π/π₀` caused by `param.Lf` linked deleterious
+sites with mutation rate `theta` ([Charlesworth 1994](https://doi.org/10.1017/S0016672300032365)):
 
 ```math
-\\frac{\\pi}{\\pi_{0}} = e^{\\frac{4\\mu L}{2rL+t}}
+\\frac{\\pi}{\\pi_{0}} = e^{-\\frac{4\\mu L_f}{2 r L_f + t}}
 ```
 
-# Arguments
- - `param::parameters`
- - `theta::Float64`
-# Returns
- - `Float64`: expected reduction in diversity given a non-coding length, mutation rate and defined recombination.
+with `μ = theta/(2NN)`, `r = ρ/(2NN)` and `t = -gam_flanking/NN`.
 """
 function Br(param::parameters, theta::Float64)
     ρ::Float64 = param.ρ
@@ -146,21 +168,18 @@ end
 
 # Set mutation rate given the expected reduction in nucleotide diversity (B value) in a locus.
 """
-	set_θ!(param)
+    set_θ!(param) -> Float64
 
-Find the mutation rate `θ_flanking` such that `Br(param, θ_flanking) == param.B`.
+Set `param.θ_flanking` to the flanking mutation rate that gives the background selection
+value `param.B`, and return it.
 
-`Br(θ) = exp(-2·θ·Lf / (Lf·ρ - gam_flanking))` inverts analytically:
+`Br(θ) = exp(-2θ Lf / (Lf ρ - gam_flanking))` inverts in closed form:
 
 ```
-θ_flanking = -log(B) · (Lf·ρ - gam_flanking) / (2·Lf)
+θ_flanking = -log(B) (Lf ρ - gam_flanking) / (2 Lf)
 ```
 
-The closed form gives the same value as the previous root search (`Roots.find_zero`)
-to float precision, without allocations, which makes `rates()` faster.
-
-# Returns
- - mutates `param.θ_flanking`.
+Uses `B`, `Lf`, `ρ` and `gam_flanking`: set `ρ` before calling it.
 """
 function set_θ!(param::parameters)
     # Br(θ) = exp(-4μLf / (2Lf·r + t)) with μ=θ/(2NN), r=ρ/(2NN), t=-gam_flanking/NN.
@@ -199,16 +218,18 @@ function solv_eqns(param, config)
 end
 
 """
-	set_ppos!(param; warm_start = [0.0, 0.0], atol = 1e-6)
+    set_ppos!(param; warm_start = [0.0, 0.0], atol = 1e-6)
 
-Solve `(ppos_l, ppos_h)`, the probabilities of weakly and strongly beneficial mutations,
-so the model's FIXATION alpha equals `param.al_tot` and its weak share `param.al_low`.
+Solve `param.ppos_l` and `param.ppos_h`, the probabilities of weakly and strongly
+beneficial mutations, so that the model's fixation α equals `param.al_tot` and its weak
+part equals `param.al_low` at the current `B` and `θ_flanking`.
 
-Tries `warm_start`, then `[0.001, 0.001]`, `[0, 0.001]`, `[0.001, 0]`, and accepts the
-first root whose residuals are `<= atol`. A zero component is accepted when it satisfies
-the system (it is the correct root when `al_low == 0` or `al_low == al_tot`). If no start
-reaches the tolerance it throws, and `simulate_models!` drops the model instead of
-writing a row whose alpha label does not match its fixations.
+`NLsolve.nlsolve` runs from `warm_start`, then `[0.001, 0.001]`, `[0, 0.001]` and
+`[0.001, 0]`; negative roots are clamped to 0 and the first root whose residuals are
+`<= atol` is kept. A zero component is accepted when it satisfies the system (the right
+root when `al_low == 0` or `al_low == al_tot`). Returns the tuple `(ppos_l, ppos_h)`.
+
+Throws an `ErrorException` if no start reaches `atol`; `rates` then drops the model.
 """
 function set_ppos!(param::parameters; warm_start::Vector{Float64} = [0.0, 0.0],
                    atol::Float64 = 1e-6)
@@ -252,7 +273,7 @@ const _NEUT_CACHE = Dict{Tuple{Int,Int,Float64},Vector{Float64}}()
 """
     TailWeights
 
-Projection weights used by `rates()` (see `_sfs_dac!` in `src/rates.jl`).
+Projection weights used by `rates()` (see `_sfs_dac!` in `src/abcmk/rates.jl`).
 
 `rates()` only needs the cumulative SFS at the `dac` values, so the binomial projection
 followed by `cumulative_vector!` reduces to one dot product per DAC against
@@ -358,16 +379,17 @@ function tail_weights_op(
 end
 
 """
-	binom_op(param)
+    binom_op(param) -> SparseMatrixCSC{Float64,Int64}
+    binom_op(param, B_bins) -> Dict{Float64,SparseMatrixCSC{Float64,Int64}}
 
-Binomial convolution to sample the allele frequencies probabilites depending on background selection values and sample size.
+Binomial sampling matrix that projects population frequencies onto the sample.
 
-# Arguments
- - `param::parameters`
- - `B_bins::Vector{Float64}`
-
-# Returns
- - `Array{Float64,2}`: convoluted SFS for each B value defined in the model (B_bins). The estimations are saved at *convolutedBn.bn*.
+With `NN2 = ceil(NN B)` chromosomes (the population size reduced by background
+selection), entry `[i, j+1]` is the probability of `i` derived alleles in `nn` sampled
+chromosomes when the population frequency is `j/NN2`, for `i = 1:nn-1` and `j = 0:NN2`
+(rounded to 10 digits, zeros dropped). The one-argument method uses `param.B`; the second
+returns one matrix per value of `B_bins`. Results are cached per `(NN, nn, B)`; call
+`clear_binom_cache!()` to free them.
 """
 function binom_op(param::parameters, B_bins::Vector{Float64})
     key = (param.NN, param.nn, hash(B_bins))
@@ -435,40 +457,23 @@ function binom_op(param)
 end
 
 """
+    Φ(param, s::Int64) -> Float64
 
-	Φ(param,s)
+Factor (in `(0, 1]`) by which background selection and linkage reduce the fixation
+probability of a beneficial mutation with coefficient `s` (`2N` times the heterozygote
+coefficient), from the `param.Lf` linked deleterious sites
+([Charlesworth 1994](https://doi.org/10.1017/S0016672300032365),
+[Barton 1995](https://www.genetics.org/content/140/2/821)).
 
-
-Reduction in fixation probabilty due to background selection and linkage. The formulas used have been subjected to several theoretical works ([Charlesworth B., 1994](https://doi.org/10.1017/S0016672300032365), [Hudson et al., 1995](https://www.genetics.org/content/141/4/1605), [Nordborg et al. 1995](https://doi.org/10.1017/S0016672300033619), [Barton NH., 1995](https://www.genetics.org/content/140/2/821)).
-
-The fixation probabilty of selected alleles are reduce by a factor ``\\phi``:
-
-```math
-\\phi(t,s) = e^{[\\frac{-2\\mu}{t(1+\\frac{rL}{t}+\\frac{2s}{t})}]}
-```
-
-Multiplying across all deleterious linkes sites, we find:
+The product over linked sites of the per-site reduction gives
 
 ```math
-\\Phi = \\prod_{1}^{L} = \\phi(t,s) = e^{\\frac{-2t\\mu(\\psi[1,\\frac{r+2s+L}{r}] - \\psi[1,\\frac{r(L+1)+2s+t}{r}])}{r^2}}
+\\Phi = e^{-\\frac{2 t \\mu \\left(\\psi_1\\left(\\frac{r + 2s + t}{r}\\right) - \\psi_1\\left(\\frac{r (L_f + 1) + 2s + t}{r}\\right)\\right)}{r^2}}
 ```
 
-```math
-\\phi(t,s) = e^{\\frac{-2t\\mu(\\psi[1,\\frac{r+2s+L}{r}] - \\psi[1,\\frac{r(L+1)+2s+t}{r}])}{r^2}}
-```
-
-# Arguments
- - `param::parameters`: mutable structure containing the variables required to solve the model
- - `gamma::Int64`: selection coefficient.
-
-The expression is Uricchio et al. 2019 Supplementary eqn. 14 / Murga-Moreno et al. 2024
-(G3) eqn. 9. Previous versions omitted the factor of two on the beneficial coefficient
-(and the `r +` in the first polygamma), which made the reduction of strongly beneficial
-fixations about twice too large.
-
-# Returns
- - `Float64`: expected rate of positive fixations under background selection.
-
+with `t = |gam_flanking|/NN`, `μ = θ_flanking/(2NN)`, `r = ρ/(2NN)`, `s = s/NN` and
+`ψ₁` the trigamma function: Uricchio et al. 2019, Supplementary eq. 14, and
+Murga-Moreno et al. 2024, eq. 9.
 """
 function Φ(param::parameters, s::Int64)
     S::Float64 = abs(param.gam_flanking / (1.0 * param.NN))
@@ -484,18 +489,27 @@ function Φ(param::parameters, s::Int64)
 end
 
 """
-	analytical_alpha(param)
+    analytical_alpha(param; cumulative = false) -> (α, α_nopos)
 
-Analytical α(x) estimation. Solve α(x) generally. We used the expected fixation rates and SFSto approach the asympotic value accouting for background selection, weakly and strong positive selection. α(x) can be estimated taking into account the role of positive selected alleles or not. In this way we explore the role of linkage to deleterious alleles in the coding region.
+Expected α(x) of the model in `param`, at every derived allele count `1:nn-1`:
 
 ```math
-\\mathbb{E}[\\alpha_{x}] =  1 - \\left(\\frac{\\mathbb{E}[D_{s}]}{\\mathbb{E}[D_{N}]}\\frac{\\mathbb{E}[P_{N}]}{\\mathbb{E}[P_{S}]}\\right)
+\\mathbb{E}[\\alpha_{x}] = 1 - \\frac{\\mathbb{E}[D_{s}]}{\\mathbb{E}[D_{n}]}\\frac{\\mathbb{E}[P_{n}(x)]}{\\mathbb{E}[P_{s}(x)]}
 ```
 
-# Arguments
- - `param::parameters`
+`ppos_l` and `ppos_h` are solved at `B = 0.999` ([`set_ppos!`](@ref)), then the fixation
+rates and spectra are computed at `param.B`. `param` is modified: `ppos_l`, `ppos_h` and
+`θ_flanking` (the value for `param.B`) are left set.
+
+# Keywords
+ - `cumulative::Bool = false`: use the tails (DAC >= x) of the spectra instead of the
+   per-frequency counts.
+
 # Returns
- - `Tuple{Vector{Float64},Vector{Float64}}`: α(x) accounting for weak adaptation, α(x) non-accouting for weak adaptation.
+ - `α::Vector{Float64}`: α(x) with all nonsynonymous polymorphism (deleterious and
+   beneficial).
+ - `α_nopos::Vector{Float64}`: α(x) with deleterious polymorphism only, whose asymptote
+   is the true α.
 """
 function analytical_alpha(param::parameters; cumulative::Bool=false)
     binom = binom_op(param)

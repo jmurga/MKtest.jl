@@ -6,15 +6,22 @@ function cumulative_vector!(v::Union{SubArray,Vector{T}}) where {T<:Number}
 end
 
 """
-	cumulative_sfs(sfs_tmp)
+    cumulative_sfs(sfs, freqs = true)
 
-Changing SFS considering all values above a frequency *x*. The original aMK approach takes Pn(x) and Ps(x) as the number of polymorphic sites at frequency *x* rather than above *x*, but this approach scales poorly as sample size increases. We define the polymorphic spectrum as stated above since these quantities trivially have the same asymptote but are less affected by changing sample size.
+Tail sums of an SFS: row i holds the counts of rows `i, i+1, ..., end`, so `Pn(x)` and
+`Ps(x)` become the numbers of polymorphisms at frequency `>= x`.
+
+The original asymptotic MK test uses the counts at x itself; the tail sums have the same
+asymptote and are less sensitive to the sample size. A row whose tail sum (over all
+count columns) is not positive is set to 0.
 
 # Arguments
- - `sfs_tmp::Union{Array,SubArray}`: SFS vector.
- - `freqs::Bool`: true/false wheter the input SFS vector containing a first columns with the frequencies.
-# Output 
- - `Vector{Float64}`: SFS vector.
+ - `sfs::Union{Array,SubArray}`: an SFS matrix, `[DAC Pn Ps]` from [`parse_sfs`](@ref).
+ - `freqs::Bool`: column 1 holds the DAC (or frequency) and is copied unchanged;
+   `false` cumulates every column.
+
+# Returns
+ - A matrix of the same size and element type as `sfs`.
 """
 function cumulative_sfs(sfs_tmp::Union{Array, SubArray}, freqs::Bool = true)
     n, m = size(sfs_tmp)
@@ -43,41 +50,53 @@ end
 
 
 """
-	reduce_sfs(sfs_tmp,bins)
+    reduce_sfs(sfs, bins; n = nothing)
 
-Function to reduce the SFS into N bins.
+Collapse an SFS into `bins` derived allele frequency bins of equal width.
+
+Row `i` has frequency `x = DAC / n`; it goes to bin `k` when `(k - 1) / bins < x <= k / bins`,
+and the counts of columns 2 to end are summed within each bin. Bins that receive no row
+hold 0.
 
 # Arguments
- - `sfs_tmp::Vector{Float64}`: SFS vector.
- - `bins::Int64`: bin size to collapse the SFS.
-# Output 
- - `Vector{Float64}`: Binned SFS vector.
+ - `sfs::AbstractMatrix`: an SFS `[DAC Pn Ps ...]` (any number of count columns).
+ - `bins::Int`: number of frequency bins.
+
+# Keywords
+ - `n::Union{Nothing,Int}`: haploid sample size. By default `size(sfs, 1) + 1`, which needs
+   the full SFS (DAC `1..n-1`). Pass it for any SFS trimmed by `parse_sfs(...; cutoff)`:
+   a trim at the low end throws without it, but a top-only trim (DAC `1..k`) cannot be
+   told apart from a full SFS of `k + 1` chromosomes and would give wrong frequencies.
+
+# Returns
+ - `Matrix{Float64}` of `bins` rows: column 1 is the upper edge `k / bins` of each bin (a
+   frequency, which `fww_mk`, `imputed_mk` and `standard_mk` accept as such), the other
+   columns the summed counts.
+
+# Example
+```julia
+sfs = hcat(1:9, ones(9), 2 .* ones(9))   # n = 10 chromosomes
+MKtest.reduce_sfs(sfs, 2)                # [0.5 5 10; 1.0 4 8]
+```
 """
-function reduce_sfs(sfs_tmp::Array, bins::Int64)
-    freq = collect(0:(size(sfs_tmp, 1)-1)) / size(sfs_tmp, 1)
-    h1 = StatsBase.fit(StatsBase.Histogram, freq, 0:(1/(bins-1)):1)
-    xmap1 = StatsBase.binindex.(Ref(h1), freq)
-
-    tmp = hcat(sfs_tmp, xmap1)
-    out = Array{Float64}(undef, bins - 1, size(sfs_tmp, 2))
-    vIter = convert(Array, unique(xmap1)')
-    @simd for i in eachindex(vIter)
-        @inbounds out[i, 2:end] = sum(tmp[tmp[:, end].==i, 2:(end-1)], dims = 1)
+function reduce_sfs(sfs::AbstractMatrix, bins::Int; n::Union{Nothing,Int}=nothing)
+    bins > 0 || throw(ArgumentError("bins must be positive, got $bins"))
+    freq = view(sfs, :, 1) ./ _alpha_x_n(sfs, n)
+    out = zeros(bins, size(sfs, 2))
+    out[:, 1] .= (1:bins) ./ bins
+    for i in axes(sfs, 1)
+        # the bin of x: ceil(x bins), with x = k / bins exactly kept in bin k
+        k = clamp(ceil(Int, round(freq[i] * bins; digits = 10)), 1, bins)
+        @views out[k, 2:end] .+= sfs[i, 2:end]
     end
-
-    out[:, 1] = collect(1:(bins-1)) ./ bins
-
-    return (out)
+    return out
 end
 
 """
-Log of N choose k.
+    _lncomb(N, k)
 
-# Arguments
- - `N::Int64`
- - `k::Union{Vector{Int64},Int64}`
-# Output
- - `Vector{Float64}`
+Log of the binomial coefficient `N choose k`, through `loggamma`; broadcast over a
+vector `k`.
 """
 function _lncomb(N::Int64,k::Union{Vector{Int64},Int64})
 
@@ -85,14 +104,11 @@ function _lncomb(N::Int64,k::Union{Vector{Int64},Int64})
 end
 
 """
-Coefficients for projection from a different sfs size.
+    _cached_projection(proj_to, proj_from, hits)
 
-# Arguments
- - `proj_to::Int64`: Numper of samples to project down to.
- - `proj_from::Int64`: Numper of samples to project from.
- - `hits::Int64`: Number of derived alleles projecting from.
-# Output
- - `Vector{Float64}`: projection weights.
+Hypergeometric weights of `0:proj_to` derived alleles in a subsample of `proj_to`
+chromosomes drawn from `proj_from` chromosomes carrying `hits` derived alleles,
+computed in logs. Nothing is cached, despite the name.
 """
 function _cached_projection(proj_to::Int64, proj_from::Int64, hits::Int64)
 
@@ -108,16 +124,28 @@ function _cached_projection(proj_to::Int64, proj_from::Int64, hits::Int64)
 end
 
 """
-Project SFS to smaller sample size following DADI and moments implementation
+    project(sfs, n)
+
+Project an SFS down to `n` diploid individuals (`2n` chromosomes), by hypergeometric
+sampling as in dadi and moments.
+
+The projected counts are truncated to integers. Only columns 2 and 3 are projected, and
+the input is taken to be a full spectrum of `size(sfs, 1) + 1` chromosomes: an SFS
+trimmed by `parse_sfs(...; cutoff)` gives a wrong projection. For data read with
+`ploidy = 1`, `n` still means `2n` chromosomes.
 
 # Arguments
- - `sfs::Matrix{Float64}`: SFS parsed from parse_sfs
- - `n::Int64`: new sample sample size
-# Output:
- - `Vector{Float64}`: projected SFS.
+ - `sfs::Matrix{Float64}` (or a `Vector` of them, projected in parallel threads): the
+   full raw SFS `[DAC Pn Ps]` from [`parse_sfs`](@ref).
+ - `n::Int64`: number of diploid individuals to project to. Throws an `AssertionError`
+   unless `n < size(sfs, 1)`.
+
+# Returns
+ - `Matrix{Float64}` `[DAC Pn Ps]` with `2n - 1` rows (a `Vector` of them for a
+   `Vector` input).
 """
 function project(sfs::Matrix{Float64},n::Int64)
-    @assert size(sfs,1) > n "n is larger than the SFS. Select another sample size to project"
+    @assert 2n <= size(sfs,1) + 1 "n is larger than the SFS. Select another sample size to project"
 
     n *= 2;
 
@@ -147,6 +175,23 @@ function project(sfs::Vector{Matrix{Float64}},n::Int64)
     return ThreadsX.mapi(x -> project(x,n),sfs)
 end
 
+"""
+    fold(sfs)
+
+Fold an SFS into the minor allele spectrum: the counts at DAC `i` and `m - i` are added,
+for `m = size(sfs, 1) + 1` chromosomes.
+
+The input must be a full, untrimmed spectrum. All columns after the first are folded; the
+middle bin (`i = m / 2`, `m` even) is counted once.
+
+# Arguments
+ - `sfs::Matrix{Float64}` (or a `Vector` of them, folded in parallel threads): raw SFS
+   `[DAC Pn Ps]`.
+
+# Returns
+ - `Matrix{Float64}` with `floor(m / 2)` rows, `[DAC Pn Ps]` for DAC `1:floor(m / 2)`
+   (a `Vector` of them for a `Vector` input).
+"""
 function fold(sfs::Matrix{Float64})
 
     n, m = size(sfs); n+=1;
@@ -171,19 +216,22 @@ function fold(sfs::Vector{Matrix{Float64}})
 end
 
 """
-Get standard Kingman SFS.
+    standard_kingman(n)
 
-# Arguments
- - n: sample size
-# Output
- - Expected SFS
+Shape of the neutral SFS under the standard coalescent, `1 ./ (1:n)` (unscaled by θ).
 """
 function standard_kingman(n::Int64)
     return 1 ./ collect(1:n)
 end
 
 """
-Calculate site-wise theta using Watterson's estimator.
+    θ(sfs, divergence)
+
+Per-site Watterson θ from the synonymous polymorphisms: `Ps / a / (Ps + Ls)`, with
+`a = Σ 1/i` over the `size(sfs, 1)` SFS rows and `Ls = divergence[4]`.
+
+`divergence` must be a `Matrix`; the `Vector` returned by [`parse_sfs`](@ref) has no
+method.
 """
 function θ(sfs::Matrix,divergence::Matrix)
     n_polymorphic = sum(@view sfs[:,3])
@@ -213,6 +261,16 @@ function rᵢ!(sfs::Matrix,divergence::Matrix)
     # return sfs_adjusted
 end
 
+"""
+    write_files(x::Union{Matrix{Float64},SubArray}, name)
+    write_files(x::DataFrame, name, newfile)
+
+Write `x` to `name` as tab-separated text without a header.
+
+A matrix is written gzip-compressed when `name` ends in `.gz`, replacing any existing
+file. A `DataFrame` is appended to `name` when `newfile = true` (despite the name), and
+replaces it when `false`; it is never compressed.
+"""
 # A `.gz` name is written gzip-compressed.
 function write_files(x::Matrix{Float64}, name::String)
     CSV.write(name, Tables.table(x), delim = '\t', header = false, compress = endswith(name, ".gz"))
@@ -236,6 +294,14 @@ function write_files(x::DataFrame, name::String, newfile::Bool)
     CSV.write(name, x, delim = '\t', header = false, append = newfile)
 end;
 
+"""
+    read_gz(file)
+    read_gz(files::Vector{String})
+
+Read a tab-separated numeric file, plain or gzipped, into a `Matrix{Float64}` (no
+header). A file that cannot be read gives a warning and `zeros(1, 12)`. The `Vector`
+form reads the files in parallel threads and returns a `Vector` of matrices.
+"""
 # read gz since CSV.read is bugged at node server
 function read_gz(out_file::String)
     try
@@ -251,26 +317,52 @@ function read_gz(out_file::Vector{String})
 end
 
 """
-    grapes(sfs,divergence,model)
+    grapes(sfs, divergence, model; n = 0, nearly_neutral = 5, FWW_threshold = 0.15,
+           nb_rand_start = 0, anc_to_rec_Ne_ratio = 1.0, no_div_data = false,
+           no_div_param = false, no_syn_orient_error = false, fold = false,
+           fixed_param = "")
 
-Run grapes using SFS and divergence data. The function will install grapes using Conda from genomedk channel. 
+Run the GRAPES binary (Galtier 2016) on each dataset and return its estimates.
+
+The binary comes from the `grapes-static` package of the `genomedk` conda channel,
+installed through CondaPkg on first use. Each dataset is written to a temporary `.dofe`
+file and the runs go in parallel threads; the files of a successful run are removed.
+For a Julia implementation of the same model see `dfe_ml`.
 
 # Arguments
- - `sfs::Vector{Matrix{Float64}}`: SFS data parsed from parse_sfs()
- - `divergence::Vector{Matrix{Int64}}`: divergence data parsed from parse_sfs()
- - `model::String`: grapes model (GammaZero, GammaExpo, DisplGamma, ScaledBeta, FGMBesselK and all)
- - `n::Int64`: smaller sample size to project the SFS
- - `nearly_neutral::Int64`: Sadp threshold of above which a mutation is considered adaptive
- - `FWW_threshold::Float64`: minimal allele frequency in FWW α
- - `nb_rand_start::Int64`: number of random starting values in model optimization (default=0); setting positive values will slow down the program but decrease the probability of being trapped in local optima.
- - `anc_to_rec_Ne_ratio::Float64`: divergence/polymorphism Ne ratio
- - `no_div_data::Bool`: only use divergence data to estimate DFE
- - `no_div_param::Bool`: implements so-called [-A] version in Galtier (2016); also called a DFE by Tataru et al. (2017), and indicated with * in Rousselle et al. (2018); irrelevant if model = GammaZero; (default=false)
- - `no_syn_orient_error::Bool`: force equal synonymous and non-synonymous mis-orientation rate(default=false)
- - `fold::Bool`: fold the SFS
- - `fixed_param::String`: this option should be used if one does not want to optimize every parameter, but rather have some parameters fixed to predefined values; parameter names and predefined values are passed via a control file; see example at the bottom of this file (default=none).
-# Output
- - `DataFrame`: grapes model estimation.
+ - `sfs`: raw SFS `[DAC Pn Ps]`, a `Matrix` or a `Vector` of them. It must be a full
+   spectrum (GRAPES reads `size(sfs, 1) + 1` chromosomes, or `2n` after projection).
+ - `divergence`: `[Dn, Ds, Ln, Ls]`, a `Vector` or a `Vector` of them. Ln and Ls are
+   required.
+ - `model::String`: `"GammaZero"`, `"GammaExpo"`, `"GammaGamma"`, `"DisplGamma"`,
+   `"ScaledBeta"`, `"FGMBesselK"` or `"all"`; anything else throws an `AssertionError`.
+
+# Keywords (GRAPES options)
+ - `n::Int64`: if positive, [`project`](@ref) the SFS to `n` diploid individuals first.
+ - `nearly_neutral::Int64`: `-nearly_neutral`, the S threshold above which a mutation
+   counts as adaptive.
+ - `FWW_threshold::Float64`: `-FWW_threshold`, the lowest frequency kept in GRAPES' FWW
+   alpha.
+ - `nb_rand_start::Int64`: `-nb_rand_start`, random starting points of the optimizer.
+ - `anc_to_rec_Ne_ratio::Float64`: `-anc_to_rec_Ne_ratio`, the ratio of the divergence to
+   the polymorphism Ne.
+ - `no_div_data::Bool`: `-no_div_data`, estimate the DFE from the polymorphism alone.
+ - `no_div_param::Bool`: `-no_div_param`, the [-A] version of Galtier (2016); ignored
+   for GammaZero.
+ - `no_syn_orient_error::Bool`: `-no_syn_orient_error`, the same misorientation rate for
+   synonymous and nonsynonymous sites.
+ - `fold::Bool`: `-fold`, fit the folded SFS.
+ - `fixed_param::String`: `-fixed_param`, the path of a GRAPES control file of
+   parameters fixed to given values; empty for none.
+
+A `0` anywhere in `divergence` (including Ln = Ls = 0 from a table without site counts)
+throws an `ArgumentError`.
+
+# Returns
+ - `DataFrame`: the GRAPES output tables of the datasets that ran, stacked. For a single
+   model the columns are GRAPES' first 20, those of `model`, and those from `theta` on;
+   `"all"` keeps every column. A dataset that fails gives a warning and no row,
+   so rows then no longer follow the dataset order.
 """
 function grapes(
     sfs::Union{Vector,Matrix},
@@ -393,10 +485,27 @@ function grapes(
     return (vcat(df...))
 end
 
+"""
+    sfs_to_dofe(pn, ps, dn, ds, ln, ls, w, n)
+
+One GRAPES `.dofe` data line as a one-row `DataFrame`: the name `"dofe_<w>"`, the number
+of chromosomes `n`, `Ln`, the Pn spectrum, `Ls`, the Ps spectrum, then `Ln, Dn, Ls, Ds`
+(the same site counts for polymorphism and divergence). `pn` and `ps` are `1 x (n - 1)`
+row vectors.
+"""
 function sfs_to_dofe(pn, ps, dn, ds, ln, ls, w, n)
     return(DataFrame(hcat("dofe_" * string(w), n, ln, pn, ls, ps, ln, dn, ls, ds...), :auto))
 end
 
+"""
+    read_clean_grapes(dofe, grapes_file, model)
+
+Read the GRAPES output `grapes_file` into a `DataFrame` and delete it, its `.profile`
+and `.messages` files and the input `dofe`. For a single `model` the first 20 columns,
+the columns of `model` and those from `theta` on are kept; `"all"` keeps the whole table.
+If any step fails (no output, or a file missing) it warns and returns `nothing`, leaving
+the files in place.
+"""
 function read_clean_grapes(dofe::String,grapes_file::String,model::String)
     # Try to open file if grapes executed properly
     output = @suppress_err begin

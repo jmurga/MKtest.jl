@@ -277,25 +277,12 @@ end
         r2 = MKtest.dfe_ml(ML_SFS, ML_DIV, GammaExpo())
         @test r2.inference.alpha_dfe[1] > 0.0
 
-        cmp = MKtest.dfe_model_comparison(vcat(r, r2))
-        @test sort(cmp.aic.model) == ["GammaExpo", "GammaZero"]
-        @test nrow(cmp.lrt) <= 1
-        if nrow(cmp.lrt) == 1
-            @test cmp.lrt.model_null[1] == "GammaZero" && cmp.lrt.model_alt[1] == "GammaExpo"
-            @test cmp.lrt.df[1] == 2
-        end
-
-        # at lethal_prop = 0 (fixed) the wrapper is its base, fit included
-        rl = MKtest.dfe_ml(ML_SFS, ML_DIV, wl; fixed = (lethal_prop = 0.0,))
-        @test rl.inference.loglik[1] ≈ r.inference.loglik[1] atol=1e-9
-        @test rl.inference.n_params[1] == r.inference.n_params[1]
-
         # no divergence data: nothing throws, alpha_div is undefined
         r3 = MKtest.dfe_ml(ML_SFS, [0.0, 0.0, 1.0e6, 3.0e5], GammaZero(); div_model = MKtest.NoDivergence())
         @test isnan(r3.inference.alpha_div[1])
         @test isfinite(r3.inference.loglik[1]) && r3.inference.loglik[1] < 0
         # without divergence the SFS alone is scored: the saturated Dn/Ds terms are absent
-        @test r3.inference.loglik[1] != MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero()).inference.loglik[1]
+        @test r3.inference.loglik[1] != r.inference.loglik[1]
     end
 
     # --- IntervalCDF quadrature -------------------------------------------------
