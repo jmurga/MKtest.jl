@@ -1,0 +1,2 @@
+alpha,cmd,date,grapes_version,julia,lnL,model,n_chrom,n_ind,n_param_grapes,p_negGmean,p_negGshape,p_syno_orientation_error,src_sha,theta,wall_s
+0.1163,grapes -in <dofe> -out <out> -model GammaZero -nearly_neutral 5 -FWW_threshold 0.15 -nb_rand_start 0 -anc_to_rec_Ne_ratio 1.0,2026-10-15T01:36:57.223,grapes-static-1.1.0-h6bb024c_1,1.13.1,-321.8092,GammaZero,40,20,44,1144.689314,0.078388,0.0,622e6e0bb9d056b092196a880a8dc891139f50969fa858ac68798123011be064,0.001619,82.36365103721619
