@@ -157,10 +157,10 @@ MKtest.plot_α_x(sfs, div; sample_size = 50, cutoff = [0.0, 1.0])
 ### Asymptotic MK
 
 The asymptotic fit: the observed alpha(x), the fitted curve, the asymptote (dashed) and
-its 95% CI. The fit uses `cutoff = [0.0, 0.7]`, as in the example above.
+its 95% CI.
 
 ```@example mk
-amk = MKtest.asymptotic_mk(sfs, div; cutoff = [0.0, 0.7])
+amk = MKtest.asymptotic_mk(sfs, div)
 MKtest.plot_asymptotic_mk(amk)
 ```
 
