@@ -19,6 +19,6 @@ AGENTS.md
 .zed/
 docs/agents/
 *.md
-!README.md
+!/README.md
 !docs/src/
 !docs/src/**/*.md
