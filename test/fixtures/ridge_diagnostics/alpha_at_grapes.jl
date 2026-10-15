@@ -10,7 +10,7 @@ function alpha_at(m, s, θ)
     x = [MKtest._to_opt(θ[i], lay.log_scale[i]) for i in lay.opt_idx]
     MKtest._set_params!(obj, x); ll, th = MKtest._loglik!(obj)
     f = MKtest._FitOutcome(obj, x, ll, th, true, length(x))
-    c = MKtest.FitContext(f; nearly_neutral = 5.0, FWW_threshold = 0.15, alpha_ci_threshold = 0.0)
+    c = MKtest.FitContext(f; nearly_neutral = 5.0, alpha_ci_threshold = 0.0)
     return ll, MKtest.summarize(MKtest.DFEMAlpha(), c).alpha, (c.exp_div_N1, c.exp_div_N2, c.exp_div_N3, c.totN)
 end
 for row in eachrow(sort(tab, [:model, :n_ind]))

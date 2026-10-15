@@ -30,7 +30,8 @@ design is `docs/agents/briefs/task1_phase0_report.md` on dev.
    DFE-predicted (`DFEConstrainedDivergence`).
 6. Multi-start optimisation: model starts + box centre + `nb_rand_start` (MersenneTwister(42)).
 7. At the optimum the same objective is re-evaluated, and `FitContext` carries the fitted
-   SFS and the divergence decomposition to the summaries (DFEMAlpha, FWWAlpha).
+   SFS and the divergence decomposition to the summaries (DFEMAlpha; the data-only MK
+   alphas are `standard_mk` / `fww_mk`, not part of the engine).
 
 ## Traps
 

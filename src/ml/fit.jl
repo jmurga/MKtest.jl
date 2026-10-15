@@ -186,7 +186,7 @@ What a finished fit hands to `summarize`:
   (always the DFE prediction), `exp_div_N1`, `exp_div_N2`, `exp_div_N3` (expected Dn
   from mutations with S <= -nearly_neutral, <= 0, <= nearly_neutral),
   `effective_Ln_div`, `lambda` (neutral substitution rate per site);
-- the settings `nearly_neutral`, `FWW_threshold`, `alpha_ci_threshold`,
+- the settings `nearly_neutral`, `alpha_ci_threshold`,
   `divergence_free`.
 """
 struct FitContext{M<:AbstractDFEModel,P<:PrecomputedData,K<:AbstractLikelihoodKernel}
@@ -210,12 +210,11 @@ struct FitContext{M<:AbstractDFEModel,P<:PrecomputedData,K<:AbstractLikelihoodKe
     effective_Ln_div::Float64
     lambda::Float64
     nearly_neutral::Float64
-    FWW_threshold::Float64
     alpha_ci_threshold::Float64
     divergence_free::Bool
 end
 
-function FitContext(f::_FitOutcome; nearly_neutral::Float64, FWW_threshold::Float64,
+function FitContext(f::_FitOutcome; nearly_neutral::Float64,
                     alpha_ci_threshold::Float64)
     obj = f.obj
     data, pre = obj.data, obj.pre
@@ -246,7 +245,7 @@ function FitContext(f::_FitOutcome; nearly_neutral::Float64, FWW_threshold::Floa
                       copy(obj.layout.names), theta, f.loglik, copy(obj.exp_neut), copy(obj.exp_sel),
                       obj.kernel, _kernel_disp(obj), totN, pred(opt_lambda, Inf),
                       pred(opt_lambda, -nn), pred(opt_lambda, 0.0), pred(opt_lambda, nn),
-                      effL, opt_lambda, nn, FWW_threshold, alpha_ci_threshold, !obj.constrained_div)
+                      effL, opt_lambda, nn, alpha_ci_threshold, !obj.constrained_div)
 end
 
 function summarize(::DFEMAlpha, c::FitContext)
@@ -274,21 +273,6 @@ function summarize(::DFEMAlpha, c::FitContext)
             omega_a = omega_a, omega_a_ci_low = oa_lo, omega_a_ci_high = oa_hi,
             omega_na = omega_na, omega_na_ci_low = ona_lo, omega_na_ci_high = ona_hi,
             omega_obs = omega_obs, alpha_div = alpha_div, alpha_dfe = alpha_dfe)
-end
-
-function summarize(::FWWAlpha, c::FitContext)
-    d = c.data
-    (!d.div_available || d.fixN <= 0 || d.fixS <= 0) && return (alpha_fww = NaN,)
-    tot_N = 0.0
-    tot_S = 0.0
-    @inbounds for j in 1:d.n_bins
-        if (j / d.n) >= c.FWW_threshold
-            tot_N += d.specN[j]
-            tot_S += d.specS[j]
-        end
-    end
-    a = (tot_N > 0 && tot_S > 0) ? 1.0 - (tot_N * d.fixS) / (tot_S * d.fixN) : NaN
-    return (alpha_fww = a,)
 end
 
 # Warn for every free DFE parameter whose estimate sits on a bound: a clamped value
@@ -360,7 +344,7 @@ function fit_model(data::DataInput, pre::PrecomputedData, model::AbstractDFEMode
                    optimizer::AbstractOptimizer, ne_model::AbstractNeModel,
                    div_model::AbstractDivergenceModel, demography::AbstractDemography,
                    no_syn_orient_error::Bool, fixed::NamedTuple, bounds::NamedTuple,
-                   nb_rand_start::Int, nearly_neutral::Float64, FWW_threshold::Float64,
+                   nb_rand_start::Int, nearly_neutral::Float64,
                    alpha_ci_threshold::Float64, summaries)
     r = ne_ratio(ne_model)
     common = (kernel = kernel, quad = quad, optimizer = optimizer,
@@ -382,7 +366,7 @@ function fit_model(data::DataInput, pre::PrecomputedData, model::AbstractDFEMode
 
     lay = fit.obj.layout
     _warn_pinned_bounds(lay, fit.obj.full_param, model)
-    ctx = FitContext(fit; nearly_neutral = nearly_neutral, FWW_threshold = FWW_threshold,
+    ctx = FitContext(fit; nearly_neutral = nearly_neutral,
                      alpha_ci_threshold = alpha_ci_threshold)
 
     n_params = fit.n_opt + (route_a ? 1 : 0)

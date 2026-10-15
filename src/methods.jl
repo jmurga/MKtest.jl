@@ -874,7 +874,7 @@ or several datasets, with GRAPES' model (Galtier 2016). One row per dataset.
    `default_s_grid(expectation)` (`GrapesGrid()`).
  - `kernel::AbstractLikelihoodKernel = PoissonKernel()`; or `NegativeBinomialKernel()`.
  - `optimizer::AbstractOptimizer = LBFGSOptimizer()`; or `NelderMeadOptimizer()`.
- - `summaries = (DFEMAlpha(), FWWAlpha())`: the `AbstractAlphaSummary` column sets.
+ - `summaries = (DFEMAlpha(),)`: the `AbstractAlphaSummary` column sets.
 
 # Keywords (fit)
  - `fixed::NamedTuple = (;)`: pin parameters by name, e.g. `(pos_prop = 0.0,)`.
@@ -882,9 +882,9 @@ or several datasets, with GRAPES' model (Galtier 2016). One row per dataset.
  - `no_syn_orient_error::Bool = false`: do not fit `syno_orientation_error`.
  - `nb_rand_start::Int = 0`: extra random starting points (seeded, reproducible).
  - `nearly_neutral::Real = 5`: S threshold of adaptive substitutions in alpha.
- - `FWW_threshold::Real = 0.15`: minimum frequency of the FWW alpha.
- - `alpha_ci_threshold::Real = 0.0`: log-likelihood drop of the alpha CI (GRAPES uses
-   1.92); 0 disables it and the CI columns are NaN.
+ - `alpha_ci_threshold::Real = 1.92`: log-likelihood drop of the alpha CI (half the
+   chi-square(1) 95% quantile; GRAPES' interval). 0 disables it and the CI columns are NaN.
+   The CI exists only under `SaturatedDivergence`, as in GRAPES.
  - `cache::DFECache = DFECache()`: precomputed tables; pass one to reuse them across
    calls (safe across threads).
 
@@ -894,7 +894,7 @@ A `DataFrame`, one row per dataset, with the columns `dataset`, `model`, `n`
 optimised names, comma separated), `theta`, one column per parameter (DFE, then
 `syno_orientation_error`, then the kernel's), `Ne_ratio` under `AncestralNeRatio(:free)`,
 the summary columns (`alpha`, `alpha_ci_low`, `alpha_ci_high`, `omega_a`, ...,
-`omega_obs`, `alpha_div`, `alpha_dfe`, `alpha_fww`), and one column per axis setting
+`omega_obs`, `alpha_div`, `alpha_dfe`), and one column per axis setting
 (`expectation`, `integrator`, `quadrature`, `s_grid`, `dominance`, `demography`,
 `ne_model`, `div_model`, `kernel`, `optimizer`).
 """
@@ -913,14 +913,13 @@ function dfe_ml(sfs, divergence, model::AbstractDFEModel;
                 s_grid::Union{Nothing,AbstractSGrid} = nothing,
                 kernel::AbstractLikelihoodKernel = PoissonKernel(),
                 optimizer::AbstractOptimizer = LBFGSOptimizer(),
-                summaries = (DFEMAlpha(), FWWAlpha()),
+                summaries = (DFEMAlpha(),),
                 fixed::NamedTuple = NamedTuple(),
                 bounds::NamedTuple = NamedTuple(),
                 no_syn_orient_error::Bool = false,
                 nb_rand_start::Int = 0,
                 nearly_neutral::Real = 5,
-                FWW_threshold::Real = 0.15,
-                alpha_ci_threshold::Real = 0.0,
+                alpha_ci_threshold::Real = 1.92,
                 cache::DFECache = DFECache())
     sfs_l = _sfs_list(sfs)
     div_l = _div_list(divergence)
@@ -944,7 +943,6 @@ function dfe_ml(sfs, divergence, model::AbstractDFEModel;
                         ne_model = ne_model, div_model = div_model, demography = dem,
                         no_syn_orient_error = no_syn_orient_error, fixed = fixed, bounds = bounds,
                         nb_rand_start = nb_rand_start, nearly_neutral = Float64(nearly_neutral),
-                        FWW_threshold = Float64(FWW_threshold),
                         alpha_ci_threshold = Float64(alpha_ci_threshold), summaries = summaries)
         out = OrderedDict{Symbol,Any}(:dataset => i)
         merge!(out, row)
