@@ -84,13 +84,8 @@ tbl = MKtest.case_control_table(DataFrame([MKtest.fww_mk(case_sfs, case_div)]),
 MKtest.plot_violins_empirical(tbl; params = [:alpha, :omega_a])
 ```
 
-The alpha(x) curve of the case set against the 10-90% band of its 1000 control sets
-(`parse_sfs` returns the curves as `[DAC frequency alpha(x)]` tables):
-
-```@example cc
-MKtest.plot_α_x(case_ax[:, 3], [x[:, 3] for x in ctl_ax]; labels = ["DNA VIPs"],
-                cutoff = [0.0, 0.7])
-```
+The alpha(x) curve of the case set against the band of its control sets is on the
+[MK tests](mk.md) page.
 
 ## Making the control sets
 
