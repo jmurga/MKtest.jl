@@ -21,20 +21,22 @@ src/abcmk/               parameters, fixations, sfs (sfs_neut/pos/neg), summary_
 src/data/parse.jl        parse_sfs and data I/O
 src/utils.jl             project, fold, cumulative_sfs, reduce_sfs, theta, I/O (write_files, read_gz),
                          grapes / sfs_to_dofe / read_clean_grapes (GRAPES binary)
-src/ml/                  interface, models, integrators, grids, cache, likelihood, fit, api
-src/methods.jl           MK tests, abcmk
+src/ml/                  interface, models, integrators, grids, cache, likelihood, fit (engine internals)
+src/methods.jl           MK tests, abcmk, and (marked block at the end) dfe_ml / dfe_model_comparison
 src/bootstrap.jl, src/alpha_b.jl
 ext/                     MKtestPlotsExt (Plots), MKtestStatsPlotsExt (StatsPlots): plot methods
 ```
 
 Include order: abcmk/parameters, fixations, sfs, summary_statistics, rates, data/parse,
-abcmk/abc, utils, ml/* (in the order above), methods, bootstrap, alpha_b.
+abcmk/abc, utils, ml/* (in the order above), methods, bootstrap, alpha_b. New user-facing
+methods go in `methods.jl`; engine internals stay in `src/ml/`.
 
 `src/abcmk/`, `src/data/`, `src/utils.jl`, `methods.jl`, `bootstrap.jl`, `alpha_b.jl` are
 main 614be3c7 moved VERBATIM. `bash test/verbatim_gate.sh` proves it (sorted-line multiset
 against 614be3c7; allowed differences listed in `test/verbatim_allowlist.txt`: the ABCreg
-path and the `grapes()` flag fix). Any other edit there makes the gate fail; add it to the
-allow-list only on purpose.
+path, the `grapes()` flag fix and its .dofe header; the dfe_ml block at the end of
+`methods.jl`, between its `# >>>` / `# <<<` markers, is skipped). Any other edit there makes
+the gate fail; add it to the allow-list only on purpose.
 
 ## ABC-MK: the method
 

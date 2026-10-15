@@ -5,7 +5,8 @@
 # src/utils.jl and src/alpha_b.jl by whole functions, without changing a line. The gate
 # proves it without Julia: the multiset of non-blank lines of main's src/*.jl (except
 # MKtest.jl) must equal the multiset of non-blank lines of every branch src/**/*.jl outside
-# src/ml/ (and except MKtest.jl), up to the lines listed in test/verbatim_allowlist.txt:
+# src/ml/ (and except MKtest.jl and the marked dfe_ml block at the end of methods.jl), up to
+# the lines listed in test/verbatim_allowlist.txt:
 #   "- <line>"  a line of main allowed to disappear
 #   "+ <line>"  a line allowed to appear
 # ext/ must be byte-identical to main, and main's test/runtests.jl must be a prefix of the
@@ -35,7 +36,17 @@ done < <(git ls-tree -r --name-only "$BASE" -- src | grep '\.jl$')
 : > "$TMP/branch.txt"
 while IFS= read -r f; do
     nonblank < "$f" >> "$TMP/branch.txt"
-done < <(find src -name '*.jl' ! -path 'src/ml/*' ! -path 'src/MKtest.jl' | sort)
+done < <(find src -name '*.jl' ! -path 'src/ml/*' ! -path 'src/MKtest.jl' ! -path 'src/methods.jl' | sort)
+# methods.jl: main's lines plus the dfe_ml entry points, which sit in one block between
+# "# >>> dfe_ml entry points" and "# <<< dfe_ml entry points" and are skipped here.
+nb=$(grep -c '^# >>> dfe_ml entry points' src/methods.jl || true)
+ne=$(grep -c '^# <<< dfe_ml entry points' src/methods.jl || true)
+if [[ "$nb" != "1" || "$ne" != "1" ]]; then
+    echo "FAIL: src/methods.jl needs exactly one dfe_ml entry-point block (found $nb begin, $ne end markers)"
+    exit 1
+fi
+awk '/^# >>> dfe_ml entry points/{skip=1} !skip{print} /^# <<< dfe_ml entry points/{skip=0}' src/methods.jl |
+    nonblank >> "$TMP/branch.txt"
 
 sort "$TMP/main.txt" > "$TMP/main.sorted"
 sort "$TMP/branch.txt" > "$TMP/branch.sorted"
