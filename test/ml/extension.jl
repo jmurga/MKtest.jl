@@ -196,9 +196,9 @@ end
         @test abs(ro.loglik[1] - r0.loglik[1]) < 1e-2
 
         # summaries
-        rs = MKtest.dfe_ml(ML_SFS, ML_DIV, g0; summaries = (MKtest.DFEMAlpha(), UserDFEs.ThetaTwice()))
+        rs = MKtest.dfe_ml(ML_SFS, ML_DIV, g0; summaries = (UserDFEs.ThetaTwice(),))
         @test rs.theta_x2[1] == 2 * rs.theta[1]
-        @test !(:alpha_fww in propertynames(rs))
+        @test !(:alpha in propertynames(rs))       # only the summaries asked for
 
         # expectation with exterior terms: lethal_mass is the mass beyond the outer
         # cell EDGE (dev evaluated it at the outer grid point)

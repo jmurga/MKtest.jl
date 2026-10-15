@@ -422,7 +422,7 @@ end
         for col in (:model, :n, :converged, :loglik, :aic, :n_params, :free_params, :theta,
                     :negGshape, :negGmean, :syno_orientation_error, :alpha, :alpha_ci_low,
                     :alpha_ci_high, :omega_a, :omega_na, :omega_obs, :alpha_div, :alpha_dfe,
-                    :alpha_fww, :integrator, :kernel, :quadrature, :s_grid, :ne_model, :div_model,
+                    :integrator, :kernel, :quadrature, :s_grid, :ne_model, :div_model,
                     :dominance, :demography, :expectation, :optimizer)
             @test col in propertynames(r)
         end
@@ -431,9 +431,14 @@ end
         @test r.n_params[1] == 3
         @test r.aic[1] ≈ 2 * 3 - 2 * r.loglik[1]
         @test r.loglik[1] == r.loglik[2]           # same data, same answer
-        @test isnan(r.alpha_ci_low[1])             # CI off by default
-        rci = MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero(); alpha_ci_threshold = 1.92, cache = c)
-        @test rci.alpha_ci_low[1] < rci.alpha[1] < rci.alpha_ci_high[1]
+        # GRAPES' likelihood CI is on by default (threshold 1.92), and 0 switches it off
+        @test r.alpha_ci_low[1] < r.alpha[1] < r.alpha_ci_high[1]
+        @test !(:alpha_fww in propertynames(r))    # FWW is MKtest.fww_mk, not part of dfe_ml
+        r0ci = MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero(); alpha_ci_threshold = 0, cache = c)
+        @test isnan(r0ci.alpha_ci_low[1]) && isnan(r0ci.alpha_ci_high[1])
+        # the CI is GRAPES' rule: one lnL threshold drop in E[Dn]; a larger threshold is wider
+        rw = MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero(); alpha_ci_threshold = 4.0, cache = c)
+        @test rw.alpha_ci_low[1] < r.alpha_ci_low[1] && rw.alpha_ci_high[1] > r.alpha_ci_high[1]
 
         # fixed parameters keep their column and leave n_params
         rf = MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero(); fixed = (negGshape = 0.3,), cache = c)

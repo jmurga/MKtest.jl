@@ -31,13 +31,14 @@ One row per dataset with:
 | `converged`, `loglik`, `aic`, `n_params`, `free_params`, `theta` | the fit; `free_params` lists the optimised parameters, comma separated |
 | one column per parameter | the DFE's (`dfe_parameters` order), then `syno_orientation_error`, then the kernel's (`a`) |
 | `Ne_ratio` | only under `AncestralNeRatio(:free)` |
-| `alpha`, `alpha_ci_low`, `alpha_ci_high`, `omega_a`, `omega_a_ci_*`, `omega_na`, `omega_na_ci_*`, `omega_obs`, `alpha_div`, `alpha_dfe` | `DFEMAlpha()`; the CIs are NaN unless `alpha_ci_threshold > 0` (GRAPES uses 1.92) |
-| `alpha_fww` | `FWWAlpha()`, from bins at frequency >= `FWW_threshold` |
+| `alpha`, `alpha_ci_low`, `alpha_ci_high`, `omega_a`, `omega_a_ci_*`, `omega_na`, `omega_na_ci_*`, `omega_obs`, `alpha_div`, `alpha_dfe` | `DFEMAlpha()`; the CI is GRAPES' likelihood interval, `alpha_ci_threshold = 1.92` by default (0 disables it) |
 | `expectation`, `integrator`, `quadrature`, `s_grid`, `dominance`, `demography`, `ne_model`, `div_model`, `kernel`, `optimizer` | the axis settings of the fit |
 
 `alpha_div` uses the observed Dn as denominator (it equals `alpha` under the default
 `SaturatedDivergence`); `alpha_dfe` uses the Dn the fitted DFE predicts. They agree when
-the DFE explains the observed divergence.
+the DFE explains the observed divergence. The data-only MK alphas (standard, FWW,
+asymptotic) are separate methods: `MKtest.standard_mk`, `MKtest.fww_mk`,
+`MKtest.asymptotic_mk`.
 
 ## Model comparison
 
@@ -73,7 +74,7 @@ engine calls, so a new subtype of one axis needs no change to any other.
 | `quadrature` | `AbstractDFEQuadrature` | `MidpointDensity()` | `IntervalCDF()` | `fill_dfe_vals!(out, q, m, p, pre)` |
 | `s_grid` | `AbstractSGrid` | `GrapesGrid()` | `LogGammaGrid()` | `s_grid_points(g)`, `s_grid_widths(g, grid)` |
 | `optimizer` | `AbstractOptimizer` | `LBFGSOptimizer()` | `NelderMeadOptimizer()` | `run_optimizer(o, f, bounds, x0)` |
-| `summaries` | `AbstractAlphaSummary` | `(DFEMAlpha(), FWWAlpha())` | -- | `summarize(s, ctx::FitContext)` |
+| `summaries` | `AbstractAlphaSummary` | `(DFEMAlpha(),)` | -- | `summarize(s, ctx::FitContext)` |
 
 Methods added from outside the package are written with the module prefix, e.g.
 `MKtest.log_kernel(::MyKernel, k, mu, lf, d) = ...`.

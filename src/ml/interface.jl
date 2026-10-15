@@ -19,7 +19,7 @@
 #   DFE weight per S cell    AbstractDFEQuadrature      MidpointDensity()
 #   S grid                   AbstractSGrid              GrapesGrid()
 #   optimizer                AbstractOptimizer          LBFGSOptimizer()
-#   reported summaries       AbstractAlphaSummary       (DFEMAlpha(), FWWAlpha())
+#   reported summaries       AbstractAlphaSummary       (DFEMAlpha(),)
 #
 # Selection coefficients are S = 4 Ne s (GRAPES' convention) throughout.
 # =============================================================================
@@ -612,19 +612,11 @@ abstract type AbstractAlphaSummary end
     DFEMAlpha()
 
 GRAPES' DFE-model alpha: `alpha = (Dn - E[Dn | S < nearly_neutral]) / Dn`, with its
-likelihood CI (when `alpha_ci_threshold > 0`), omega_a, omega_na, the observed
+likelihood CI (`alpha_ci_threshold`, default 1.92; 0 disables it), omega_a, omega_na, the observed
 omega, and polyDFE's two readings `alpha_div` (observed Dn as denominator) and
 `alpha_dfe` (DFE-predicted Dn as denominator).
 """
 struct DFEMAlpha <: AbstractAlphaSummary end
-
-"""
-    FWWAlpha()
-
-The Fay-Wyckoff-Wu alpha, from SFS bins at frequency >= `FWW_threshold`, as GRAPES
-reports it. NaN when undefined.
-"""
-struct FWWAlpha <: AbstractAlphaSummary end
 
 """
     summarize(s::AbstractAlphaSummary, ctx::FitContext) -> NamedTuple
