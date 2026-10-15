@@ -107,23 +107,62 @@ MKtest.standard_mk(gs, gd; correction = :fdr)
 
 ## Plots
 
-The plot functions load with Plots.jl. The asymptotic fit of the 1000 Genomes data
-above: the observed alpha(x), the fitted curve, the asymptote (dashed) and its 95% CI.
+The plot functions load with Plots.jl. All examples use the 1000 Genomes table, the
+DNA-virus VIPs and their 1000 matched control sets (see
+[Case and control sets](case_control.md)); `parse_sfs` returns each alpha(x) curve as a
+`[DAC frequency alpha(x)]` table.
 
 ```@example mk
 using MKtest, Plots
 data = joinpath(pkgdir(MKtest), "data")
-sfs, div, alpha_x = MKtest.parse_sfs(joinpath(data, "MKdata_tgp_may2023.txt"); sample_size = 661)
+tgp = joinpath(data, "MKdata_tgp_may2023.txt")
+sfs, div, alpha_x = MKtest.parse_sfs(tgp; sample_size = 661)
+case_sfs, case_div, case_ax = MKtest.parse_sfs(tgp; sample_size = 661,
+                                               gene_list = joinpath(data, "DNAonly_VIPs.txt.gz"))
+ctl_sfs, ctl_div, ctl_ax = MKtest.parse_sfs(tgp; sample_size = 661,
+                                            gene_list = joinpath(data, "DNAonly_nonVIPs.txt.gz"))
+nothing # hide
+```
+
+### alpha(x)
+
+One curve, over the whole frequency range (`cutoff = [0.0, 1.0]`, the default):
+
+```@example mk
+MKtest.plot_α_x(alpha_x; cutoff = [0.0, 1.0])
+```
+
+Several curves on the same panel: pass a vector of tables (or several alpha(x) vectors)
+and one label per curve.
+
+```@example mk
+MKtest.plot_α_x([alpha_x, case_ax]; labels = ["all genes", "DNA VIPs"], cutoff = [0.0, 1.0])
+```
+
+A case against its controls: the case curve first, then the control curves, drawn as a
+band between the 10% and 90% quantiles at each frequency (`percentil = [0.1, 0.9]`):
+
+```@example mk
+MKtest.plot_α_x(case_ax[:, 3], [x[:, 3] for x in ctl_ax]; labels = ["DNA VIPs"],
+                cutoff = [0.0, 1.0])
+```
+
+The curve can also be computed from an SFS directly, projected first to `sample_size`
+individuals:
+
+```@example mk
+MKtest.plot_α_x(sfs, div; sample_size = 50, cutoff = [0.0, 1.0])
+```
+
+### Asymptotic MK
+
+The asymptotic fit: the observed alpha(x), the fitted curve, the asymptote (dashed) and
+its 95% CI. The fit uses `cutoff = [0.0, 0.7]`, as in the example above.
+
+```@example mk
 amk = MKtest.asymptotic_mk(sfs, div; cutoff = [0.0, 0.7])
 MKtest.plot_asymptotic_mk(amk)
 ```
 
-alpha(x) curves straight from the SFS, here projected to 50 individuals first:
-
-```@example mk
-MKtest.plot_α_x(sfs, div; sample_size = 50, cutoff = [0.0, 0.7])
-```
-
-`plot_α_x` also takes the `alpha_x` table of `parse_sfs`, several curves at once, and a
-set of control curves drawn as a band (see [Case and control sets](case_control.md));
-`output_path = "fig.pdf"` saves the figure (png, svg, pdf, ps or html).
+`output_path = "fig.pdf"` saves any of these figures (png, svg, pdf, ps or html), and
+other Plots.jl keywords (`title`, `ylims`, ...) pass through.
