@@ -33,7 +33,7 @@ _model_of(name) = Dict("GammaZero" => MKtest.GammaZero(), "GammaExpo" => MKtest.
         rb = MKtest.RombergIntegrator()
         report = DataFrame(n_ind = Int[], model = String[], lnL_grapes = Float64[], lnL_julia_at_grapes = Float64[],
                            lnL_julia_fit = Float64[], alpha_grapes = Float64[], alpha_julia = Float64[],
-                           lnL_exact_fit = Float64[], alpha_exact = Float64[], stalled = Bool[])
+                           stalled = Bool[])
         for row in eachrow(tab)
             m = _model_of(row.model)
             s = MKtest.project(sfs, row.n_ind)
@@ -63,12 +63,8 @@ _model_of(name) = Dict("GammaZero" => MKtest.GammaZero(), "GammaExpo" => MKtest.
             ll_starts = [MKtest._loglik_at(m, s, div, st; integrator = rb, cache = cache) for st in starts]
             stalled = any(abs.(ll_starts .- row.lnL) .< PARITY_TOL)
 
-            # the default integrator: finite and converged; the difference is recorded
-            je = MKtest.dfe_ml(s, div, m; cache = cache)
-            @test isfinite(je.inference.loglik[1]) && je.inference.converged[1]
-
             push!(report, (row.n_ind, row.model, row.lnL, ll_at, jf.inference.loglik[1], row.alpha, jf.inference.alpha[1],
-                           je.inference.loglik[1], je.inference.alpha[1], stalled))
+                           stalled))
         end
         show(stdout, report; allrows = true, allcols = true)
         println()

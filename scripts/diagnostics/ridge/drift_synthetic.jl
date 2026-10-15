@@ -3,7 +3,7 @@
 # the tgp n = 200 fit) at 400 chromosomes, Ln/Ls and theta like tgp, Dn/Ds = tgp's.
 # A self-consistency smoke check (oracle 4 style), 2 seeds; NOT evidence of accuracy.
 using MKtest, Random, Distributions
-sfs, div, _ = MKtest.parse_sfs(expanduser("~/.julia/dev/MKtest_grapes/data/MKdata_tgp_may2023.txt"); sample_size = 661)
+sfs, div, _ = MKtest.parse_sfs(joinpath(@__DIR__, "..", "..", "..", "data/MKdata_tgp_may2023.txt"); sample_size = 661)
 div = Float64.(vec(div)); Ln, Ls = div[3], div[4]
 pre = MKtest.get_precomputed(MKtest.DFECache(), 400)
 dens = zeros(length(pre.s_grid)); MKtest.dfe_density!(dens, MKtest.GammaZero(), [0.09, 1650.0], pre.s_grid)
