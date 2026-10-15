@@ -96,4 +96,5 @@ do); counts are truncated to integers. It needs the full, untrimmed SFS. Both ac
 `Vector` of SFS.
 
 Other helpers: `cumulative_sfs` (tail sums, the input of the alpha(x) curves),
-`reduce_sfs` (fewer frequency bins) and `bootstrap_data` (Poisson resamples of one SFS).
+`reduce_sfs(sfs, bins)` (the counts summed within `bins` equal-width frequency bins, each
+row at its upper edge `k / bins`) and `bootstrap_data` (Poisson resamples of one SFS).

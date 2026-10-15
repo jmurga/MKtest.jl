@@ -1,33 +1,36 @@
 """
     bootstrap_parameters(; data, annotations, distance, max_reps, tolerance, iterations,
-                         confounding_factors, output, filter_hla_hist)
+                         confounding_factors, output, filter_hla_hist, seed)
 
-Settings of `bootstrap`, the matched control-set builder of Enard & Petrov (2020) and
-Di et al. (2021). A keyword (`Parameters.@with_kw`) mutable struct; every field has a
+Settings of [`bootstrap`](@ref), the matched control-set builder of Enard & Petrov (2020)
+and Di et al. (2021). A keyword (`Parameters.@with_kw`) mutable struct; every field has a
 default.
 
 # Fields
  - `data::String`: file with the case gene IDs, one per line, no header. Default
    `"ensembl_list.txt"`.
- - `annotations::String`: tab-separated BED file without header, at least five columns
-   (chromosome, start, end, gene ID, one more column). The gene IDs in column 4 define the
-   gene universe. Default `"ensembl_gene_coords_v109.bed"`.
- - `distance::Int64`: minimum distance in bp from a candidate control gene to the closest
-   case gene, as reported by `bedtools closest -d` (see `get_distance`). Default `1`.
- - `max_reps::Int64`: a control gene may make up at most `max_reps / n_case` of the pooled
-   control genes of one iteration, i.e. on average at most `max_reps` copies per control
-   set. Default `3`.
+ - `annotations::String`: tab-separated BED file without header, at least four columns
+   (chromosome, start, end, gene ID). The gene IDs in column 4 define the gene universe.
+   Default `"ensembl_gene_coords_v109.bed"`.
+ - `distance::Int64`: minimum distance in bp between the midpoint of a candidate control
+   gene and the midpoint of the closest case gene (see [`get_distance`](@ref)). Genes on a
+   chromosome without case genes are always far enough. Default `1`, which only excludes
+   genes sharing a midpoint with a case gene.
+ - `max_reps::Int64`: a control gene may make up at most `max_reps / n_case` of the control
+   genes drawn in one iteration, i.e. about `max_reps` copies per control set. Default `3`.
  - `tolerance::Float64`: relative tolerance of the matching: the running average of every
-   confounding factor must stay within `[1 - tolerance, 1 + tolerance]` times the case average.
+   confounding factor must stay within `tolerance * |case average|` of the case average.
    Default `0.05`.
  - `iterations::Int64`: number of independent runs; each gives 100 control sets. Default `10`
    (1000 sets).
- - `confounding_factors::String`: file without header, gene ID then one numeric column per
-   factor. Default `"confounding_factors.txt"`.
+ - `confounding_factors::String`: file without header, separated by spaces or tabs: gene ID
+   then one numeric column per factor. Default `"confounding_factors.txt"`.
  - `output::String`: output prefix, without extension; `bootstrap` writes
    `<output>_case.txt` and `<output>_control.txt`. Default `"test"`.
  - `filter_hla_hist::Bool`: remove the human HLA and histone genes (Ensembl gene IDs, lists
    `hla_genes` and `hist_genes` in `src/bootstrap.jl`) from case and controls. Default `true`.
+ - `seed::Union{Nothing,Int}`: seed of the draws; iteration `i` uses `Xoshiro(seed + i)`, so
+   the sets do not depend on the thread count. `nothing` (default) draws from the global RNG.
 """
 @with_kw mutable struct bootstrap_parameters
     data::String = "ensembl_list.txt"
@@ -39,442 +42,160 @@ default.
     confounding_factors::String = "confounding_factors.txt"
     output::String = "test"
     filter_hla_hist::Bool = true
+    seed::Union{Nothing,Int} = nothing
 end
 
+# Per-factor matching bounds: case average +/- tol * |case average| (a two-column matrix;
+# the absolute value keeps lower <= upper for a negative average).
+_match_bounds(case_avg::Vector{Float64}, tol::Float64) =
+    hcat(case_avg .- tol .* abs.(case_avg), case_avg .+ tol .* abs.(case_avg))
 
-function filter_case_control(x::Vector{String}, y::Vector{String}, distance::Vector{String})
-
-    # setdiff!(x, hla_hist)
-    # x_case::Vector{String} = intersect(x, y[:, 1])
-    y_control::Vector{String} = setdiff(y, x)
-
-    y_control = intersect(x,intersect(y, distance))
-
-    return (string.(y_control))
-end
-
-"""
-    get_valid(x, y, distance)
-
-Unused internal helper: computes `x ∩ y ∩ distance` and returns `nothing`.
-"""
-function get_valid(x::Vector{<:AbstractString}, y::Vector{<:AbstractString}, distance::Vector{<:AbstractString})
-
-    y_control = intersect(x,intersect(y, distance))
-
-    return
-end
-
-"""
-    get_factors(case_set, control_set, factors_raw)
-
-Internal: the case-set average of each confounding factor, the control factor matrix, a
-gene -> factor vector `Dict` of the controls and a gene -> 0 use counter.
-"""
-function get_factors(
-    case_set::Vector{String},
-    control_set::Vector{String},
-    factors_raw::Matrix,
-)
-    control_values = factors_raw[(@view factors_raw[:, 1]).∈[control_set], 1:end]
-    # control_dict = Dict{String,Vector{Float64}}()
-
-    # for row in eachrow(control_values)
-    #     control_dict[row[1]] = row[2:end]
-    # end
-
-    control_number::Dict{String,Int64} = Dict(control_set .=> 0)
-    control_dict::Dict{String,Vector{Float64}} =  Dict(control_values[:,1] .=> eachrow(control_values[:,2:end]));
-
-    case_avg::Vector{Float64} =
-        vec(mean(factors_raw[(@view factors_raw[:, 1]).∈[case_set], 2:end], dims = 1))
-
-    return (
-        case_avg,
-        convert(Matrix{Float64}, @view control_values[:, 2:end]),
-        control_dict,
-        control_number,
-    )
-end
-
-"""
-    check_limits(control_avg, tol)
-
-Internal: per-factor bounds `[(1 - tol) * avg, (1 + tol) * avg]` (a two-column matrix) and a
-vector of `"start"` flags. Called with the case averages.
-"""
-function check_limits(control_avg::Vector{Float64}, tol::Float64)
-    l_u::Matrix{Float64} = hcat(control_avg, control_avg)
-    lims::Vector{String} = fill("start", length(control_avg))
-
-    for i::Int64 in eachindex(control_avg)
-        if lims[i] == "higher"
-            l_u[i, 1] = (1 - tol) * control_avg[i]
-            l_u[i, 2] = (1 + 1 * tol) * control_avg[i]
-        else
-            l_u[i, 1] = (1 - 1 * tol) * control_avg[i]
-            l_u[i, 2] = (1 + tol) * control_avg[i]
-        end
-    end
-
-    return (lims, l_u)
-end
-
-function get_samples(case_set::Vector{String}, control_boot::Vector{String})
+# Cut the accepted control genes into 100 sets of `case_number` genes, from the end (the
+# earlier genes are burn-in), labelled sample_(offset + 1) ... sample_(offset + 100).
+function get_samples(case_number::Int, control_boot::Vector{String}; offset::Int = 0)
     sc_t = length(control_boot)
-    case_number = length(case_set)
-
-    out = String[]
-    for p::Int64 = 0:99
-        sup_ind = sc_t - 1 - p * case_number
-        inf_ind = sc_t - 1 - p * case_number - case_number + 1
-        iter = control_boot[inf_ind:sup_ind]
-
-        z = p + 1
-        s = "sample_" * string(z) * " " * join(iter, " ")
-        push!(out, s)
+    sc_t >= 100 * case_number || throw(ArgumentError(
+        "$(sc_t) control genes cannot make 100 sets of $case_number"))
+    out = Vector{String}(undef, 100)
+    for p in 0:99
+        sup_ind = sc_t - p * case_number
+        inf_ind = sup_ind - case_number + 1
+        out[p+1] = "sample_" * string(offset + p + 1) * " " * join(control_boot[inf_ind:sup_ind], " ")
     end
-
-    return (out)
+    return out
 end
 
 """
-    get_distance(data::String, annotation::String) -> DataFrame
+    get_distance(data, annotation) -> DataFrame
 
-Distance in bp from every gene of `annotation` to the closest gene listed in `data`, with
-`bedtools closest -d` (installed into the CondaPkg environment from bioconda on first use).
+Distance in bp from every gene of `annotation` to the closest case gene listed in `data`.
 
-`data` is the case gene list (one ID per line), `annotation` a tab-separated BED file with
-at least five columns (chromosome, start, end, gene ID, ...). Each gene is reduced to a 1 bp
-interval at its midpoint `int((start + end) / 2)`, so the distance is between gene
-midpoints, not gene bodies; case genes get 0. Case genes are selected with `fgrep -f`
-(substring match of the IDs). The search runs per chromosome; a chromosome without case
-genes is skipped, so its genes get no row. Needs `fgrep`, `grep -P`, `awk`, `sort` and `cut`
-on the PATH.
+`data` is the case gene list (a file with one ID per line, or a `Vector` of IDs);
+`annotation` a tab-separated BED file without header with at least four columns
+(chromosome, start, end, gene ID, ...). Each gene is represented by its midpoint
+`div(start + end, 2)`, and the distance is between midpoints on the same chromosome, as
+`bedtools closest -d` gives it on 1 bp midpoint intervals (Enard & Petrov 2020). A case
+gene has distance 0; a gene on a chromosome without case genes has `typemax(Int)`. Gene IDs
+are matched exactly. A gene listed on several rows gets its smallest distance.
 
 # Returns
- - `DataFrame` without header names: `Column1` the gene ID, `Column2` the distance in bp
-   (tied closest genes give one row each).
+ - `DataFrame` with columns `gene::String` and `distance::Int`, one row per gene, in the
+   order of first appearance in `annotation`.
 """
-function get_distance(data::String, annotation::String)
-    if (isnothing(CondaPkg.which("bedtools")))
-        CondaPkg.add("bedtools", channel = "bioconda")
+function get_distance(data::AbstractVector{<:AbstractString}, annotation::String)
+    bed = CSV.read(annotation, DataFrame; header = false, delim = '\t',
+                   types = Dict(1 => String, 4 => String))
+    chrom, gene = bed[:, 1], bed[:, 4]
+    mid = div.(Int.(bed[:, 2]) .+ Int.(bed[:, 3]), 2)
+
+    case = Set{String}(data)
+    case_mid = Dict{String,Vector{Int}}()
+    for i in eachindex(gene)
+        gene[i] in case && push!(get!(case_mid, chrom[i], Int[]), mid[i])
     end
+    foreach(sort!, values(case_mid))
 
-    bedtools = CondaPkg.which("bedtools")
-
-    tmp = tempname()
-    out = IOBuffer()
-
-    run(
-        pipeline(
-            `fgrep -f $data $annotation`,
-            `awk  -F'\t' 'BEGIN {OFS = FS} {print $1,int(($2+$3)/2),int(($2+$3)/2+1),$4,$5}'`,
-            `sort -k1,2V`,
-            tmp,
-        ),
-    )
-
-    run(pipeline(`cut -f1 $annotation`, stdout = out))
-
-    nchr = unique(split(String(take!(out)), "\n")[1:(end-1)])
-    distance = tempname()
-    gene_1 = tempname()
-    gene_2 = tempname()
-
-    for i in nchr
-        try
-            run(pipeline(`grep -P "^$i\t" $tmp`, stdout = gene_1))
-            run(
-                pipeline(
-                    `grep -P "^$i\t" $annotation`,
-                    `awk -F'\t' 'BEGIN {OFS = FS} {print $1,int(($2+$3)/2),int(($2+$3)/2+1),$4,$5}'`,
-                    `sort -k2,3n`,
-                    gene_2,
-                ),
-            )
-            run(
-                pipeline(
-                    pipeline(
-                        `$bedtools closest -d -a $gene_2 -b $gene_1`,
-                        `cut -f4,11`,
-                        `sort`,
-                    ),
-                    stdout = distance,
-                    append = true,
-                ),
-            )
-        catch e
-            continue
+    best = Dict{String,Int}()
+    order = String[]
+    for i in eachindex(gene)
+        d = typemax(Int)
+        cm = get(case_mid, chrom[i], nothing)
+        if !isnothing(cm)
+            # closest case midpoint: the neighbours of the insertion point
+            j = searchsortedfirst(cm, mid[i])
+            j <= length(cm) && (d = min(d, cm[j] - mid[i]))
+            j > 1 && (d = min(d, mid[i] - cm[j-1]))
+        end
+        if haskey(best, gene[i])
+            best[gene[i]] = min(best[gene[i]], d)
+        else
+            best[gene[i]] = d
+            push!(order, gene[i])
         end
     end
-
-    df = CSV.read(distance, DataFrame, delim = '\t', header = false)
-
-    rm.([tmp, gene_1, gene_2])
-
-    return df
+    return DataFrame(gene = order, distance = [best[g] for g in order])
 end
 
+get_distance(data::String, annotation::String) =
+    get_distance(vec(CSV.read(data, Tables.matrix; header = false, delim = '\t',
+                              stringtype = String)), annotation)
+
 """
-    get_bootstrap(case_set, control_set; factors_raw, max_reps, tolerance) -> Vector
+    get_bootstrap(case_set, control_set; factors, max_reps, tolerance, rng) -> Vector{String}
 
 Draw one pool of matched control genes for `case_set` from `control_set` (Enard & Petrov
 2020).
 
 Pairs of distinct candidate genes are drawn at random and accepted when the running
-average of every confounding factor stays within `tolerance` (relative) of the case
+average of every confounding factor stays within `tolerance * |case average|` of the case
 average and neither gene exceeds a share of `max_reps / length(case_set)` of the pool. The
 running average starts from a seed of 100 pseudo-genes at the case average; each accepted
-pair removes one of them. Drawing stops at `100 + 110 * length(case_set)` genes, or after 5
-million draws in a row without an accepted pair.
-
-`bootstrap` calls the equivalent `get_bootstrap_noalloc`, not this function.
+pair removes one of them. Drawing stops at `100 + 110 * length(case_set)` genes, the pool
+[`bootstrap`](@ref) cuts into 100 sets (the first genes are burn-in).
 
 # Arguments
- - `case_set::Vector{String}`, `control_set::Vector{String}`: gene IDs.
- - `factors_raw::Matrix`: gene ID in column 1, one confounding factor per further column.
+ - `case_set::Vector{String}`, `control_set::Vector{String}`: gene IDs; every one must be a
+   key of `factors`.
+ - `factors::Dict{String,Vector{Float64}}`: confounding factors of each gene.
  - `max_reps::Int64`, `tolerance::Float64`: as in [`bootstrap_parameters`](@ref).
+ - `rng::AbstractRNG`: random number generator. Default `Random.default_rng()`.
 
 # Returns
- - The accepted control genes in order of acceptance (with repeats), or an empty vector if
-   fewer than 1000 were accepted. `get_samples` cuts the `100 * length(case_set)` genes
-   before the last one into 100 control sets; the earlier ones are burn-in.
+ - The accepted control genes in order of acceptance (with repeats), or an empty
+   `Vector{String}` if 5 million draws in a row were rejected before reaching the target.
 """
 function get_bootstrap(
     case_set::Vector{String},
     control_set::Vector{String};
-    factors_raw::Matrix,
+    factors::Dict{String,Vector{Float64}},
     max_reps::Int64,
     tolerance::Float64,
+    rng::AbstractRNG = Random.default_rng(),
 )
-
-    # Get cont
-    case_number    = length(case_set)
-    control_number = length(control_set)
-
-    # Get averages
-    case_avg, factors, factors_dict, used_number =
-        get_factors(case_set, control_set, factors_raw)
-    control_avg                                  = vec(mean(factors, dims = 1))
-
-    # high_low
-    high_low, inf_sup    = check_limits(case_avg, tolerance)
-    flt_avg              = case_avg .> control_avg
-    high_low[flt_avg]   .= "higher"
-    high_low[.!flt_avg] .= "lower"
-
-    # Increase control dataset to iter to create the control sets per se. Creating a big list speeds up the process because it avoids repeating the slow start of adding control genes to the "fake" seed.
-    # gene_1, gene_2 = control_iteration(x, y)
-
-    ######################
-    # Iter combinations
-    ######################
-    previous_gn  = 0
-    same_counter = 0
-
-    #Control sets are created by packs of 100 to speed up control creation while keeping memory usage in check.
-    init_fake = fake_seed_num = 100
-
-    # to keep the control sets close the averages for confounding factors in the group of interest, we later require that there some level of alternance with the newly added control genes swithcing between increasing the overall average and decreasing it.
-    lim             = size(factors, 2)
-
-    direction       = fill("start", lim)
-    current_factors = case_avg
-
-    added_nonvips   = 0
-    good_control    = String[]
-
-    sc_gn           = length(good_control)
-
-    while sc_gn < (init_fake + (10 + 100) * case_number)
-        # the two control genes to choose to add to the current control set.
-        gene_1 = rand(control_set)
-        gene_2 = rand(control_set)
-
-        while gene_1 == gene_2
-            gene_2 = rand(control_set)
-        end
-
-        factor_value_1 = factors_dict[gene_1]
-        factor_value_2 = factors_dict[gene_2]
-
-        sc_fc = length(factor_value_1)
-        sc_t = length(good_control)
-
-        matching::Int64 = 0
-
-        test_value_1 =
-            (
-                fake_seed_num * case_avg +
-                current_factors * sc_t +
-                factor_value_1 +
-                factor_value_2
-            ) / (sc_t + 2 + fake_seed_num)
-
-        test_value_2 =
-            (current_factors * sc_t + factor_value_1 + factor_value_2) / (sc_t + 2)
-
-        matching =
-            sum((test_value_1 .>= inf_sup[:, 1]) .&& (test_value_1 .<= inf_sup[:, 2]))
-
-        if matching >= lim
-            test_dir = similar(direction)
-            flt_dir = test_value_1 .>= current_factors
-            test_dir[flt_dir] .= "more"
-            test_dir[.!flt_dir] .= "less"
-            other_dir = sum(test_dir .!= direction)
-            test_ln = length(good_control) + 1
-
-            if (
-                (other_dir >= 0) &&
-                (used_number[gene_1] / test_ln <= (max_reps / case_number)) &&
-                (used_number[gene_2] / test_ln <= (max_reps / case_number))
-            )
-                if (fake_seed_num > 0)
-                    fake_seed_num -= 1
-                end
-
-                push!(good_control, gene_1)
-                push!(good_control, gene_2)
-
-                used_number[gene_1] += 1
-                used_number[gene_2] += 1
-
-                # Update current_factors
-                current_factors = copy(test_value_1)
-
-                # Update directions
-                copy!(direction, test_dir)
-            end
-        end
-
-        sc_gn = length(good_control)
-
-        if (sc_gn == previous_gn)
-            same_counter += 1
-        elseif sc_gn > previous_gn
-            same_counter = 0
-        end
-
-        if (same_counter >= 5000000)
-            break
-        end
-
-        previous_gn = sc_gn
-    end
-
-    if (length(good_control) < 1000)
-        return []
-    else
-        return (good_control)
-    end
-end
-
-
-function get_bootstrap_noalloc(
-    case_set::Vector{String},
-    control_set::Vector{String};
-    factors_raw::Matrix,
-    max_reps::Int64,
-    tolerance::Float64,
-)
-
-
-    case_number    = length(case_set)
-    control_number = length(control_set)
-
-    case_avg, factors, factors_dict, used_number =
-        get_factors(case_set, control_set, factors_raw)
-    control_avg                 = vec(mean(factors, dims = 1))
-    high_low, inf_sup           = check_limits(case_avg, tolerance)
-    flt_avg                     = case_avg .> control_avg
-    high_low[flt_avg]  .= "higher"
-    high_low[.!flt_avg] .= "lower"
-
-    lim      = size(factors, 2)
+    length(control_set) >= 2 || throw(ArgumentError("need at least 2 candidate control genes"))
+    case_number = length(case_set)
+    case_avg = vec(mean(reduce(hcat, (factors[g] for g in case_set)), dims = 2))
+    bounds = _match_bounds(case_avg, tolerance)
+    lim = length(case_avg)
     max_frac = max_reps / case_number
+    used_number = Dict{String,Int}(g => 0 for g in control_set)
 
-    # CHANGED: reserve capacity upfront for pushes
-    N_fake   = 100
-    N_target = N_fake + (10 + 100)*case_number
-    good_control = Vector{String}()
-    # CHANGED: sizehint to avoid reallocs
-    sizehint!(good_control, N_target)
+    n_fake = 100
+    n_target = n_fake + (10 + 100) * case_number
+    good_control = String[]
+    sizehint!(good_control, n_target + 1)
 
-    #  CHANGED: pre-allocate/reuse scratch buffers outside the loop
-    current_factors = copy(case_avg)             # holds the evolving control-avg
-    direction       = fill("start", lim)         # initial directions
-    test_value_1    = similar(case_avg)          # buffer for new avg w/ fake seed
-    test_value_2    = similar(case_avg)          # buffer for new avg w/o fake seed
-    test_dir        = similar(direction)         # buffer for per-factor direction
+    current_factors = copy(case_avg)
+    test_value = similar(case_avg)
+    same_ctr = 0
 
-    prev_len  = 0
-    same_ctr  = 0
-
-    #  main loop
-    while length(good_control) < N_target
-        # pick two distinct controls
-        g1 = rand(control_set)
-        g2 = rand(control_set)
-        while g2 === g1
-            g2 = rand(control_set)
+    while length(good_control) < n_target
+        g1 = rand(rng, control_set)
+        g2 = rand(rng, control_set)
+        while g2 == g1
+            g2 = rand(rng, control_set)
         end
-
-        v1 = factors_dict[g1]
-        v2 = factors_dict[g2]
+        v1, v2 = factors[g1], factors[g2]
         sc_t = length(good_control)
 
-        # CHANGED: in-place vector math via @. to avoid temporaries
-        @. test_value_1 = (N_fake*case_avg + sc_t*current_factors + v1 + v2) / (N_fake + sc_t + 2)
-        @. test_value_2 = (sc_t*current_factors + v1 + v2) / (sc_t + 2)
+        @. test_value = (n_fake * case_avg + sc_t * current_factors + v1 + v2) / (n_fake + sc_t + 2)
 
-        # CHANGED: manual loop for matching instead of array ops
-        matches = 0
-        for i in 1:lim
-            matches += (test_value_1[i] ≥ inf_sup[i,1] && test_value_1[i] ≤ inf_sup[i,2])
-        end
-
-        if matches ≥ lim
-            #  CHANGED: in-place fill of test_dir, no Boolean temporary
-            for i in 1:lim
-                test_dir[i] = test_value_1[i] ≥ current_factors[i] ? "more" : "less"
-            end
-
-            #  CHANGED: lazy zip+count instead of non-existent count(!=,…)
-            other_dir = count(t -> t[1] != t[2], zip(test_dir, direction))
-
-            next_len  = sc_t + 1
-
-            if other_dir ≥ 0 &&
-               used_number[g1]/next_len ≤ max_frac &&
-               used_number[g2]/next_len ≤ max_frac
-
-                if N_fake > 0
-                    N_fake -= 1
-                end
-
-                # CHANGED: single push! of both genes, no reallocs due to hint
-                push!(good_control, g1, g2)
-                used_number[g1] += 1
-                used_number[g2] += 1
-
-                # CHANGED: update in-place, reuse buffers
-                copy!(current_factors, test_value_1)
-                copy!(direction, test_dir)
-            end
-        end
-
-        # break-out to avoid infinite loop
-        cur_len = length(good_control)
-        same_ctr = (cur_len == prev_len) ? same_ctr+1 : 0
-        prev_len = cur_len
-        if same_ctr ≥ 5_000_000
-            break
+        accepted = all(i -> bounds[i, 1] <= test_value[i] <= bounds[i, 2], 1:lim) &&
+                   used_number[g1] / (sc_t + 1) <= max_frac &&
+                   used_number[g2] / (sc_t + 1) <= max_frac
+        if accepted
+            n_fake > 0 && (n_fake -= 1)
+            push!(good_control, g1, g2)
+            used_number[g1] += 1
+            used_number[g2] += 1
+            copy!(current_factors, test_value)
+            same_ctr = 0
+        else
+            same_ctr += 1
+            same_ctr >= 5_000_000 && return String[]
         end
     end
-
-    return length(good_control) < 1000 ? String[] : good_control
+    return good_control
 end
 
 """
@@ -484,112 +205,74 @@ Build matched control sets for a case gene list and write them to disk (Enard & 
 2020; Di et al. 2021). See [`bootstrap_parameters`](@ref) for the settings.
 
 Steps: read the case IDs (`data`), the confounding factors and the `annotations` gene IDs;
-compute the distance of every gene to the closest case gene with `get_distance`; keep as
-candidate controls the genes present in `annotations` and in the factor file, at least
-`distance` bp from any case gene and not in the case set; keep only case genes present in
-both files; drop HLA and histone genes if `filter_hla_hist`. Then run `iterations`
-independent matched draws in parallel (`ThreadsX.map`, one per iteration), each cut into
-100 control sets of `length(case)` genes, for `iterations * 100` sets in total.
+compute the distance of every gene to the closest case gene with [`get_distance`](@ref);
+keep as candidate controls the genes present in `annotations` and in the factor file, at
+least `distance` bp from every case gene and not in the case set; keep only case genes
+present in both files; drop HLA and histone genes if `filter_hla_hist`. Then run
+`iterations` independent matched draws ([`get_bootstrap`](@ref)) in parallel threads, each
+cut into 100 control sets of `length(case)` genes, for `iterations * 100` sets in total.
 
-Warns when there are fewer than 1.5 candidate controls per case gene.
+Warns when there are fewer than 1.5 candidate controls per case gene. Throws an
+`ErrorException`, and writes nothing, when an iteration cannot reach its target.
 
 # Files written
  - `<output>_control.txt`: one control set per line, `sample_i GENE GENE ...`
-   (space-separated; `i` restarts at 1 in each iteration); the format `parse_sfs` reads as
+   (space-separated, `i` = 1 ... `100 * iterations`); the format `parse_sfs` reads as
    `gene_list`. An existing file is replaced.
  - `<output>_case.txt`: the case genes kept after the filters, one per line.
 
-If any iteration fails to find enough matching controls (see `get_bootstrap`), it logs an
-error and writes nothing; it does not throw.
-
 # Returns
- - `nothing`.
+ - `(case = Vector{String}, control = Vector{String})`: the case genes kept and the lines
+   of `<output>_control.txt`.
 """
 function bootstrap(param::bootstrap_parameters)
-    @unpack data, annotations, distance, max_reps, tolerance, iterations, confounding_factors, output, filter_hla_hist = param
+    @unpack data, annotations, distance, max_reps, tolerance, iterations, confounding_factors, output, filter_hla_hist, seed = param
 
     @info "Opening data"
-
-    case        = vec(CSV.read(data, header = false, delim = '\t', Tables.matrix, stringtype = String));
-
-    factors_raw = CSV.read(confounding_factors, header = false, Tables.matrix);
-    factors_id  = String.(@view factors_raw[:, 1]);
-    factors     = Float64.(@view factors_raw[:, 2:end]);
-    ann         = CSV.read(annotations,header=false,DataFrame)[:,4];
+    case = vec(CSV.read(data, Tables.matrix; header = false, delim = '\t', stringtype = String))
+    factors_raw = CSV.read(confounding_factors, Tables.matrix; header = false,
+                           stringtype = String)
+    factors_id = String.(factors_raw[:, 1])
+    factors = Dict{String,Vector{Float64}}(factors_id[i] => Float64.(factors_raw[i, 2:end])
+                                           for i in eachindex(factors_id))
+    ann = String.(CSV.read(annotations, DataFrame; header = false, delim = '\t',
+                           types = Dict(4 => String))[:, 4])
 
     @info "Estimating distance between genes"
-    distance_raw = get_distance(data, annotations);
+    dist = get_distance(case, annotations)
+    far = dist.gene[dist.distance .>= distance]
 
-    #Filter case, control and distance
-    distance_min = distance_raw[distance_raw[:, 2] .>= distance, 1];
-
-    # Get all valid factors and gene set, case excluded unless dist == 0
-    control = intersect(ann, factors_id, distance_min);
-    case    = intersect(case,intersect(ann, factors_id));
-    setdiff!(control,case);
-
+    control = intersect(ann, factors_id, far)
+    case = intersect(case, ann, factors_id)
+    setdiff!(control, case)
     if filter_hla_hist
-        setdiff!(case,hla_genes,hist_genes);
-        setdiff!(control,hla_genes,hist_genes);
+        setdiff!(case, hla_genes, hist_genes)
+        setdiff!(control, hla_genes, hist_genes)
     end
+    isempty(case) && throw(ArgumentError("no case gene is both in $annotations and in $confounding_factors"))
 
-    case_number    = length(case);
-    control_number = length(control);
-
-    @info "There are " *
-          string(case_number) *
-          " genes of interest and " *
-          string(control_number) *
-          " potential control genes at distance of at least " *
-          string(distance) *
-          " bases."
-
-    if (control_number <= (1.5 * case_number))
-        @warn "Warning! The number of control genes is less than 1.5 times the number of genes of interest. FDR may be high as a result."
-    end
-
-    # using ThreadsX
-    n_case    = fill(case, iterations)
-    n_control = fill(control, iterations)
+    case_number = length(case)
+    control_number = length(control)
+    @info "There are $case_number genes of interest and $control_number potential control " *
+          "genes at distance of at least $distance bases."
+    control_number <= 1.5 * case_number && @warn "The number of control genes is less than " *
+        "1.5 times the number of genes of interest. FDR may be high as a result."
 
     @info "Running bootstrap"
-    good_control = ThreadsX.map(
-        (x, y) -> get_bootstrap_noalloc(
-            x,
-            y,
-            factors_raw = factors_raw,
-            max_reps = max_reps,
-            tolerance = tolerance,
-        ),
-        n_case,
-        n_control,
-    )
+    rngs = [isnothing(seed) ? Random.default_rng() : Xoshiro(seed + i) for i in 1:iterations]
+    pools = ThreadsX.map(rng -> get_bootstrap(case, control; factors = factors,
+                                              max_reps = max_reps, tolerance = tolerance,
+                                              rng = rng), rngs)
 
+    failed = count(isempty, pools)
+    failed > 0 && error("bootstrap: $failed of $iterations iterations could not find enough " *
+                        "matching controls for $data; change tolerance, max_reps or distance")
 
-    if any(isempty.(good_control))
-        @error "The bootstrap struggled too much to find matching controls. Stopping bootstrap test here. Please restart the entire pipeline for safety at input $data changing the parameters"
-    else
-        out_samples = ThreadsX.map(x -> get_samples(case, x), good_control);
-
-        try
-            rm(output * "_control.txt")
-        catch e
-            touch(output * "_control.txt")
-        end
-
-        io = Base.open(output * "_control.txt", "a+")
-        for i in vcat(out_samples...)
-            println(io, i)
-        end
-
-        close(io)
-
-        io = Base.open(output * "_case.txt", "w+")
-        for i in case
-            println(io, i)
-        end
-        close(io)
-    end
+    lines = reduce(vcat, [get_samples(case_number, pools[i]; offset = 100 * (i - 1))
+                          for i in 1:iterations])
+    Base.open(io -> foreach(l -> println(io, l), lines), output * "_control.txt", "w")
+    Base.open(io -> foreach(g -> println(io, g), case), output * "_case.txt", "w")
+    return (case = case, control = lines)
 end
 
 """

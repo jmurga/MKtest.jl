@@ -83,21 +83,26 @@ MKtest.plot_violins_empirical(tbl; params = [:alpha])
 bp = MKtest.bootstrap_parameters(data = "my_case_genes.txt",
                                  annotations = "data/ensembl_gene_coords_v109.bed",
                                  confounding_factors = "data/confounding_factors.txt",
-                                 output = "my_case")
-MKtest.bootstrap(bp)
-# writes my_case_case.txt (the case genes kept) and my_case_control.txt (the control sets)
+                                 output = "my_case", seed = 1)
+res = MKtest.bootstrap(bp)
+# writes my_case_case.txt (the case genes kept) and my_case_control.txt (the control sets,
+# sample_1 ... sample_1000); res.case and res.control hold the same
 ```
 
 This is the control-set building of Enard & Petrov (2020) and Di et al. (2021): each
 control set grows gene by gene so that its average of every confounding factor stays
 within `tolerance` (default 5%) of the case set's average. Candidates are genes at least
-`distance` bp from the closest case gene (`bedtools closest -d` on `annotations`,
-measured between gene midpoints; the default 1 only excludes the case genes
-themselves), and a control gene can make up at most `max_reps / n_case` of the control
-genes drawn in one iteration (about `max_reps` copies per set). Each iteration gives 100 sets
-(`iterations = 10`: 1000 sets). Human HLA and histone genes are left out
+`distance` bp from the closest case gene (`get_distance`: between gene midpoints on the
+same chromosome, as `bedtools closest -d` gives it; the default 1 only excludes the case
+genes themselves). Genes on a chromosome with no case gene are always far enough, so with
+autosomal cases the X-linked genes of `confounding_factors` are candidates too; leave them
+out of that file if they should not be. A control gene can make up at most
+`max_reps / n_case` of the control genes drawn in one iteration (about `max_reps` copies
+per set). Each iteration gives 100 sets (`iterations = 10`: 1000 sets), and `seed` makes
+them reproducible at any thread count. Human HLA and histone genes are left out
 (`filter_hla_hist = true`). `my_case_control.txt` has the one-set-per-line format above,
-which `parse_sfs` reads directly.
+which `parse_sfs` reads directly. If an iteration cannot reach its target `bootstrap`
+throws and writes nothing: loosen `tolerance` or `max_reps`, or lower `distance`.
 
 `confounding_factors` is a space-separated file without header: the gene ID, then one
 numeric column per factor. Any set of factors works the same way.

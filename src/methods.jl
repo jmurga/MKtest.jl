@@ -23,6 +23,25 @@ function _alpha_x_n(sfs::AbstractMatrix, n::Union{Nothing,Int})
     return m + 1
 end
 
+# Derived allele frequency of every row: column 1 as is when it already holds
+# frequencies in (0, 1] (not all whole numbers), else DAC / n with the haploid sample size
+# of `_alpha_x_n`.
+function _row_freqs(sfs::AbstractMatrix, n::Union{Nothing,Int})
+    c = Float64.(view(sfs, :, 1))
+    all(x -> 0 < x <= 1, c) && !all(isinteger, c) && return c
+    return c ./ _alpha_x_n(sfs, n)
+end
+
+# omega = (Dn/Ln) / (Ds/Ls), omega_a = alpha omega, omega_d = omega - omega_a; NaN without
+# site counts.
+function _mk_omegas(divergence::AbstractVector, alpha::Real)
+    length(divergence) > 2 || return (NaN, NaN, NaN)
+    dn, ds, ln, ls = divergence[1], divergence[2], divergence[3], divergence[4]
+    omega = (dn / ln) / (ds / ls)
+    isfinite(omega) || return (NaN, NaN, NaN)
+    return (omega, omega * alpha, omega - omega * alpha)
+end
+
 """
     α_x(sfs, divergence; cutoff = [0.0, 1.0], cumulative = true, n = nothing)
 
@@ -340,57 +359,62 @@ asymptotic_mk(α_x_values::AbstractVector{<:AbstractVector{<:Real}}; kwargs...) 
 ################################
 
 """
-    imputed_mk(sfs, divergence; cutoff = 0.15)
+    imputed_mk(sfs, divergence; cutoff = 0.15, n = nothing)
 
 Imputed MK test (Murga-Moreno et al. 2022, https://doi.org/10.1093/g3journal/jkac206):
 the slightly deleterious nonsynonymous polymorphisms below `cutoff` are estimated and
 subtracted from Pn.
 
-With low = frequency `<= cutoff` and high = frequency `>= cutoff`, the deleterious count
+With low = frequency `< cutoff` and high = frequency `>= cutoff`, the deleterious count
 is `Pn_low - Pn_high (Ps_low / Ps_high)`, set to 0 when it is negative, larger than Pn,
 or `Ps_high = 0`. Then `alpha = 1 - (Pn_neutral / Ps) (Ds / Dn)` (rounded to 3 digits),
 with a Fisher exact test of `[Ps Pn_neutral; Ds Dn]` (counts rounded up to integers).
 
 # Arguments
- - `sfs::Matrix`: full raw SFS `[DAC Pn Ps]`. Frequencies are taken as `i / (k + 1)` for
-   the `k` rows, so an SFS trimmed by `parse_sfs(...; cutoff)` gives wrong frequencies.
+ - `sfs::Matrix`: raw SFS `[DAC Pn Ps]`; the frequency of a row is `DAC / n`. Column 1
+   may instead hold frequencies in (0, 1] (as `reduce_sfs` returns), used as they are.
  - `divergence::Vector`: `[Dn, Ds, Ln, Ls]`; `[Dn, Ds]` alone also works.
 
 # Keywords
  - `cutoff::Float64`: derived allele frequency separating the low-frequency class.
+ - `n::Union{Nothing,Int}`: haploid sample size. By default `size(sfs, 1) + 1`, which needs
+   the full SFS (DAC `1..n-1`). Pass it for any SFS trimmed by `parse_sfs(...; cutoff)`:
+   a trim at the low end throws without it, but a top-only trim (DAC `1..k`) cannot be
+   told apart from a full SFS of `k + 1` chromosomes and would give wrong frequencies.
 
 # Returns
  - `NamedTuple` `(alpha, p_value, b, f, d, omega, omega_a, omega_d)`. `b`, `f` and `d`
    are the fractions of new nonsynonymous mutations that are slightly deleterious,
    neutral and strongly deleterious; `omega = (Dn/Ln) / (Ds/Ls)`,
    `omega_a = alpha omega`, `omega_d = omega - omega_a`. These six are NaN without Ln
-   and Ls (2-element `divergence`, or site counts of 0). There is no guard for `Ps = 0`
+   and Ls (2-element `divergence`, or site counts of 0); everything is NaN when `Ps = 0`
    or `Dn = 0`.
 """
 function imputed_mk(
     sfs::Matrix,
     divergence::Vector;
     cutoff::Float64=0.15,
+    n::Union{Nothing,Int}=nothing,
 )
 
-    sfs = copy(sfs)
-    if sum(@view sfs[:, 1]) > 1
-        n = size(sfs, 1)
-        sfs[:, 1] .= (1:n) ./ (n + 1)
-    end
+    freq = _row_freqs(sfs, n)
 
     pn = sum(sfs[:, 2])
     ps = sum(sfs[:, 3])
     dn = divergence[1]
     ds = divergence[2]
 
+    if ps == 0 || dn == 0
+        return (alpha=NaN, p_value=NaN, b=NaN, f=NaN, d=NaN, omega=NaN, omega_a=NaN, omega_d=NaN)
+    end
+
     deleterious = 0
     ### Estimating slightly deleterious with pn/ps ratio
-    flt_low = (sfs[:, 1] .<= cutoff)
+    flt_low = freq .< cutoff
     pn_low = sum(sfs[flt_low, 2])
     ps_low = sum(sfs[flt_low, 3])
 
-    flt_inter = (sfs[:, 1] .>= cutoff) .& (sfs[:, 1] .<= 1)
+    flt_inter = .!flt_low
     pn_inter = sum(sfs[flt_inter, 2])
     ps_inter = sum(sfs[flt_inter, 3])
 
@@ -410,8 +434,9 @@ function imputed_mk(
     p_value =
         pvalue(FisherExactTest(Int(ceil(ps)), Int(ceil(pn_neutral)), Int(ds), Int(dn)))
 
-    b = f = d = omega = omega_a = omega_d = NaN
-    if size(divergence, 1) > 2
+    b = f = d = NaN
+    omega, omega_a, omega_d = _mk_omegas(divergence, alpha)
+    if isfinite(omega)
         ln = divergence[3]
         ls = divergence[4]
         # ## Estimation of b: weakly deleterious
@@ -422,21 +447,13 @@ function imputed_mk(
 
         ## Estimation of d, strongly deleterious sites
         d = 1 - (f + b)
-
-        ka = dn / ln
-        ks = ds / ls
-        omega = ka / ks
-
-        # omega_a and omega_d
-        omega_a = omega * alpha
-        omega_d = omega - omega_a
     end
 
     return (alpha=alpha, p_value=p_value, b=b, f=f, d=d, omega=omega, omega_a=omega_a, omega_d=omega_d)
 end
 
 """
-    imputed_mk(sfs::Vector, divergence::Vector; cutoff = 0.15, correction = nothing)
+    imputed_mk(sfs::Vector, divergence::Vector; cutoff = 0.15, n = nothing, correction = nothing)
 
 `imputed_mk` for several datasets, in parallel threads.
 
@@ -452,11 +469,12 @@ function imputed_mk(
     sfs::Vector,
     divergence::Vector;
     cutoff::Float64=0.15,
+    n::Union{Nothing,Int}=nothing,
     correction::Union{Symbol,Nothing}=nothing
 )
     df = DataFrame(ThreadsX.mapi(sfs, divergence) do x, y
         Logging.with_logger(Logging.NullLogger()) do
-            imputed_mk(x, y, cutoff=cutoff)
+            imputed_mk(x, y, cutoff=cutoff, n=n)
         end
     end)
     n_nan = sum(isnan.(df.alpha))
@@ -469,7 +487,7 @@ end
 
 
 """
-    fww_mk(sfs, divergence; cutoff = 0.15)
+    fww_mk(sfs, divergence; cutoff = 0.15, n = nothing)
 
 Fay, Wyckoff and Wu MK test (Fay et al. 2002, https://doi.org/10.1038/4151024a):
 polymorphisms at frequency below `cutoff` are removed before
@@ -477,36 +495,33 @@ polymorphisms at frequency below `cutoff` are removed before
 `[Ps Pn; Ds Dn]` on the polymorphisms kept.
 
 # Arguments
- - `sfs::Matrix`: full raw SFS `[DAC Pn Ps]`. Frequencies are taken as `i / (k + 1)` for
-   the `k` rows, so an SFS trimmed by `parse_sfs(...; cutoff)` gives wrong frequencies.
+ - `sfs::Matrix`: raw SFS `[DAC Pn Ps]`; the frequency of a row is `DAC / n`. Column 1
+   may instead hold frequencies in (0, 1] (as `reduce_sfs` returns), used as they are.
  - `divergence::Vector`: `[Dn, Ds, Ln, Ls]`; `[Dn, Ds]` alone also works.
 
 # Keywords
  - `cutoff::Float64`: lowest derived allele frequency kept (included).
+ - `n::Union{Nothing,Int}`: haploid sample size; see [`imputed_mk`](@ref).
 
 # Returns
  - `NamedTuple` `(alpha, p_value, omega, omega_a, omega_d)`, with
    `omega = (Dn/Ln) / (Ds/Ls)`, `omega_a = alpha omega`, `omega_d = omega - omega_a`.
-   All NaN when no Ps remains or `Dn = 0`. The omegas are NaN with site counts of 0, and
-   0 with a 2-element `divergence`.
+   All NaN when no Ps remains or `Dn = 0`. The omegas are NaN without site counts
+   (2-element `divergence`, or counts of 0).
 """
 function fww_mk(
     sfs::Matrix,
     divergence::Vector;
     cutoff::Float64=0.15,
+    n::Union{Nothing,Int}=nothing,
 )
 
-    # DAC to freqs
-    sfs = copy(sfs)
-    if sum(@view sfs[:, 1]) > 1
-        n = size(sfs, 1)
-        sfs[:, 1] .= (1:n) ./ (n + 1)
-    end
+    freq = _row_freqs(sfs, n)
 
     dn = divergence[1]
     ds = divergence[2]
 
-    flt_inter = (sfs[:, 1] .>= cutoff) .& (sfs[:, 1] .<= 1)
+    flt_inter = freq .>= cutoff
     pn_inter = sum(sfs[flt_inter, 2])
     ps_inter = sum(sfs[flt_inter, 3])
 
@@ -519,25 +534,13 @@ function fww_mk(
     p_value =
         pvalue(FisherExactTest(Int(ps_inter), Int(ceil(pn_inter)), Int(ds), Int(dn)))
 
-    omega = omega_a = omega_d = 0
-    if size(divergence, 1) > 2
-        ln = divergence[3]
-        ls = divergence[4]
-        ka = dn / ln
-        ks = ds / ls
-
-        omega = ka / ks
-
-        # omega_a and omega_d
-        omega_a = omega * alpha
-        omega_d = omega - omega_a
-    end
+    omega, omega_a, omega_d = _mk_omegas(divergence, alpha)
 
     return (alpha=alpha, p_value=p_value, omega=omega, omega_a=omega_a, omega_d=omega_d)
 end
 
 """
-    fww_mk(sfs::Vector, divergence::Vector; cutoff = 0.15, correction = nothing)
+    fww_mk(sfs::Vector, divergence::Vector; cutoff = 0.15, n = nothing, correction = nothing)
 
 `fww_mk` for several datasets, in parallel threads. `correction` is `:fdr`
 (Benjamini-Hochberg) or `:bonferroni`, which add a `pvalue_adjusted` column, or `nothing`;
@@ -550,11 +553,12 @@ function fww_mk(
     sfs::Vector,
     divergence::Vector;
     cutoff::Float64=0.15,
+    n::Union{Nothing,Int}=nothing,
     correction::Union{Symbol,Nothing}=nothing
 )
     df = DataFrame(ThreadsX.mapi(sfs, divergence) do x, y
         Logging.with_logger(Logging.NullLogger()) do
-            fww_mk(x, y, cutoff=cutoff)
+            fww_mk(x, y, cutoff=cutoff, n=n)
         end
     end)
     n_nan = sum(isnan.(df.alpha))
@@ -578,20 +582,13 @@ Standard MK test: `alpha = 1 - (Pn / Ps) (Ds / Dn)` (Smith & Eyre-Walker 2002, r
 # Returns
  - `NamedTuple` `(alpha, p_value, omega, omega_a, omega_d)`, with
    `omega = (Dn/Ln) / (Ds/Ls)`, `omega_a = alpha omega`, `omega_d = omega - omega_a`.
-   All NaN when `Ps = 0` or `Dn = 0`. The omegas are NaN with site counts of 0, and 0
-   with a 2-element `divergence`.
+   All NaN when `Ps = 0` or `Dn = 0`. The omegas are NaN without site counts
+   (2-element `divergence`, or counts of 0).
 """
 function standard_mk(
     sfs::Matrix,
     divergence::Vector;
 )
-
-    # DAC to freqs
-    sfs = copy(sfs)
-    if (sfs[1, 1] >= 1)
-        nn = size(view(sfs, :, 1), 1)
-        sfs[:, 1] .= collect(1:nn) ./ (nn + 1)
-    end
 
     pn = sum(sfs[:, 2])
     ps = sum(sfs[:, 3])
@@ -606,19 +603,7 @@ function standard_mk(
     #  method = :lnnlike same results R, python two.sides
     p_value = pvalue(FisherExactTest(Int(ps), Int(ceil(pn)), Int(ds), Int(dn)))
 
-    omega = omega_a = omega_d = 0
-    if size(divergence, 1) > 2
-        ln = divergence[3]
-        ls = divergence[4]
-
-        ka = dn / ln
-        ks = ds / ls
-        omega = ka / ks
-
-        # omega_a and omega_d
-        omega_a = omega * alpha
-        omega_d = omega - omega_a
-    end
+    omega, omega_a, omega_d = _mk_omegas(divergence, alpha)
     return (alpha=alpha, p_value=p_value, omega=omega, omega_a=omega_a, omega_d=omega_d)
 end
 

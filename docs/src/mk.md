@@ -51,6 +51,12 @@ MKtest.imputed_mk(sfs, div; cutoff = 0.15)
 `b`, `f` and `d` are the fractions of new nonsynonymous mutations estimated to be
 slightly deleterious, neutral and strongly deleterious.
 
+Both tests take the frequency of each row as `DAC / n`, with `n` the number of
+chromosomes (`size(sfs, 1) + 1` by default). For an SFS trimmed with
+`parse_sfs(...; cutoff)` pass `n = sample_size * ploidy`: a top-only trim cannot be
+detected and would otherwise shift every frequency. A table from `reduce_sfs`, whose
+first column already holds frequencies, is used as it is.
+
 ## Asymptotic MK test
 
 alpha is computed as a function of frequency, `alpha(x)` from the polymorphisms at

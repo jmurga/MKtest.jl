@@ -50,37 +50,46 @@ end
 
 
 """
-    reduce_sfs(sfs, bins)
+    reduce_sfs(sfs, bins; n = nothing)
 
-Collapse an SFS into `bins - 1` frequency bins of equal width.
+Collapse an SFS into `bins` derived allele frequency bins of equal width.
 
-Row k of `sfs` is placed at frequency `(k - 1) / size(sfs, 1)` and the counts of columns
-2 to end are summed within each bin of the histogram with edges `0:1/(bins - 1):1`.
+Row `i` has frequency `x = DAC / n`; it goes to bin `k` when `(k - 1) / bins < x <= k / bins`,
+and the counts of columns 2 to end are summed within each bin. Bins that receive no row
+hold 0.
 
 # Arguments
- - `sfs::Array`: an SFS matrix, `[DAC Pn Ps]`.
- - `bins::Int64`: number of histogram edges; the result has `bins - 1` rows.
+ - `sfs::AbstractMatrix`: an SFS `[DAC Pn Ps ...]` (any number of count columns).
+ - `bins::Int`: number of frequency bins.
+
+# Keywords
+ - `n::Union{Nothing,Int}`: haploid sample size. By default `size(sfs, 1) + 1`, which needs
+   the full SFS (DAC `1..n-1`). Pass it for any SFS trimmed by `parse_sfs(...; cutoff)`:
+   a trim at the low end throws without it, but a top-only trim (DAC `1..k`) cannot be
+   told apart from a full SFS of `k + 1` chromosomes and would give wrong frequencies.
 
 # Returns
- - `Matrix{Float64}` of `bins - 1` rows: column 1 is `(1:bins-1) / bins` (a frequency,
-   not a DAC), the other columns the summed counts. When `k` bins receive no row, the
-   last `k` rows are left uninitialized, so use far fewer bins than SFS rows.
+ - `Matrix{Float64}` of `bins` rows: column 1 is the upper edge `k / bins` of each bin (a
+   frequency, which `fww_mk`, `imputed_mk` and `standard_mk` accept as such), the other
+   columns the summed counts.
+
+# Example
+```julia
+sfs = hcat(1:9, ones(9), 2 .* ones(9))   # n = 10 chromosomes
+MKtest.reduce_sfs(sfs, 2)                # [0.5 5 10; 1.0 4 8]
+```
 """
-function reduce_sfs(sfs_tmp::Array, bins::Int64)
-    freq = collect(0:(size(sfs_tmp, 1)-1)) / size(sfs_tmp, 1)
-    h1 = StatsBase.fit(StatsBase.Histogram, freq, 0:(1/(bins-1)):1)
-    xmap1 = StatsBase.binindex.(Ref(h1), freq)
-
-    tmp = hcat(sfs_tmp, xmap1)
-    out = Array{Float64}(undef, bins - 1, size(sfs_tmp, 2))
-    vIter = convert(Array, unique(xmap1)')
-    @simd for i in eachindex(vIter)
-        @inbounds out[i, 2:end] = sum(tmp[tmp[:, end].==i, 2:(end-1)], dims = 1)
+function reduce_sfs(sfs::AbstractMatrix, bins::Int; n::Union{Nothing,Int}=nothing)
+    bins > 0 || throw(ArgumentError("bins must be positive, got $bins"))
+    freq = view(sfs, :, 1) ./ _alpha_x_n(sfs, n)
+    out = zeros(bins, size(sfs, 2))
+    out[:, 1] .= (1:bins) ./ bins
+    for i in axes(sfs, 1)
+        # the bin of x: ceil(x bins), with x = k / bins exactly kept in bin k
+        k = clamp(ceil(Int, round(freq[i] * bins; digits = 10)), 1, bins)
+        @views out[k, 2:end] .+= sfs[i, 2:end]
     end
-
-    out[:, 1] = collect(1:(bins-1)) ./ bins
-
-    return (out)
+    return out
 end
 
 """
