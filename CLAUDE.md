@@ -40,7 +40,7 @@ the gate fail; add it to the allow-list only on purpose.
 
 ## ABC-MK: the method
 
-- `sfs, div = MKtest.valid_data(param, sfs, div)`, then
+- `ok = MKtest.valid_data(param, sfs, div)` (one Bool per dataset; `sfs[ok]`, `div[ok]`), then
   `MKtest.abcmk(param, sfs, div; h5_file, summstat_size, output_folder, tol)`. Defaults:
   `sampling = RjSampling()` (= `w = (0.0, 2.5), anchor = (0.15, 0.70), tilt = 0.05`),
   `row_prior = FlatAlphaPrior()` (= `by_B = true`), `stat = "median"`. They beat the
@@ -62,9 +62,16 @@ the gate fail; add it to the allow-list only on purpose.
 
 ## dfe_ml: the engine
 
-`MKtest.dfe_ml(sfs, div, model; ...) -> DataFrame` (one row per dataset) and
-`MKtest.dfe_model_comparison(...)` (AIC + LRT DataFrames). User docs: `docs/src/dfe_ml.md`,
-`docs/src/new_dfe.md`. Internals: `docs/agents/ml.md`.
+`MKtest.dfe_ml(sfs, div, model; ...) -> DFEResult` (`src/ml/result.jl`): fixed-schema long
+tables keyed by `fit` (`inference`, `params`, `sfs` with the fitted SFS and r_j, `divergence`
+by S class, `config`, `extra`); `vcat` stacks results. `MKtest.dfe_model_comparison(res)`
+gives AIC + LRT, only between fits with the same data and likelihood settings. User docs:
+`docs/src/dfe_ml.md`, `docs/src/new_dfe.md`. Internals: `docs/agents/ml.md`.
+
+- Parameter names are `<component>_<quantity>` (2026-10-15): `del_shape`, `del_mean`,
+  `ben_prop`, `ben_mean`, `neu_prop`, `lethal_prop`, `misorient`, ... `from_legacy_name`
+  maps the GRAPES / pre-2026-10-15 names (frozen fixtures, Task 2/3 outputs use them);
+  `grapes_param_name` gives GRAPES' name (binary output columns, -fixed_param files).
 
 - Axes (one keyword each, independent): `AbstractDFEModel` (argument),
   `AbstractSFSExpectation`, `AbstractDominance`, `AbstractDemography` (`NuisanceRj` =
@@ -82,6 +89,17 @@ the gate fail; add it to the allow-list only on purpose.
 - Not on main (stay on dev): pde/ and wf/ engines, fitted demography (`fit_demography`,
   `theta = :fitdadi`), `dfe_bayes`, multi-population `shared_params`, three-lineage
   divergence, `remove_poly`, String model names.
+
+## Documentation and known issues
+
+- `docs/src/`: index, data, mk, dfe_ml, new_dfe, abcmk, case_control, reference (rewritten
+  2026-10-15; build with Documenter, `docs/make.jl`). Example outputs on the pages were
+  computed from the bundled `data/` files.
+- Known issues in verbatim (non-engine) code, NOT fixed: `scripts/abcmk_cli.jl` calls
+  removed keywords (`output=`, `analysis_folder=`) and is not documented; `α_b`'s CI is a
+  50% interval (250th/750th of 1000); `ni_cmh` returns a bare Float64; `abc_loclinear`'s
+  "log"/"tan" back-transforms are broken; `fold`, `abc`, `abc_loclinear`, `bootstrap`,
+  `get_distance`, `get_bootstrap` have no docstring.
 
 ## Tests and evidence
 

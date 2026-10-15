@@ -1,66 +1,114 @@
-# MK approaches
-We included other MK approaches in our module. All the functions use the formated SFS and divergence data described at [Summary statistics section](summstat.md).
+# MK tests
 
-## Standard MKT
-The standard McDonald & Kreitman test ([McDonald and Kreitman, 1991]) was developed to be applied to protein coding sequences, combining both divergence ($D$) and polymorphism ($P$) sites, and categorizing mutations as synonymous ($P_S$, $D_S$) and non-synonymous ($P_N$, $D_N$). 
+The McDonald-Kreitman (MK) family compares polymorphism and divergence at nonsynonymous
+(N) and synonymous (S) sites. Under neutrality `Dn/Ds = Pn/Ps`; adaptive substitutions
+inflate `Dn`. All functions take a raw SFS and `[Dn, Ds, Ln, Ls]` (see
+[Input data](data.md)), and also accept a `Vector` of each (one result row per dataset,
+returned as a `DataFrame`).
 
-If all mutations are either strongly deleterious or neutral, then $Di/D0$ is expected to roughly equal $Pi/P0$. In contrast, if positive selection is operating in the region, adaptive mutations rapidly reach fixation and contribute more to divergence than polymorphism compared to neutral mutations, and then $D_N/D_S > P_N/P_S$. Assuming that adaptive mutations contribute little to polymorphism but substantially to divergence, the proportion of non-synonymous substitutions is inferred following [Smith and Eyre-Walker (2002)](https://doi.org/10.1038/4151022a).
-
-$\alpha = 1 - (\frac{P_N}{P_S}\cdot\frac{D_S}{D_N})$
-
-Please check [`MKtest.standard_mk`](@ref) to obtain more info.
+The examples use the whole 1000 Genomes table:
 
 ```julia
-sfs, divergence, alpha = MKtest.parse_sfs("mktest/tgp.txt"; sample_size = 661)
-
-mk = MKtest.standard_mk(sfs, divergence)
+sfs, div, alpha_x = MKtest.parse_sfs("data/MKdata_tgp_may2023.txt"; sample_size = 661)
 ```
 
-## Fay, Waycoff and Wu MK extension
-[Fay et al. (2002)](https://doi.org/10.1038/4151024a) proposed an approach that removes all polymorphisms segregating at a frequency ($j$) below a given threshold (usually $j > 5\%–15\%$). Although there is no consensus about what this threshold should be used, [J. Charlesworth & Eyre-Walker (2008)](https://doi.org/10.1093/molbev/msn005) demonstrated that  estimates are robust using a frequency threshold of 15%, below which most slightly deleterious polymorphisms are found and removed. The estimates are reasonably accurate only when the rate of adaptive evolution is high and the Distribution of Fitness Effects (DFE) of deleterious mutations is leptokurtic.
+## Standard MK test
 
-$\alpha = 1 - (\frac{P_{N (j>15\%)}}{P_{S (j>15\%)}\cdot\frac{D_S}{D_N})$
-
-Please check [`MKtest.fww_mk`](@ref) to obtain more info.
+`alpha = 1 - (Pn / Ps) (Ds / Dn)` (Smith & Eyre-Walker 2002), with a Fisher exact test
+of the 2x2 table.
 
 ```julia
-fww = MKtest.fww_mk(sfs, divergence; cutoff = 0.15)
+MKtest.standard_mk(sfs, div)
+# (alpha = -0.598, p_value = 0.0, omega = 0.284, omega_a = -0.170, omega_d = 0.453)
 ```
 
-## imputed MKT (in preparation)
-The imputed MKT (impMKT) is a modification of the Fay, Waycoff, and Wu MK extension (fwwMK) ([Fay et al. (2002)](https://doi.org/10.1038/4151024a) to improve gene-by-gene analyses. The method propose the imputation of slightly deleterious mutations at the SFS rather than removing all variants below a frequency threshold. The imputedMK aims to maximize the information to test the excess of divergence ratio relative to polymorphism at the gene level. $\alpha$ is estimated as
+`omega = (Dn/Ln) / (Ds/Ls)`, split into its adaptive (`omega_a = alpha * omega`) and
+non-adaptive (`omega_d`) parts. Slightly deleterious polymorphisms make the standard
+alpha negative, as here.
 
-$\alpha_{imputed} = 1 - \left( \frac{P_{N} - P_{wd}}{P_{S}} \cdot \frac{D_{N}}{D_{S}} \right)$
+## Fay, Wyckoff and Wu (FWW)
 
-where $P_{wd}$ is
-
-$P_{wd} \approx P_{wd (j < 15\%)} = P_{N (j<15\%)} - \frac{P_{N (j>15\%) } \cdot P_{S (j<15\%)}}{P_{S (j>15\%)}}$
-
-Please check [`MKtest.imputed_mk`](@ref) to obtain more info.
+Polymorphisms below a frequency `cutoff` are removed before computing alpha (Fay et al.
+2002), which discards most slightly deleterious variants; 15% is the usual choice
+(Charlesworth & Eyre-Walker 2008).
 
 ```julia
-imputed = MKtest.imputed_mk(sfs, divergence; cutoff = 0.15)
+MKtest.fww_mk(sfs, div; cutoff = 0.15)
+# (alpha = 0.008, p_value = 0.580, omega = 0.284, omega_a = 0.0023, omega_d = 0.281)
 ```
 
-## Asymptotic MKT
-Proposed by Messer and Petrov (2013). This extension is robust to the presence of selective sweeps (genetic hitchhiking) and the segregation of slightly deleterious polymorphisms substitutions (BGS). In this approach, the authors defined $\alpha$ as a function that depends on the SFS of alleles. Therefore, $\alpha$ is estimated in different frequency intervals ($x$), and these values are then adjusted to an exponential function. An exponential fit is suitable as the non-synonymous allele frequency is expected to decay exponentially over the respective levels of synonymous polymorphisms (Messer & Petrov, 2013). $\alpha$ is estimated as
+## Imputed MK test
 
-$\alpha_{fit(x)} = a+b \cdot e^{-cx}$
-
-The model is chosen with `model`: `ExponentialFit()` (default) or `LinearFit()` ($\alpha_{fit(x)} = a + b \cdot x$). Only that model is fitted; if the fit fails the result is `NaN`. The confidence interval is the 95% interval of the asymptote. Please check [`MKtest.asymptotic_mk`](@ref) to obtain more info.
+Instead of removing low-frequency polymorphisms, the imputed MK test (Murga-Moreno et al.
+2022) subtracts the slightly deleterious ones it estimates from the shape of the SFS
+below `cutoff`, which keeps more information for gene-level tests.
 
 ```julia
-amk = MKtest.asymptotic_mk(sfs, divergence)
-amk_linear = MKtest.asymptotic_mk(alpha; model = MKtest.LinearFit())
+MKtest.imputed_mk(sfs, div; cutoff = 0.15)
+# (alpha = 0.008, p_value = 0.331, b = 0.172, f = 0.281, d = 0.547, omega = 0.284, ...)
+```
 
+`b`, `f` and `d` are the fractions of new nonsynonymous mutations estimated to be
+slightly deleterious, neutral and strongly deleterious.
+
+## Asymptotic MK test
+
+alpha is computed as a function of frequency, `alpha(x)` from the polymorphisms at
+frequency `>= x`, and the curve is extrapolated to `x = 1` (Messer & Petrov 2013),
+which removes the bias of slightly deleterious polymorphisms. `cutoff` restricts the
+frequencies used in the fit; `[0.0, 0.7]` is common for empirical data.
+
+```julia
+amk = MKtest.asymptotic_mk(sfs, div; cutoff = [0.0, 0.7])
+# amk.asymptotic_mk = 0.0118, CI [0.0081, 0.0154]; fit a + b exp(-c x) with
+# a = 0.0118, b = -0.318, c = 21.7
+
+MKtest.asymptotic_mk(sfs, div; cutoff = [0.0, 0.7], model = MKtest.LinearFit())
+# asymptotic_mk = 0.0823, CI [0.0679, 0.0966]
+```
+
+The fitted model is `ExponentialFit()` (`a + b exp(-c x)`, the default) or `LinearFit()`
+(`a + b x`). Only the chosen model is fitted: if the fit fails the result is NaN, with
+no silent fallback to the other. The CI is the 95% interval of the asymptote. The
+result also holds the `f` and `alpha_x` points used.
+
+`asymptotic_mk` also takes the `alpha_x` table from `parse_sfs`, or a bare alpha(x)
+vector: `MKtest.asymptotic_mk(alpha_x; cutoff = [0.0, 0.7])`.
+
+`MKtest.α_x(sfs, div)` returns the alpha(x) table `[DAC frequency alpha(x)]` itself.
+
+## Direction of selection and neutrality index
+
+```julia
+MKtest.dos(sfs, div)   # (dos = -0.117, p_value = 0.0)   Stoletzki & Eyre-Walker 2011
+MKtest.ni(sfs, div)    # (ni = 1.598, p_value = 0.0)     Rand & Kann 1996
+```
+
+`MKtest.ni_cmh(sfs_vector, div_vector)` combines several datasets into one weighted NI
+(Stoletzki & Eyre-Walker 2011); it returns the value alone, without a test.
+
+## Many datasets and multiple testing
+
+With a `Vector` of SFS and divergence (for instance from a gene list with one gene per
+line and `mode = :gene`), every test returns a `DataFrame`, and `correction = :fdr` or
+`:bonferroni` adds a `pvalue_adjusted` column:
+
+```julia
+gs, gd, _ = MKtest.parse_sfs("data/MKdata_tgp_may2023.txt"; sample_size = 661,
+                             gene_list = "data/ensembl_list.txt", mode = :gene)
+MKtest.standard_mk(gs, gd; correction = :fdr)
+```
+
+## Plots
+
+With Plots.jl loaded:
+
+```julia
 using Plots
-MKtest.plot_asymptotic_mk(amk)
-MKtest.plot_α_x(alpha)
+MKtest.plot_asymptotic_mk(amk)                    # alpha(x), the fit and its asymptote
+MKtest.plot_α_x(alpha_x; cutoff = [0.0, 0.7])     # alpha(x) curves
+MKtest.plot_α_x(sfs, div; sample_size = 50)       # from the SFS, projected first
 ```
 
-## Grapes
-Grapes is a ML method that can estimate the expected proportion of adaptive fixations given the inferred DFE from the MK data. Grapes assumes can model the DFE in the form of two different versions of the Fisher's geometric model, and a model assuming a Beta-shaped distribution of weak effect mutations, a Gamma distribution as well as a exponential distibution. Please check (Grapes repository)[https://github.com/BioPP/grapes] a cite (Galtier 2016)[https://doi.org/10.1371/journal.pgen.1005774] if you use `MKtest.grapes` function.
-
-```julia
-grapes_df = grapes(sfs,divergence,m,"GammaExpo","mktest/",20)
-```
+`plot_α_x` takes several curves at once and `control = ...` for a band of control
+curves; `output_path = "fig.pdf"` saves the figure (png, svg, pdf, ps or html).

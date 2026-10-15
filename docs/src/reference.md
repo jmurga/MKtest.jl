@@ -1,72 +1,197 @@
-# Model parameters
+# Reference
 
-*adap* is the only variable exported from *MKtest* module. It is a Mutable structure contaning the variables required to solve the analytical approach. Any value can be easly changed. Remember *adap* should be change before the execution, in other case, $\alpha_{(x)}$ will be solve with the default values. To change all the values at once, you can use [`MKtest.parameters`](@ref) in order to set specific models in a new variable.
+Nothing is exported: call every function as `MKtest.f`. Functions documented only in
+the pages (`fold`, `abc`, `abc_loclinear`, `bootstrap`, `get_distance`,
+`get_bootstrap`) have no docstring of their own.
+
+## Input data
+
+```@docs
+MKtest.parse_sfs
+MKtest.project
+MKtest.cumulative_sfs
+MKtest.reduce_sfs
+MKtest.bootstrap_data
+```
+
+## MK tests
+
+```@docs
+MKtest.standard_mk
+MKtest.fww_mk
+MKtest.imputed_mk
+MKtest.asymptotic_mk
+MKtest.ExponentialFit
+MKtest.LinearFit
+MKtest.α_x
+MKtest.dos
+MKtest.ni
+MKtest.ni_cmh
+MKtest.grapes
+```
+
+## dfe_ml
+
+```@docs
+MKtest.dfe_ml
+MKtest.dfe_model_comparison
+MKtest.DFEResult
+MKtest.params_wide
+MKtest.param_values
+MKtest.expected_sfs
+MKtest.rj
+MKtest.write_dfe_result
+MKtest.read_dfe_result
+MKtest.from_legacy_name
+MKtest.grapes_param_name
+MKtest.DFECache
+```
+
+### DFE models
+
+```@docs
+MKtest.AbstractDFEModel
+MKtest.GammaZero
+MKtest.GammaExpo
+MKtest.GammaGamma
+MKtest.ExpoZero
+MKtest.ExpoExpo
+MKtest.ExpoGamma
+MKtest.DisplGamma
+MKtest.ScaledBeta
+MKtest.LogNormalZero
+MKtest.NeuGamma
+MKtest.FGMBesselK
+MKtest.FixedSpikes
+MKtest.spike_weights
+MKtest.WithLethal
+MKtest.dfe_parameters
+MKtest.distribution
+MKtest.dfe_density!
+MKtest.dfe_log_scale
+MKtest.dfe_start_points
+MKtest.dfe_name
+MKtest.discrete_components
+MKtest.dfe_mass_below
+MKtest.dfe_mass_above
+MKtest.dfe_cdf_continuous
+MKtest.dfe_cdf_continuous!
+MKtest.dfe_ne_multipliers
+```
+
+### Axes
+
+```@docs
+MKtest.AbstractSFSExpectation
+MKtest.PRFSojourn
+MKtest.expectation_counts
+MKtest.neutral_shape
+MKtest.uses_exterior
+MKtest.default_s_grid
+MKtest.default_demography
+MKtest.AbstractDominance
+MKtest.Additive
+MKtest.Dominance
+MKtest.DominanceFunction
+MKtest.effective_s
+MKtest.AbstractDemography
+MKtest.NuisanceRj
+MKtest.Equilibrium
+MKtest.free_rj
+MKtest.AbstractNeModel
+MKtest.ConstantNe
+MKtest.AncestralNeRatio
+MKtest.ne_ratio
+MKtest.AbstractDivergenceModel
+MKtest.SaturatedDivergence
+MKtest.DFEConstrainedDivergence
+MKtest.NoDivergence
+MKtest.uses_divergence
+MKtest.divergence_free
+MKtest.AbstractLikelihoodKernel
+MKtest.PoissonKernel
+MKtest.NegativeBinomialKernel
+MKtest.log_kernel
+MKtest.kernel_parameters
+MKtest.kernel_start
+MKtest.AbstractIntegrator
+MKtest.RombergIntegrator
+MKtest.GaussLegendreSojourn
+MKtest.ExactSojourn
+MKtest.integrate
+MKtest.expected_count
+MKtest.dn_correction_term
+MKtest.AbstractDFEQuadrature
+MKtest.MidpointDensity
+MKtest.IntervalCDF
+MKtest.fill_dfe_vals!
+MKtest.AbstractSGrid
+MKtest.GrapesGrid
+MKtest.LogGammaGrid
+MKtest.s_grid_points
+MKtest.s_grid_widths
+MKtest.s_cell_bounds
+MKtest.AbstractOptimizer
+MKtest.LBFGSOptimizer
+MKtest.NelderMeadOptimizer
+MKtest.run_optimizer
+MKtest.AbstractAlphaSummary
+MKtest.DFEMAlpha
+MKtest.summarize
+MKtest.FitContext
+```
+
+## ABC-MK
 
 ```@docs
 MKtest.parameters
+MKtest.rates
+MKtest.valid_data
+MKtest.summary_statistics
+MKtest.abcmk
+MKtest.RjSampling
+MKtest.IndependentSampling
+MKtest.FlatAlphaPrior
+MKtest.TableRowPrior
+MKtest.ABCreg
+MKtest.summary_abc
 MKtest.analytical_alpha
-MKtest.Br
+MKtest.set_ppos!
 MKtest.set_θ!
-MKtest.binom_op
 MKtest.Φ
-```
-
-# MKtest estimation
-## Fixations
-```@docs
+MKtest.binom_op
 MKtest.fix_neut
 MKtest.fix_neg
 MKtest.p_fix
 MKtest.fix_pos_sim
-```
-
-## Polymorphism
-```@docs
 MKtest.sfs_neut
 MKtest.sfs_pos
 MKtest.sfs_neg
-MKtest.cumulative_sfs
-MKtest.reduce_sfs
 ```
 
-## Rates
+## Case and control sets
+
 ```@docs
-MKtest.rates
-```
-## Summary statistics
-```@docs
-MKtest.poisson_fixation!
-MKtest.poisson_polymorphism!
-MKtest.sampling_summaries!
-MKtest.summary_statistics
+MKtest.bootstrap_parameters
+MKtest.case_control_table
+MKtest.empirical_test
+MKtest.empirical_pvalues
 ```
 
-## Inference tools
+## Balancing selection
+
 ```@docs
-MKtest.parse_sfs
-MKtest.ABCreg
-MKtest.summary_abc
+MKtest.α_b
+MKtest.parse_private_share
 ```
 
-## MKtest
-```@docs
-MKtest.α_x
-MKtest.asymptotic_mk
-MKtest.AbstractAsymptoticModel
-MKtest.ExponentialFit
-MKtest.LinearFit
-MKtest.imputed_mk
-MKtest.fww_mk
-MKtest.standard_mk
-MKtest.ni
-MKtest.ni_cmh
-MKtest.dos
-MKtest.grapes
-```
+## Plots
 
-## Plotting
-Available after `using Plots`.
+These load with `using Plots` (`plot_α_x`, `plot_asymptotic_mk`) or `using StatsPlots`
+(`plot_violins_empirical`).
+
 ```@docs
 MKtest.plot_α_x
 MKtest.plot_asymptotic_mk
+MKtest.plot_violins_empirical
 ```

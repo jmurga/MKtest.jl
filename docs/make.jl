@@ -13,23 +13,19 @@ makedocs(;
         prettyurls=get(ENV, "CI", "false") == "true",
         canonical="https://jmurga.github.io/MKtest.jl",
         assets=String[],
+        size_threshold=400 * 2^10,         # the reference page lists the whole API
+        size_threshold_warn=250 * 2^10,
     ),
         pages     = [
                 "Home" => "index.md",
-                "Package Overview" => [
-                        "Infering the rate and strength of adaptation" => "empirical.md",
-                        "Rates" => "rates.md",
-                        "Summary statistics" => "summstat.md",
-                        "ABC inference" => "abc.md"
-                ],
-                "Command-Line interface" => "cli.md",
-                "MK approaches" => "mk.md",
+                "Input data" => "data.md",
+                "MK tests" => "mk.md",
                 "DFE and alpha by maximum likelihood" => "dfe_ml.md",
                 "How to add a new DFE" => "new_dfe.md",
-                "Bootstrap" => "bootstrap.md",
+                "ABC-MK" => "abcmk.md",
+                "Case and control sets" => "case_control.md",
                 "Reference" => "reference.md"
         ]
-
 )
 
 deploydocs(;
