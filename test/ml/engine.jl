@@ -501,6 +501,14 @@ end
         # the comparison: on a result, and the fitting form; never across likelihoods
         cmpf = MKtest.dfe_model_comparison(ML_SFS, ML_DIV; models = [GammaZero(), GammaExpo()])
         @test cmpf.result isa MKtest.DFEResult && nrow(cmpf.aic) == 2 && all(cmpf.aic.dataset .== 1)
+        # bounds reach only the models that have the parameter; a name no model has throws
+        cb = MKtest.dfe_model_comparison(ML_SFS, ML_DIV; models = [GammaZero(), GammaExpo()],
+                                         bounds = (ben_prop = (1e-6, 0.99),))
+        pb = cb.result.params
+        @test pb.upper[(pb.model .== "GammaExpo") .& (pb.parameter .== "ben_prop")] == [0.99]
+        @test nrow(cb.lrt) == 1                    # one likelihood setting, so still compared
+        @test_throws ArgumentError MKtest.dfe_model_comparison(ML_SFS, ML_DIV;
+            models = [GammaZero(), GammaExpo()], bounds = (pos_prop = (1e-6, 0.99),))
         mixed = vcat(MKtest.dfe_ml(ML_SFS, ML_DIV, GammaZero(); integrator = RombergIntegrator()),
                      MKtest.dfe_ml(ML_SFS, ML_DIV, GammaExpo()))
         cm = MKtest.dfe_model_comparison(mixed)

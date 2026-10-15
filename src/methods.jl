@@ -1031,7 +1031,9 @@ Both tables carry `dataset` and `group` (the likelihood setting) and are sorted 
 log-likelihood within a group: pick the AIC-best model with `argmin(aic)`, not row 1.
 
 The second form fits `models` (default: the eleven continuous shapes) with `dfe_ml`,
-sharing one `DFECache`, and forwards `kwargs` to it.
+sharing one `DFECache`, and forwards `kwargs` to it. `fixed` and `bounds` are given to
+each model restricted to the parameters it has, so `bounds = (ben_prop = (1e-6, 0.99),)`
+widens the beneficial class of the models that have one.
 """
 function dfe_model_comparison(r::DFEResult)
     inf = r.inference
@@ -1066,11 +1068,22 @@ const _DEFAULT_COMPARISON_MODELS = (ExpoZero(), GammaZero(), ExpoExpo(), GammaEx
 
 function dfe_model_comparison(sfs, divergence;
                               models = collect(AbstractDFEModel, _DEFAULT_COMPARISON_MODELS),
+                              fixed::NamedTuple = NamedTuple(), bounds::NamedTuple = NamedTuple(),
                               cache::DFECache = DFECache(), kwargs...)
+    # `fixed` and `bounds` reach each model restricted to the names it has (a bound on
+    # `ben_prop` applies to GammaExpo, not to GammaZero); a name no model has is an error.
+    names_of(m) = (n = MKtest.dfe_param_names(m); push!(n, :misorient);
+                   haskey(kwargs, :kernel) && append!(n, collect(keys(kernel_parameters(kwargs[:kernel])))); n)
+    allnames = union((names_of(m) for m in models)...)
+    for k in (keys(fixed)..., keys(bounds)...)
+        k in allnames || throw(ArgumentError("$k is not a parameter of any model in the comparison"))
+    end
+    pick(nt, m) = (n = names_of(m); NamedTuple(k => v for (k, v) in pairs(nt) if k in n))
     fits = DFEResult[]
     for m in models
         @info "Fitting $(dfe_name(m))"
-        push!(fits, dfe_ml(sfs, divergence, m; cache = cache, kwargs...))
+        push!(fits, dfe_ml(sfs, divergence, m; cache = cache, fixed = pick(fixed, m),
+                           bounds = pick(bounds, m), kwargs...))
     end
     result = vcat(fits...)
     t = dfe_model_comparison(result)
