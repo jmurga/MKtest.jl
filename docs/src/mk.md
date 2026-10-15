@@ -107,14 +107,23 @@ MKtest.standard_mk(gs, gd; correction = :fdr)
 
 ## Plots
 
-With Plots.jl loaded:
+The plot functions load with Plots.jl. The asymptotic fit of the 1000 Genomes data
+above: the observed alpha(x), the fitted curve, the asymptote (dashed) and its 95% CI.
 
-```julia
-using Plots
-MKtest.plot_asymptotic_mk(amk)                    # alpha(x), the fit and its asymptote
-MKtest.plot_α_x(alpha_x; cutoff = [0.0, 0.7])     # alpha(x) curves
-MKtest.plot_α_x(sfs, div; sample_size = 50)       # from the SFS, projected first
+```@example mk
+using MKtest, Plots
+data = joinpath(pkgdir(MKtest), "data")
+sfs, div, alpha_x = MKtest.parse_sfs(joinpath(data, "MKdata_tgp_may2023.txt"); sample_size = 661)
+amk = MKtest.asymptotic_mk(sfs, div; cutoff = [0.0, 0.7])
+MKtest.plot_asymptotic_mk(amk)
 ```
 
-`plot_α_x` takes several curves at once and `control = ...` for a band of control
-curves; `output_path = "fig.pdf"` saves the figure (png, svg, pdf, ps or html).
+alpha(x) curves straight from the SFS, here projected to 50 individuals first:
+
+```@example mk
+MKtest.plot_α_x(sfs, div; sample_size = 50, cutoff = [0.0, 0.7])
+```
+
+`plot_α_x` also takes the `alpha_x` table of `parse_sfs`, several curves at once, and a
+set of control curves drawn as a band (see [Case and control sets](case_control.md));
+`output_path = "fig.pdf"` saves the figure (png, svg, pdf, ps or html).

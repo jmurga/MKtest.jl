@@ -65,14 +65,31 @@ MKtest.empirical_test(tbl; omega = true)
 
 (see [ABC-MK](abcmk.md) for `param` and the table; run `valid_data` on the controls first).
 
-### Plot
+### Plots
 
-With StatsPlots.jl loaded, a grid of violins (one row per parameter, one column per
-analysis), with the case as a dot and its significance as stars:
+The FWW example above, computed here when the page is built. With StatsPlots.jl loaded,
+`plot_violins_empirical` draws one violin of the control values per parameter and
+analysis, with the case as a dot and its significance as stars:
 
-```julia
-using StatsPlots
-MKtest.plot_violins_empirical(tbl; params = [:alpha])
+```@example cc
+using MKtest, DataFrames, StatsPlots
+data = joinpath(pkgdir(MKtest), "data")
+tgp = joinpath(data, "MKdata_tgp_may2023.txt")
+case_sfs, case_div, case_ax = MKtest.parse_sfs(tgp; sample_size = 661,
+                                               gene_list = joinpath(data, "DNAonly_VIPs.txt.gz"))
+ctl_sfs, ctl_div, ctl_ax = MKtest.parse_sfs(tgp; sample_size = 661,
+                                            gene_list = joinpath(data, "DNAonly_nonVIPs.txt.gz"))
+tbl = MKtest.case_control_table(DataFrame([MKtest.fww_mk(case_sfs, case_div)]),
+                                MKtest.fww_mk(ctl_sfs, ctl_div); analysis = "DNA VIPs")
+MKtest.plot_violins_empirical(tbl; params = [:alpha, :omega_a])
+```
+
+The alpha(x) curve of the case set against the 10-90% band of its 1000 control sets
+(`parse_sfs` returns the curves as `[DAC frequency alpha(x)]` tables):
+
+```@example cc
+MKtest.plot_α_x(case_ax[:, 3], [x[:, 3] for x in ctl_ax]; labels = ["DNA VIPs"],
+                cutoff = [0.0, 0.7])
 ```
 
 ## Making the control sets

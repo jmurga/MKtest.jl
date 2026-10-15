@@ -1,5 +1,6 @@
 using MKtest
 using Documenter
+ENV["GKSwstype"] = "100"   # GR without a display, for the figures of the @example blocks
 
 DocMeta.setdocmeta!(MKtest, :DocTestSetup, :(using MKtest); recursive=true)
 

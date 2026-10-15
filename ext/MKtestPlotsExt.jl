@@ -299,10 +299,10 @@ function plot_asymptotic_mk(
         x_curve = range(0.05, 1.0, length=100)
         if result.model == :exponential
             y_curve = result.a .+ result.b .* exp.(-result.c .* x_curve)
-            fit_label = "Fit: a + b·exp(−cx)"
+            fit_label = "Fit: a + b exp(-c x)"
         else
             y_curve = result.a .+ result.b .* x_curve
-            fit_label = "Fit: a + b·x"
+            fit_label = "Fit: a + b x"
         end
         plot!(p, x_curve, y_curve, color=:red, linewidth=2, label=fit_label)
     end
