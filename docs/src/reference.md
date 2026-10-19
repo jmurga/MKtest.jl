@@ -155,6 +155,7 @@ MKtest.TableRowPrior
 MKtest.ABCreg
 MKtest.abc
 MKtest.abc_loclinear
+MKtest.abcreg_loclinear
 MKtest.summary_abc
 MKtest.analytical_alpha
 MKtest.set_ppos!

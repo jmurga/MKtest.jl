@@ -529,9 +529,8 @@ _row_prior_desc(p::FlatAlphaPrior) = "FlatAlphaPrior (bin $(p.bin), floor $(p.fl
 """
     sampling_summaries!(buf, fs, d, neut, sel, dsdn, gn, sh, gL, gH, B, output, summstat_size, sampling)
 
-Draw one dataset's Poisson realisations for every sampled table row, assemble
-`[α(3), ω(4, dropped if any is NaN), gn, sh, gL, gH, B, α(x)(n_dac)]`, drop the
-non-finite rows, keep at most `summstat_size`, and write them to `output`.
+Write one dataset's summaries (see `_assemble_summaries!`) to `output`; returns the number
+of rows written.
 """
 function sampling_summaries!(
     buf::SamplingBuffers,
@@ -546,6 +545,35 @@ function sampling_summaries!(
     gH::AbstractVector,
     B::AbstractVector,
     output::String,
+    summstat_size::Int64,
+    sampling::AbstractPoissonSampling=IndependentSampling(),
+)
+    out = _assemble_summaries!(buf, fs, d, neut, sel, dsdn, gn, sh, gL, gH, B, summstat_size, sampling)
+    write_files(out, output)
+    return size(out, 1)
+end
+
+"""
+    _assemble_summaries!(buf, fs, d, neut, sel, dsdn, gn, sh, gL, gH, B, summstat_size,
+                         sampling = IndependentSampling()) -> Matrix{Float64}
+
+Draw one dataset's Poisson realisations for every sampled table row, assemble
+`[α(3), ω(4, dropped if any is NaN), gn, sh, gL, gH, B, α(x)(n_dac)]`, drop the
+non-finite rows and keep at most `summstat_size`: the matrix `sampling_summaries!`
+writes. The in-memory ABC route (`abcmk(...; in_memory = true)`) uses it directly.
+"""
+function _assemble_summaries!(
+    buf::SamplingBuffers,
+    fs::AbstractVector,
+    d::AbstractVector,
+    neut::AbstractMatrix,
+    sel::AbstractMatrix,
+    dsdn::AbstractMatrix,
+    gn::AbstractVector,
+    sh::AbstractVector,
+    gL::AbstractVector,
+    gH::AbstractVector,
+    B::AbstractVector,
     summstat_size::Int64,
     sampling::AbstractPoissonSampling=IndependentSampling(),
 )
@@ -628,7 +656,7 @@ function sampling_summaries!(
         n_kept = target
     end
 
-    # Materialise the kept rows (single allocation), then write.
+    # Materialise the kept rows (single allocation).
     out = Matrix{Float64}(undef, n_kept, n_cols)
     row = 0
     @inbounds for i in 1:N
@@ -640,8 +668,7 @@ function sampling_summaries!(
         end
     end
 
-    write_files(out, output)
-    return n_kept
+    return out
 end
 
 """
@@ -713,13 +740,60 @@ function summary_statistics(
         end
     end
 
+    st = _summaries_setup(param, sfs, divergence; h5_file, summstat_size, alpha, B_bins,
+                          sampling, row_prior, provenance_folder = output_folder)
+
+    # Making summaries
+    summ_output = output_folder .* "/summstat_" .* string.(1:length(st.sfs_p)) .* ".txt.gz"
+
+    @info "Estimating and writting summary statistics at $output_folder"
+
+    # One SamplingBuffers per dataset; the threaded loop only mutates its own buffer.
+    ThreadsX.map(
+        (i, z) -> sampling_summaries!(_dataset_buffer(st), st.sfs_p[i], st.divergence_p[i],
+                                      st.neut, st.sel, st.dsdn, st.gn, st.sh, st.gL, st.gH,
+                                      st.B, z, st.summstat_size, st.samplers[i]),
+        eachindex(st.sfs_p),
+        summ_output,
+    );
+
+    α_output = output_folder * "/alphas_" .* string.(1:length(st.sfs_p)) .* ".txt.gz"
+
+    @. write_files(st.α, α_output)
+end
+
+"""
+    _summaries_setup(param, sfs, divergence; h5_file, summstat_size, alpha, B_bins,
+                     sampling, row_prior, provenance_folder = nothing)
+
+Everything `summary_statistics` does before the per-dataset Poisson draws, shared with the
+in-memory ABC route: read the rates table, filter and draw its rows under `row_prior`, lay
+out the sampled spectra, and prepare one sampler and the observed α(x) per dataset. The
+row draw is the only random step here, so both routes consume the global RNG identically.
+Writes `provenance.txt` into `provenance_folder` when one is given.
+"""
+function _summaries_setup(
+    param::parameters,
+    sfs::Vector,
+    divergence::Vector;
+    h5_file::String,
+    summstat_size::Int,
+    alpha::Union{Nothing,Vector{Float64}},
+    B_bins::Union{Nothing,Vector{Float64}},
+    sampling::AbstractPoissonSampling,
+    row_prior::AbstractRowPrior,
+    provenance_folder::Union{Nothing,String} = nothing,
+)
+    @assert 1 ∉ param.dac "Please exclude singletons from the inference"
+    assertion_params(param)
+
     @info "Opening and random sampling expected SFS and fixation rates"
     tmp = _read_rates(h5_file, param)
     @info "rates built with: " * tmp.options
 
     # Record how the summaries were made. `Base.open`, since this module imports
     # `GZip.open`.
-    Base.open(joinpath(output_folder, "provenance.txt"), "w") do io
+    isnothing(provenance_folder) || Base.open(joinpath(provenance_folder, "provenance.txt"), "w") do io
         println(io, "rates_file  = ", h5_file)
         println(io, "rates_opts  = ", tmp.options)
         println(io, "sampling    = ", nameof(typeof(sampling)), _sampling_desc(sampling, param))
@@ -799,31 +873,15 @@ function summary_statistics(
     gH = ceil.(abs.(view(models, :, 6)))
     B  = collect(view(models, :, 1))               # B * 1000
 
-    # Making summaries
-    summ_output = output_folder .* "/summstat_" .* string.(1:size(sfs_p, 1)) .* ".txt.gz"
-
-    @info "Estimating and writting summary statistics at $output_folder"
-
     # One sampler per dataset: RjSampling needs each dataset's observed Ps.
     samplers = [_prepare_sampling(sampling, sfs[i], param.dac, param.nn) for i in eachindex(sfs)]
 
-    # One SamplingBuffers per dataset; the threaded loop only mutates its own buffer.
-    ThreadsX.map(
-        (x, y, z, smp) -> begin
-            buf = SamplingBuffers(N, n_dac)
-            sampling_summaries!(buf, x, y, neut, sel, dsdn,
-                                gn, sh, gL, gH, B, z, summstat_size, smp)
-        end,
-        sfs_p,
-        divergence_p,
-        summ_output,
-        samplers
-    );
-
-    α_output = output_folder * "/alphas_" .* string.(1:size(sfs_p, 1)) .* ".txt.gz"
-
-    @. write_files(α, α_output)
+    return (; α, sfs_p, divergence_p, samplers, neut, sel, dsdn, gn, sh, gL, gH, B,
+            N, n_dac, summstat_size)
 end
+
+"Fresh `SamplingBuffers` for one dataset of a `_summaries_setup` result."
+_dataset_buffer(st) = SamplingBuffers(st.N, st.n_dac)
 
 # One set, as `parse_sfs` returns it for a single gene list.
 summary_statistics(param::parameters, sfs::AbstractMatrix{<:Real}, divergence::AbstractVector{<:Real}; kwargs...) =

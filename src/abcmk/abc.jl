@@ -89,7 +89,8 @@ function ABCreg(;
 
     # Creating output names
     out = output_folder .* "/out_" .* string.(_dataset_index.(a_file))
-    tol_abcreg = tol ./ _with_gz.(countlines, sum_file)
+    # One task per file: counting 1000 files serially delays the binary.
+    tol_abcreg = tol ./ ThreadsX.map(f -> _with_gz(countlines, f), sum_file)
     @info "Running ABCreg. Please cite https://doi.org/10.1186/1471-2156-10-35"
     # Using mapi instead map to limit tasks. Bash interaction not working as expected
     ThreadsX.mapi(
@@ -449,10 +450,18 @@ function abc_loclinear(target_file::String,param_summaries_file::String;P::Int64
     # target = vec(readdlm(target_file,'\t',Float64,header=false))
     # summaries = readdlm(param_summaries_file,'\t',Float64,header=false))
 
-    param   = summaries[:, 1:P]
-    sumstat = summaries[:, (P+1):end]
+    return abc_loclinear(target, summaries[:, 1:P], summaries[:, (P+1):end];
+                         tol = tol, transformation = transformation, kernel = kernel)
+end
 
-    # transformation="none";kernel="epanechnikov";tol=0.025
+# The same on matrices: `target` the observed summaries, `param` and `sumstat` the table's
+# parameter and summary columns. The in-memory route (`abcmk(...; in_memory = true)`).
+function abc_loclinear(target::AbstractVector, param::AbstractMatrix, sumstat::AbstractMatrix;
+                       tol::Int64, transformation::String="none", kernel::String="epanechnikov")
+
+    target  = Vector{Float64}(vec(target))
+    param   = Matrix{Float64}(param)
+    sumstat = Matrix{Float64}(sumstat)
 
     kernel, transformation = lowercase(kernel), lowercase(transformation)
     @assert lowercase(kernel) ∈ ["gaussian", "epanechnikov", "rectangular", "triangular", "biweight", "cosine"] "Kernel is incorrectly defined. Use gaussian, epanechnikov, rectangular, triangular, biweight or cosine"
@@ -468,7 +477,7 @@ function abc_loclinear(target_file::String,param_summaries_file::String;P::Int64
 
     ## Scale and euclidean distance
     ## #########################
-    target_scaled, sumstat_accepted, sumstat_scaled, param_accepted, dist_accepted, wts = rejection(vec(target),sumstat,param,tol/size(summaries,1),kernel)
+    target_scaled, sumstat_accepted, sumstat_scaled, param_accepted, dist_accepted, wts = rejection(vec(target),sumstat,param,tol/size(sumstat,1),kernel)
     num_accepted = size(sumstat_accepted,1)
 
     ## Transform parameters
@@ -537,4 +546,188 @@ function abc_loclinear(target_file::String,param_summaries_file::String;P::Int64
     end
 
     return param_accepted,param_adjusted
+end
+
+##################################
+# ABCreg, in Julia and in memory #
+##################################
+
+# ABCreg's parameter transformations (transformations.cc): `-L` is log(x + 1e-4), `-T` the
+# tangent transformation, both over the range of the whole table. Where the binary aborts
+# (`-L` on a value <= -1e-4) the port gives NaN; each parameter is regressed on its own, so
+# only that parameter's column of the posterior is NaN.
+_abcreg_transform(x, t, lo, hi) =
+    t == "log" ? (x + 1e-4 > 0 ? log(x + 1e-4) : NaN) : t == "tan" ? tangent_transfromation(x, lo, hi) : x
+_abcreg_untransform(y, t, lo, hi) =
+    t == "log" ? exp(y) - 1e-4 : t == "tan" ? undo_tangent_transfromation(y, lo, hi) : y
+
+# gsl_stats_quantile_from_sorted_data
+function _gsl_quantile(sorted::AbstractVector{Float64}, f::Float64)
+    n = length(sorted)
+    idx = f * (n - 1)
+    lhs = floor(Int, idx)
+    δ = idx - lhs
+    lhs == n - 1 && return sorted[n]
+    return (1 - δ) * sorted[lhs+1] + δ * sorted[lhs+2]
+end
+
+# gsl_linalg_balance_columns: scale column j by the power of 2 that brings its L1 norm into
+# [0.5, 1]. Returns the factors.
+function _gsl_balance_columns!(A::AbstractMatrix{Float64})
+    D = ones(size(A, 2))
+    for j in axes(A, 2)
+        s = sum(abs, view(A, :, j))
+        f = 1.0
+        (s == 0.0 || !isfinite(s)) && continue
+        while s > 1.0
+            s /= 2.0; f *= 2.0
+        end
+        while s < 0.5
+            s *= 2.0; f /= 2.0
+        end
+        D[j] = f
+        f != 1.0 && (view(A, :, j) ./= f)
+    end
+    return D
+end
+
+# gsl_multifit_wlinear_svd (GSL 2.x: balanced columns, singular values <= tol * s_max
+# dropped), solved for every column of Y at once. Returns the (p x P) coefficients.
+function _gsl_wlinear_svd(X::AbstractMatrix{Float64}, w::AbstractVector{Float64},
+                          Y::AbstractMatrix{Float64}, tol::Float64)
+    sw = sqrt.(max.(w, 0.0))
+    A = X .* sw
+    D = _gsl_balance_columns!(A)
+    F = svd(A)
+    inv_s = [s <= tol * F.S[1] ? 0.0 : 1 / s for s in F.S]
+    return (F.V * (inv_s .* (F.U' * (Y .* sw)))) ./ D
+end
+
+"""
+    abcreg_loclinear(target, param, sumstat; tol, transformation = "none") -> Matrix{Float64}
+
+ABCreg ([Thornton 2009](https://doi.org/10.1186/1471-2156-10-35)) on one dataset, in
+Julia and in memory: the algorithm of the binary that [`ABCreg`](@ref) runs, transcribed
+from its source (`reg.cc`, `generate_posterior.cc`, `abc_algebra.cc`,
+`transformations.cc`). Cite ABCreg when you use it.
+
+`param` holds the table's parameter columns and `sumstat` its summary statistics, one row
+per table row; `target` is the observed summary row.
+
+1. Each statistic is centred and divided by its sample standard deviation over the table
+   (the target with the same values).
+2. The acceptance radius `q` is the `tol / nrow` quantile of the Euclidean distances
+   (GSL's interpolated quantile), and rows with distance strictly below `q` are accepted.
+   If `q` is 0, the exact matches are returned without regression, as ABCreg does.
+3. Epanechnikov weights `1 - d^2 / q^2`.
+4. Each parameter (transformed with the binary's `-L`, `log(x + 1e-4)`, or `-T`, the
+   tangent transformation over the table's range, when `transformation` is `"log"` or
+   `"tan"`) is regressed on the scaled statistics by weighted least squares through GSL's
+   balanced SVD with tolerance `1 / n_accepted`.
+5. Adjusted value = prediction at the target + the row's residual, back-transformed. No
+   heteroscedastic correction (unlike [`abc_loclinear`](@ref)).
+
+Under `"log"` a parameter at or below `-1e-4` (a negative `ωₙₐ`) makes the binary abort;
+here that parameter's column is `NaN` and the other columns are unaffected.
+
+Agrees with the binary to its printed precision (6 significant digits); the parity test is
+`test/abc_in_memory.jl`.
+
+# Returns
+The adjusted posterior, one row per accepted table row in table order; zero rows if none
+was accepted.
+"""
+function abcreg_loclinear(target::AbstractVector, param::AbstractMatrix, sumstat::AbstractMatrix;
+                          tol::Integer, transformation::String = "none")
+    transformation = lowercase(transformation)
+    transformation ∈ ("none", "log", "tan") || throw(ArgumentError(
+        "transformation must be \"none\", \"log\" or \"tan\", got \"$transformation\""))
+    n, S = size(sumstat)
+    length(target) == S || throw(DimensionMismatch(
+        "target has $(length(target)) summaries, the table $S"))
+    size(param, 1) == n || throw(DimensionMismatch("param and sumstat need the same rows"))
+    1 <= tol <= n || throw(ArgumentError("tol must be in 1:$n, got $tol"))
+
+    lo = vec(minimum(param, dims = 1))'
+    hi = vec(maximum(param, dims = 1))'
+    θ = _abcreg_transform.(param, transformation, lo, hi)
+
+    μ = vec(mean(sumstat, dims = 1))
+    σ = vec(std(sumstat, dims = 1))
+    Z = (sumstat .- μ') ./ σ'
+    z0 = (target .- μ) ./ σ
+    dist = vec(sqrt.(sum((Z .- z0') .^ 2, dims = 2)))
+    q = _gsl_quantile(sort(dist), tol / n)
+
+    if abs(q) <= eps(Float64)
+        return _abcreg_untransform.(θ[dist .<= q, :], transformation, lo, hi)
+    end
+    acc = findall(<(q), dist)
+    isempty(acc) && return zeros(0, size(param, 2))
+
+    w = @. 1.0 - dist[acc]^2 / q^2
+    X = hcat(ones(length(acc)), Z[acc, :])
+    Y = θ[acc, :]
+    C = _gsl_wlinear_svd(X, w, Y, 1 / length(acc))
+    adjusted = (vcat(1.0, z0)' * C) .+ (Y .- X * C)
+    return _abcreg_untransform.(adjusted, transformation, lo, hi)
+end
+
+"""
+    _abc_in_memory(param, sfs, divergence; abc_method, tol, h5_file, summstat_size, alpha,
+                   B_bins, sampling, row_prior) -> Vector{DataFrame}
+
+The ABC step of [`abcmk`](@ref) without files: the same table rows, Poisson realisations
+and observed summaries as [`summary_statistics`](@ref) (the same random draws at the same
+seed and thread count), handed per dataset to [`abcreg_loclinear`](@ref)
+(`abc_method = "abcreg"`) or [`abc_loclinear`](@ref) (`"abc"`, its adjusted posterior).
+One dataset per thread; only its posterior is kept. Datasets with an empty posterior are
+dropped with a warning, as [`ABCreg`](@ref) does.
+"""
+function _abc_in_memory(param::parameters, sfs::Vector, divergence::Vector;
+                        abc_method::String, tol::Int, h5_file::String, summstat_size::Int,
+                        alpha, B_bins, sampling::AbstractPoissonSampling,
+                        row_prior::AbstractRowPrior)
+    st = _summaries_setup(param, sfs, divergence; h5_file, summstat_size, alpha, B_bins,
+                          sampling, row_prior)
+    S = length(param.dac)
+
+    if abc_method == "abcreg"
+        @info "Running ABCreg in memory (Julia port of ABCreg). Please cite https://doi.org/10.1186/1471-2156-10-35"
+    else
+        @info "Running ABC in memory"
+    end
+
+    # BLAS on one thread: the datasets run in parallel; restored even if a fit throws.
+    nthreads_og = get_num_threads()
+    set_num_threads(1)
+    posteriors = try
+        ThreadsX.map(eachindex(st.sfs_p)) do i
+            out = _assemble_summaries!(_dataset_buffer(st), st.sfs_p[i], st.divergence_p[i],
+                                       st.neut, st.sel, st.dsdn, st.gn, st.sh, st.gL, st.gH,
+                                       st.B, st.summstat_size, st.samplers[i])
+            # The ω block is dropped when any ω is NaN, as ABCreg / abc then read P = 8.
+            P = size(out, 2) == 12 + S ? 12 : 8
+            target = vec(st.α[i])
+            post = if abc_method == "abcreg"
+                abcreg_loclinear(target, out[:, 1:P], out[:, (P+1):end]; tol)
+            else
+                abc_loclinear(target, out[:, 1:P], out[:, (P+1):end]; tol)[2]
+            end
+            (P, post)
+        end
+    finally
+        set_num_threads(nthreads_og)
+    end
+
+    Ps = unique(first.(posteriors))
+    length(Ps) == 1 || throw(ArgumentError(
+        "the datasets have different parameter columns ($Ps): the ω block is dropped for " *
+        "some of them (a NaN ω); run them separately"))
+    ok = [!isempty(p) && !iszero(p) for (_, p) in posteriors]
+    all(ok) || @warn "ABC gave no posterior for datasets $(findall(!, ok)); they are dropped"
+    c_names = only(Ps) == 12 ?
+        [:α_weak, :α_strong, :α, :ωₐ_weak, :ωₐ_strong, :ωₐ, :ωₙₐ, :γ₋, :β, :γ₊, :γ₊₊, :B] :
+        [:α_weak, :α_strong, :α, :γ₋, :β, :γ₊, :γ₊₊, :B]
+    return [DataFrame(p, c_names) for (_, p) in posteriors[ok]]
 end
