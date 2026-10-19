@@ -797,9 +797,9 @@ end
 
 
 """
-    abcmk(param::parameters, sfs, divergence; h5_file, summstat_size, output_folder,
+    abcmk(param::parameters, sfs, divergence; h5_file, summstat_size, output_folder = "",
           alpha = nothing, B_bins = nothing, tol = 1000, abc_method = "abcreg",
-          rm_summaries = true, stat = "median", sampling = RjSampling(),
+          in_memory = false, rm_summaries = true, stat = "median", sampling = RjSampling(),
           row_prior = FlatAlphaPrior())
 
 ABC-MK inference (Murga-Moreno et al. 2024): posterior distributions of alpha, its weak
@@ -824,12 +824,18 @@ each dataset; [`summary_abc`](@ref) summarizes the posteriors.
  - `summstat_size::Real`: rows sampled from the rates table per dataset, a positive whole
    number (`1e5` works).
  - `output_folder::String`: folder for the summary statistics and ABC outputs; created if
-   missing, and stale `summstat_*`, `alphas_*` and `out_*` files in it are removed.
+   missing, and stale `summstat_*`, `alphas_*` and `out_*` files in it are removed. Not
+   used (and may be omitted) with `in_memory = true`.
  - `alpha`, `B_bins`: keep only table rows with the alpha label, or B, in this range.
  - `tol::Real`: number of accepted simulations per dataset, a positive whole number.
  - `abc_method::String`: `"abcreg"`, the ABCreg binary at `scripts/reg` (see
    [`ABCreg`](@ref)), or `"abc"`, the Julia local-linear ABC (its regression-adjusted
    posteriors are used).
+ - `in_memory::Bool = false`: run the ABC step without files. The summaries are the same
+   draws as on disk (same seed and thread count); `"abc"` then gives the file route's
+   posteriors exactly, and `"abcreg"` runs [`abcreg_loclinear`](@ref), the Julia port of
+   the ABCreg binary (equal to its printed 6 significant digits). No disk use and much
+   faster for many datasets (case/control).
  - `rm_summaries::Bool`: delete the summary statistics files afterwards (and, for
    `"abcreg"`, the posterior files).
  - `stat::String`: point estimate taken from each posterior: `"Min."`, `"Median"`,
@@ -863,11 +869,12 @@ function abcmk(
     divergence::Vector;
     h5_file::String,
     summstat_size::Real,
-    output_folder::String,
+    output_folder::String="",
     alpha::Union{Nothing,Vector{Float64}} = nothing,
     B_bins::Union{Nothing,Vector{Float64}} = nothing,
     tol::Real=1000,
     abc_method::String="abcreg",
+    in_memory::Bool=false,
     rm_summaries::Bool=true,
     stat::String="median",
     sampling::AbstractPoissonSampling=RjSampling(),
@@ -877,6 +884,16 @@ function abcmk(
     @assert abc_method ∈ ["abcreg","abc"] "Please select ABCreg or abc from R package"
     summstat_size = _as_count(summstat_size, "summstat_size")
     tol = _as_count(tol, "tol")
+
+    if in_memory
+        posteriors = _abc_in_memory(param, sfs, divergence; abc_method, tol, h5_file,
+                                    summstat_size, alpha, B_bins, sampling, row_prior)
+        if abc_method == "abc" && all(isnan.(posteriors[1][:,1]))
+            foreach(df -> foreach(c -> replace!(c, NaN => 0.0), eachcol(df)), posteriors)
+        end
+        return summary_abc(posteriors, stat=stat)
+    end
+    isempty(output_folder) && throw(ArgumentError("output_folder is required unless in_memory = true"))
 
     summ_stats = summary_statistics(param,sfs,divergence,h5_file=h5_file,output_folder=output_folder,summstat_size=summstat_size,alpha=alpha,B_bins=B_bins,sampling=sampling,row_prior=row_prior);
 

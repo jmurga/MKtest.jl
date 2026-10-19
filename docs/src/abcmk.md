@@ -120,6 +120,33 @@ The defaults are the measured best configuration:
 `sampling = MKtest.IndependentSampling(), row_prior = MKtest.TableRowPrior(), stat = "mode"`
 reproduces ABC-MK v1.0.0.
 
+### Without files: `in_memory = true`
+
+By default `abcmk` writes one `summstat_i.txt.gz` per dataset (about 5 MB at
+`summstat_size = 1e5`) and reads it back for the ABC. With `in_memory = true` each
+dataset's summaries are built, used and dropped in memory, one dataset per thread, and no
+`output_folder` is needed:
+
+```julia
+res = MKtest.abcmk(param, sfs, div; h5_file = "rates_tgp.jld2", summstat_size = 1e5,
+                   tol = 1000, in_memory = true)
+```
+
+The summaries are the same random draws as on disk at the same seed and thread count, so
+`abc_method = "abc"` gives exactly the file route's posteriors, and `abc_method = "abcreg"`
+runs `abcreg_loclinear`, a Julia port of the ABCreg algorithm (mean/sd scaling, GSL
+quantile radius, Epanechnikov weights, GSL's balanced weighted SVD, no heteroscedastic
+correction). It equals the binary to its printed precision (6 significant digits) with the
+same accepted draws; cite [ABCreg](https://doi.org/10.1186/1471-2156-10-35) as for the
+binary.
+
+This is the route for many datasets, such as the controls of a case/control analysis. For
+1000 human control sets (n = 661, 8 DACs, a 3.7M-row table, `summstat_size = 1e5`,
+`tol = 1000`, 8 threads on a 4-core laptop, one run of the same code on the development
+branch) the in-memory ABCreg took 71 s against 685 s for `summary_statistics` plus the
+binary (470 s writing the files, 215 s in ABCreg), with the same posteriors to 6 digits
+for all 1000 sets.
+
 ### Things to know
 
 - **The SFS must be raw.** Passing a cumulative SFS cumulates it twice.

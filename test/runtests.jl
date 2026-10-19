@@ -3,7 +3,8 @@ using Test
 using DataFrames: nrow, names, propertynames
 using JLD2
 using Random: seed!, MersenneTwister
-using DelimitedFiles: readdlm
+using DelimitedFiles: readdlm, writedlm
+import Logging
 
 @testset "MKtest.jl" begin
 
@@ -847,6 +848,8 @@ using DelimitedFiles: readdlm
         @test_throws ArgumentError MKtest.abc_loclinear(tfile, nfile; P = 2, tol = 250,
                                                         transformation = "log")
     end
+
+    include("abc_in_memory.jl")
 
 end
 
