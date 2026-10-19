@@ -37,8 +37,8 @@ Fire.@main function rates(N::Int64,
     param = MKtest.parameters(N = N, n = n, dac = _ints(dac), cutoff = _floats(cutoff),
                               shape = shape)
     MKtest.rates(param; iterations = iterations, output_file = output,
-                 alpha = _floats(alpha), gam_dfe = _ints(gam_dfe), gL = _ints(gL),
-                 gH = _ints(gH), gam_flanking = _ints(gam_flanking))
+                 α = _floats(alpha), γ_deleterious = _ints(gam_dfe), γ_weak = _ints(gL),
+                 γ_strong = _ints(gH), γ_flanking = _ints(gam_flanking))
     @info "Reference table written to $output"
 end
 

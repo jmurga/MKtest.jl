@@ -10,7 +10,7 @@ model function ([`rates`](@ref), [`analytical_alpha`](@ref), [`sfs_neg`](@ref), 
 reads these fields, and some set them. Set `N`, `n`, `dac` and `cutoff` to match the data; most
 of the others are drawn from the priors by `rates`.
 
-All selection coefficients (`gL`, `gH`, `gam_dfe`, `gam_flanking`) are `2N` times the
+All selection coefficients (`γ_weak`, `γ_strong`, `γ_deleterious`, `γ_flanking`) are `2N` times the
 heterozygote selection coefficient. `θ_*` and `ρ` are population-scaled per site
 (`4Nμ`, `4Nr`).
 
@@ -22,57 +22,55 @@ heterozygote selection coefficient. `θ_*` and `ρ` are population-scaled per si
    singletons (`summary_statistics` rejects `1`).
  - `cutoff::Vector{Float64} = [0.0, 1.0]`: derived-allele frequency range of the data.
    Also part of the reference-table key `"N/n/cutoff"`.
- - `gL::Int64 = 10`, `gH::Int64 = 500`: weakly and strongly beneficial coefficients.
- - `al_tot::Float64 = 0.4`: α, the fraction of nonsynonymous fixations that are
+ - `γ_weak::Int64 = 10`, `γ_strong::Int64 = 500`: weakly and strongly beneficial coefficients.
+ - `α::Float64 = 0.4`: α, the fraction of nonsynonymous fixations that are
    beneficial (at `B = 0.999`).
- - `al_low::Float64 = 0.2`: α_W, the part of `al_tot` due to weakly beneficial fixations
-   (`0 <= al_low <= al_tot`).
+ - `α_weak::Float64 = 0.2`: α_W, the part of `α` due to weakly beneficial fixations
+   (`0 <= α_weak <= α`).
  - `shape::Float64 = 0.184`: shape of the gamma DFE of deleterious mutations.
- - `gam_dfe::Int64 = -457`: mean of that DFE.
- - `scale::Float64 = shape / abs(gam_dfe)`: rate of the gamma DFE. Computed at
-   construction only: update it if you change `shape` or `gam_dfe` afterwards.
+ - `γ_deleterious::Int64 = -457`: mean of that DFE.
+ - `scale::Float64 = shape / abs(γ_deleterious)`: rate of the gamma DFE. Computed at
+   construction only: update it if you change `shape` or `γ_deleterious` afterwards.
  - `B::Float64 = 0.999`: background selection value (`Ne = B N`).
- - `gam_flanking::Int64 = -500`: selection on the linked deleterious flanking sites.
- - `Lf::Int64 = 200000`: length of the flanking region.
+ - `γ_flanking::Int64 = -500`: selection on the linked deleterious flanking sites.
+ - `L_flanking::Int64 = 200000`: length of the flanking region.
  - `ρ::Float64 = 0.001`: recombination rate.
  - `θ_flanking::Float64 = 1e-3`: mutation rate of the flanking sites; [`set_θ!`](@ref)
    sets it from `B`.
  - `θ_coding::Float64 = 1e-3`: mutation rate of the coding sites.
- - `ppos_l::Float64 = 0`, `ppos_h::Float64 = 0`: probabilities of weakly and strongly
-   beneficial mutations; [`set_ppos!`](@ref) solves them from `al_tot` and `al_low`.
- - `syn_nonsyn_ratio::Float64 = 0.25`: fraction of new coding mutations that are
-   synonymous (`1 - syn_nonsyn_ratio` are nonsynonymous).
- - `TE::Float64 = 5.0`: divergence time used only by `analytical_alpha`, where it cancels
+ - `p_weak::Float64 = 0`, `p_strong::Float64 = 0`: probabilities of weakly and strongly
+   beneficial mutations; [`set_ppos!`](@ref) solves them from `α` and `α_weak`.
+ - `f_syn::Float64 = 0.25`: fraction of new coding mutations that are
+   synonymous (`1 - f_syn` are nonsynonymous).
+ - `T_div::Float64 = 5.0`: divergence time used only by `analytical_alpha`, where it cancels
    out of α.
  - `isolines::Bool = false`: inbred lines; `parse_private_share` then takes `n`
    chromosomes instead of `2n`.
- - `diploid::Bool = false`: not used.
  - `NN::Int64 = 2N`, `nn::Int64 = 2n`: numbers of chromosomes in the population and in the
    sample.
 """
 @with_kw mutable struct parameters
-    gL::Int64 = 10
-    gH::Int64 = 500
-    al_low::Float64 = 0.2
-    al_tot::Float64 = 0.4
+    γ_weak::Int64 = 10
+    γ_strong::Int64 = 500
+    α_weak::Float64 = 0.2
+    α::Float64 = 0.4
     θ_flanking::Float64 = 1e-3
-    gam_flanking::Int64 = -500
+    γ_flanking::Int64 = -500
     θ_coding::Float64 = 1e-3
     shape::Float64 = 0.184
-    gam_dfe::Int64 = -457
-    scale::Float64 = shape / abs(gam_dfe)
+    γ_deleterious::Int64 = -457
+    scale::Float64 = shape / abs(γ_deleterious)
     B::Float64 = 0.999
-    ppos_l::Float64 = 0
-    ppos_h::Float64 = 0
+    p_weak::Float64 = 0
+    p_strong::Float64 = 0
     N::Int64 = 1000
     n::Int64 = 500
-    Lf::Int64 = 2 * 10^5
+    L_flanking::Int64 = 2 * 10^5
     ρ::Float64 = 0.001
-    TE::Float64 = 5.0
-    diploid::Bool = false
+    T_div::Float64 = 5.0
     cutoff::Vector{Float64} = [0.0, 1.0]
     isolines::Bool = false
-    syn_nonsyn_ratio::Float64 = 0.25
+    f_syn::Float64 = 0.25
 
     NN::Int64 = 2 * N
     nn::Int64 = 2 * n
@@ -87,28 +85,27 @@ Copy of the parameters struct, with its own `cutoff` and `dac` vectors. Faster t
 """
 function copy_param(p::parameters)
     parameters(
-        gL=p.gL,
-        gH=p.gH,
-        al_low=p.al_low,
-        al_tot=p.al_tot,
+        γ_weak=p.γ_weak,
+        γ_strong=p.γ_strong,
+        α_weak=p.α_weak,
+        α=p.α,
         θ_flanking=p.θ_flanking,
-        gam_flanking=p.gam_flanking,
+        γ_flanking=p.γ_flanking,
         θ_coding=p.θ_coding,
         shape=p.shape,
-        gam_dfe=p.gam_dfe,
+        γ_deleterious=p.γ_deleterious,
         scale=p.scale,
         B=p.B,
-        ppos_l=p.ppos_l,
-        ppos_h=p.ppos_h,
+        p_weak=p.p_weak,
+        p_strong=p.p_strong,
         N=p.N,
         n=p.n,
-        Lf=p.Lf,
+        L_flanking=p.L_flanking,
         ρ=p.ρ,
-        TE=p.TE,
-        diploid=p.diploid,
+        T_div=p.T_div,
         cutoff=copy(p.cutoff),
         isolines=p.isolines,
-        syn_nonsyn_ratio=p.syn_nonsyn_ratio,
+        f_syn=p.f_syn,
         NN=p.NN,
         nn=p.nn,
         dac=copy(p.dac),
@@ -135,9 +132,9 @@ end
 
 # Residuals of the 2x2 system at a candidate root. Used by set_ppos! to decide whether a
 # zero component is the answer or a failure.
-function _ppos_residual(param::parameters, ppos_l::Float64, ppos_h::Float64)
-    rt = alpha_exp_sim_tot(param, ppos_l, ppos_h) - param.al_tot
-    rl = alpha_exp_sim_low(param, ppos_l, ppos_h) - param.al_low
+function _ppos_residual(param::parameters, p_weak::Float64, p_strong::Float64)
+    rt = alpha_exp_sim_tot(param, p_weak, p_strong) - param.α
+    rl = alpha_exp_sim_low(param, p_weak, p_strong) - param.α_weak
     return (isfinite(rt) ? abs(rt) : Inf), (isfinite(rl) ? abs(rl) : Inf)
 end
 
@@ -147,22 +144,22 @@ end
 """
     Br(param, theta) -> Float64
 
-Expected reduction in neutral diversity `π/π₀` caused by `param.Lf` linked deleterious
+Expected reduction in neutral diversity `π/π₀` caused by `param.L_flanking` linked deleterious
 sites with mutation rate `theta` ([Charlesworth 1994](https://doi.org/10.1017/S0016672300032365)):
 
 ```math
 \\frac{\\pi}{\\pi_{0}} = e^{-\\frac{4\\mu L_f}{2 r L_f + t}}
 ```
 
-with `μ = theta/(2NN)`, `r = ρ/(2NN)` and `t = -gam_flanking/NN`.
+with `μ = theta/(2NN)`, `r = ρ/(2NN)` and `t = -γ_flanking/NN`.
 """
 function Br(param::parameters, theta::Float64)
     ρ::Float64 = param.ρ
-    t::Float64 = -1.0 * param.gam_flanking / (param.NN + 0.0)
+    t::Float64 = -1.0 * param.γ_flanking / (param.NN + 0.0)
     μ::Float64 = theta / (2.0 * param.NN)
     r::Float64 = ρ / (2.0 * param.NN)
 
-    out::Float64 = ℯ^(-4 * μ * param.Lf / (2 * param.Lf * r + t))
+    out::Float64 = ℯ^(-4 * μ * param.L_flanking / (2 * param.L_flanking * r + t))
     return out
 end
 
@@ -173,69 +170,69 @@ end
 Set `param.θ_flanking` to the flanking mutation rate that gives the background selection
 value `param.B`, and return it.
 
-`Br(θ) = exp(-2θ Lf / (Lf ρ - gam_flanking))` inverts in closed form:
+`Br(θ) = exp(-2θ L_flanking / (L_flanking ρ - γ_flanking))` inverts in closed form:
 
 ```
-θ_flanking = -log(B) (Lf ρ - gam_flanking) / (2 Lf)
+θ_flanking = -log(B) (L_flanking ρ - γ_flanking) / (2 L_flanking)
 ```
 
-Uses `B`, `Lf`, `ρ` and `gam_flanking`: set `ρ` before calling it.
+Uses `B`, `L_flanking`, `ρ` and `γ_flanking`: set `ρ` before calling it.
 """
 function set_θ!(param::parameters)
-    # Br(θ) = exp(-4μLf / (2Lf·r + t)) with μ=θ/(2NN), r=ρ/(2NN), t=-gam_flanking/NN.
+    # Br(θ) = exp(-4μLf / (2Lf·r + t)) with μ=θ/(2NN), r=ρ/(2NN), t=-γ_flanking/NN.
     # Numerator and denominator both carry a 1/NN factor that cancels, giving:
-    #   Br(θ) = exp(-2θ·Lf / (Lf·ρ - gam_flanking))
+    #   Br(θ) = exp(-2θ·L_flanking / (L_flanking·ρ - γ_flanking))
     # Solving Br(θ) = B yields the formula below.
-    param.θ_flanking = -log(param.B) * (param.Lf * param.ρ - param.gam_flanking) / (2.0 * param.Lf)
+    param.θ_flanking = -log(param.B) * (param.L_flanking * param.ρ - param.γ_flanking) / (2.0 * param.L_flanking)
     return param.θ_flanking
 end
 
-function alpha_exp_sim_low(param::parameters, ppos_l::Float64, ppos_h::Float64)
-    return fix_pos_sim(param, param.gL, 0.5 * ppos_l) / (
-        fix_pos_sim(param, param.gL, 0.5 * ppos_l) +
-        fix_pos_sim(param, param.gH, 0.5 * ppos_h) +
-        fix_neg(param, 0.5 * ppos_l + 0.5 * ppos_h)
+function alpha_exp_sim_low(param::parameters, p_weak::Float64, p_strong::Float64)
+    return fix_pos_sim(param, param.γ_weak, 0.5 * p_weak) / (
+        fix_pos_sim(param, param.γ_weak, 0.5 * p_weak) +
+        fix_pos_sim(param, param.γ_strong, 0.5 * p_strong) +
+        fix_neg(param, 0.5 * p_weak + 0.5 * p_strong)
     )
 end
 
-function alpha_exp_sim_tot(param::parameters, ppos_l::Float64, ppos_h::Float64)
+function alpha_exp_sim_tot(param::parameters, p_weak::Float64, p_strong::Float64)
     return (
-        fix_pos_sim(param, param.gL, 0.5 * ppos_l) +
-        fix_pos_sim(param, param.gH, 0.5 * ppos_h)
+        fix_pos_sim(param, param.γ_weak, 0.5 * p_weak) +
+        fix_pos_sim(param, param.γ_strong, 0.5 * p_strong)
     ) / (
-        fix_pos_sim(param, param.gL, 0.5 * ppos_l) +
-        fix_pos_sim(param, param.gH, 0.5 * ppos_h) +
-        fix_neg(param, 0.5 * ppos_l + 0.5 * ppos_h)
+        fix_pos_sim(param, param.γ_weak, 0.5 * p_weak) +
+        fix_pos_sim(param, param.γ_strong, 0.5 * p_strong) +
+        fix_neg(param, 0.5 * p_weak + 0.5 * p_strong)
     )
 end
 
 function solv_eqns(param, config)
-    ppos_l, ppos_h = config
+    p_weak, p_strong = config
     return (
-        alpha_exp_sim_tot(param, ppos_l, ppos_h) - param.al_tot,
-        alpha_exp_sim_low(param, ppos_l, ppos_h) - param.al_low,
+        alpha_exp_sim_tot(param, p_weak, p_strong) - param.α,
+        alpha_exp_sim_low(param, p_weak, p_strong) - param.α_weak,
     )
 end
 
 """
     set_ppos!(param; warm_start = [0.0, 0.0], atol = 1e-6)
 
-Solve `param.ppos_l` and `param.ppos_h`, the probabilities of weakly and strongly
-beneficial mutations, so that the model's fixation α equals `param.al_tot` and its weak
-part equals `param.al_low` at the current `B` and `θ_flanking`.
+Solve `param.p_weak` and `param.p_strong`, the probabilities of weakly and strongly
+beneficial mutations, so that the model's fixation α equals `param.α` and its weak
+part equals `param.α_weak` at the current `B` and `θ_flanking`.
 
 `NLsolve.nlsolve` runs from `warm_start`, then `[0.001, 0.001]`, `[0, 0.001]` and
 `[0.001, 0]`; negative roots are clamped to 0 and the first root whose residuals are
 `<= atol` is kept. A zero component is accepted when it satisfies the system (the right
-root when `al_low == 0` or `al_low == al_tot`). Returns the tuple `(ppos_l, ppos_h)`.
+root when `α_weak == 0` or `α_weak == α`). Returns the tuple `(p_weak, p_strong)`.
 
 Throws an `ErrorException` if no start reaches `atol`; `rates` then drops the model.
 """
 function set_ppos!(param::parameters; warm_start::Vector{Float64} = [0.0, 0.0],
                    atol::Float64 = 1e-6)
     function f!(F, x, param=param)
-        F[1] = alpha_exp_sim_tot(param, x[1], x[2]) - param.al_tot
-        F[2] = alpha_exp_sim_low(param, x[1], x[2]) - param.al_low
+        F[1] = alpha_exp_sim_tot(param, x[1], x[2]) - param.α
+        F[2] = alpha_exp_sim_low(param, x[1], x[2]) - param.α_weak
     end
 
     best_l, best_h, best_err = 0.0, 0.0, Inf
@@ -256,10 +253,10 @@ function set_ppos!(param::parameters; warm_start::Vector{Float64} = [0.0, 0.0],
     end
 
     best_err <= atol || throw(ErrorException(
-        "set_ppos! did not reach al_tot=$(param.al_tot), al_low=$(param.al_low) " *
+        "set_ppos! did not reach α=$(param.α), α_weak=$(param.α_weak) " *
         "(best residual $(best_err)); model rejected"))
 
-    param.ppos_l, param.ppos_h = best_l, best_h
+    param.p_weak, param.p_strong = best_l, best_h
 end
 
 # Binomial matrices from binom_op, so they are built once per (N, n, B).
@@ -267,7 +264,7 @@ const _BINOM_CACHE = Dict{Tuple{Int,Int,UInt64},Dict{Float64,SparseMatrixCSC{Flo
 const _BINOM_CACHE_SINGLE = Dict{Tuple{Int,Int,Float64},SparseMatrixCSC{Float64,Int64}}()
 
 # binom * (1/j) for each (N, n, B). It does not depend on the model, so sfs_neut only
-# scales it by B * θ_coding * syn_nonsyn_ratio.
+# scales it by B * θ_coding * f_syn.
 const _NEUT_CACHE = Dict{Tuple{Int,Int,Float64},Vector{Float64}}()
 
 """
@@ -461,7 +458,7 @@ end
 
 Factor (in `(0, 1]`) by which background selection and linkage reduce the fixation
 probability of a beneficial mutation with coefficient `s` (`2N` times the heterozygote
-coefficient), from the `param.Lf` linked deleterious sites
+coefficient), from the `param.L_flanking` linked deleterious sites
 ([Charlesworth 1994](https://doi.org/10.1017/S0016672300032365),
 [Barton 1995](https://www.genetics.org/content/140/2/821)).
 
@@ -471,18 +468,18 @@ The product over linked sites of the per-site reduction gives
 \\Phi = e^{-\\frac{2 t \\mu \\left(\\psi_1\\left(\\frac{r + 2s + t}{r}\\right) - \\psi_1\\left(\\frac{r (L_f + 1) + 2s + t}{r}\\right)\\right)}{r^2}}
 ```
 
-with `t = |gam_flanking|/NN`, `μ = θ_flanking/(2NN)`, `r = ρ/(2NN)`, `s = s/NN` and
+with `t = |γ_flanking|/NN`, `μ = θ_flanking/(2NN)`, `r = ρ/(2NN)`, `s = s/NN` and
 `ψ₁` the trigamma function: Uricchio et al. 2019, Supplementary eq. 14, and
 Murga-Moreno et al. 2024, eq. 9.
 """
 function Φ(param::parameters, s::Int64)
-    S::Float64 = abs(param.gam_flanking / (1.0 * param.NN))
+    S::Float64 = abs(param.γ_flanking / (1.0 * param.NN))
     r::Float64 = param.ρ / (2.0 * param.NN)
     μ::Float64 = param.θ_flanking / (2.0 * param.NN)
     s::Float64 = s / (param.NN * 1.0)
 
     Ψ0::Float64 = polygamma(1, (r + 2.0 * s + S) / r)
-    Ψ1::Float64 = polygamma(1, (r * (param.Lf + 1) + 2.0 * s + S) / r)
+    Ψ1::Float64 = polygamma(1, (r * (param.L_flanking + 1) + 2.0 * s + S) / r)
 
     out::Float64 = (ℯ^(-2.0 * S * μ * (Ψ0 - Ψ1) / (r^2)))
     return out
@@ -497,8 +494,8 @@ Expected α(x) of the model in `param`, at every derived allele count `1:nn-1`:
 \\mathbb{E}[\\alpha_{x}] = 1 - \\frac{\\mathbb{E}[D_{s}]}{\\mathbb{E}[D_{n}]}\\frac{\\mathbb{E}[P_{n}(x)]}{\\mathbb{E}[P_{s}(x)]}
 ```
 
-`ppos_l` and `ppos_h` are solved at `B = 0.999` ([`set_ppos!`](@ref)), then the fixation
-rates and spectra are computed at `param.B`. `param` is modified: `ppos_l`, `ppos_h` and
+`p_weak` and `p_strong` are solved at `B = 0.999` ([`set_ppos!`](@ref)), then the fixation
+rates and spectra are computed at `param.B`. `param` is modified: `p_weak`, `p_strong` and
 `θ_flanking` (the value for `param.B`) are left set.
 
 # Keywords
@@ -537,9 +534,9 @@ function analytical_alpha(param::parameters; cumulative::Bool=false)
 
     # Fixation
     fN = param.B * fix_neut(param)
-    fNeg = param.B * fix_neg(param, 0.5 * param.ppos_h + 0.5 * param.ppos_l)
-    fPosL = fix_pos_sim(param, param.gL, 0.5 * param.ppos_l)
-    fPosH = fix_pos_sim(param, param.gH, 0.5 * param.ppos_h)
+    fNeg = param.B * fix_neg(param, 0.5 * param.p_strong + 0.5 * param.p_weak)
+    fPosL = fix_pos_sim(param, param.γ_weak, 0.5 * param.p_weak)
+    fPosH = fix_pos_sim(param, param.γ_strong, 0.5 * param.p_strong)
 
     ds = fN
     dn = fNeg + fPosL + fPosH
@@ -547,10 +544,10 @@ function analytical_alpha(param::parameters; cumulative::Bool=false)
     ## Polymorphism
     neut = sfs_neut(param, binom)
 
-    selH = sfs_pos(param, param.gH, param.ppos_h, binom)
+    selH = sfs_pos(param, param.γ_strong, param.p_strong, binom)
 
-    selL = sfs_pos(param, param.gL, param.ppos_l, binom)
-    selN = sfs_neg(param, param.ppos_h + param.ppos_l, binom)
+    selL = sfs_pos(param, param.γ_weak, param.p_weak, binom)
+    selN = sfs_neg(param, param.p_strong + param.p_weak, binom)
 
     function split_columns(matrix::Array{Float64,2})
         (view(matrix, :, i) for i = 1:size(matrix, 2))
@@ -573,10 +570,10 @@ function analytical_alpha(param::parameters; cumulative::Bool=false)
     #############################################################
     #		Accounting for neutral and deleterious alleles		#	#############################################################
     ## Fixation
-    fN_nopos = fN * (param.θ_coding / 2.0) * param.TE * param.NN
-    fNeg_nopos = fNeg * (param.θ_coding / 2.0) * param.TE * param.NN
-    fPosL_nopos = fPosL * (param.θ_coding / 2.0) * param.TE * param.NN
-    fPosH_nopos = fPosH * (param.θ_coding / 2.0) * param.TE * param.NN
+    fN_nopos = fN * (param.θ_coding / 2.0) * param.T_div * param.NN
+    fNeg_nopos = fNeg * (param.θ_coding / 2.0) * param.T_div * param.NN
+    fPosL_nopos = fPosL * (param.θ_coding / 2.0) * param.T_div * param.NN
+    fPosH_nopos = fPosH * (param.θ_coding / 2.0) * param.T_div * param.NN
 
     ds_nopos = fN_nopos
     dn_nopos = fNeg_nopos + fPosL_nopos + fPosH_nopos

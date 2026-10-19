@@ -23,7 +23,7 @@ end
 """
     _rho_prior(rho, param) -> (u_rho, rho_fixed)
 
-Turn the `rho` keyword of `rates()` into a `Uniform` prior (one draw per model) or a
+Turn the `ρ` keyword of `rates()` into a `Uniform` prior (one draw per model) or a
 fixed value.
 
 | `rho`                  | result                                        |
@@ -34,7 +34,7 @@ fixed value.
 | `[0.001]` (length 1)   | `(nothing, 0.001)`                            |
 
 The bounds are `rho[1]` and `rho[end]`, as for the other ranges. A fixed value draws no
-random numbers, so a seeded run with a fixed `rho` gives the same models as before.
+random numbers, so a seeded run with a fixed `ρ` gives the same models as before.
 """
 _rho_prior(::Nothing, param::parameters) = (nothing, param.ρ)
 
@@ -221,15 +221,15 @@ Write the `n_dac` neutral and selected cumulative SFS values for one B bin.
 """
 function _sfs_dac!(ps_row::AbstractVector, pn_row::AbstractVector,
                    buf::SolveRatesBuffers, param::parameters, op::TailWeights)
-    @unpack ppos_h, ppos_l, gL, gH, dac = param
-    has_h = ppos_h > 0.0
-    has_l = ppos_l > 0.0
+    @unpack p_strong, p_weak, γ_weak, γ_strong, dac = param
+    has_h = p_strong > 0.0
+    has_l = p_weak > 0.0
     W = op.W
     ncols = size(W, 2)
     nd = length(dac)
 
     # Neutral: precomputed, it does not depend on the model.
-    nsc = param.B * param.θ_coding * param.syn_nonsyn_ratio
+    nsc = param.B * param.θ_coding * param.f_syn
     @inbounds @simd for k in 1:nd
         ps_row[k] = nsc * op.neut_tail[k]
     end
@@ -238,24 +238,24 @@ function _sfs_dac!(ps_row::AbstractVector, pn_row::AbstractVector,
     acc = buf.acc_sel
     fill!(acc, 0.0)
     if has_h
-        src = _src_pos!(buf.scratch, param, gH * param.B, ppos_h, ncols)
+        src = _src_pos!(buf.scratch, param, γ_strong * param.B, p_strong, ncols)
         mul!(buf.acc_tmp, W, src)
-        fh = param.B * param.θ_coding * Φ(param, gH) * (1 - param.syn_nonsyn_ratio)
+        fh = param.B * param.θ_coding * Φ(param, γ_strong) * (1 - param.f_syn)
         @inbounds @simd for k in 1:nd
             acc[k] += fh * buf.acc_tmp[k]
         end
     end
     if has_l
-        src = _src_pos!(buf.scratch, param, gL * param.B, ppos_l, ncols)
+        src = _src_pos!(buf.scratch, param, γ_weak * param.B, p_weak, ncols)
         mul!(buf.acc_tmp, W, src)
-        fl = param.B * param.θ_coding * Φ(param, gL) * (1 - param.syn_nonsyn_ratio)
+        fl = param.B * param.θ_coding * Φ(param, γ_weak) * (1 - param.f_syn)
         @inbounds @simd for k in 1:nd
             acc[k] += fl * buf.acc_tmp[k]
         end
     end
-    let src = _src_neg!(buf.scratch, param, ppos_l + ppos_h, ncols)
+    let src = _src_neg!(buf.scratch, param, p_weak + p_strong, ncols)
         mul!(buf.acc_tmp, W, src)
-        fneg = param.B * param.θ_coding * (1 - param.syn_nonsyn_ratio)
+        fneg = param.B * param.θ_coding * (1 - param.f_syn)
         @inbounds @simd for k in 1:nd
             acc[k] += fneg * buf.acc_tmp[k]
         end
@@ -282,26 +282,26 @@ function solve_rates!(
     param::parameters,
     op::TailWeights,
 )
-    @unpack B, ppos_h, ppos_l, gL, gH, al_low, al_tot,
-            gam_flanking, shape, scale, dac = param
+    @unpack B, p_strong, p_weak, γ_weak, γ_strong, α_weak, α,
+            γ_flanking, shape, scale, dac = param
 
-    has_h = ppos_h > 0.0
-    has_l = ppos_l > 0.0
+    has_h = p_strong > 0.0
+    has_l = p_weak > 0.0
 
     # Fixation
     f_n = B * fix_neut(param)
-    f_neg = B * fix_neg(param, 0.5 * ppos_h + 0.5 * ppos_l)
-    f_pos_l = has_l ? fix_pos_sim(param, gL, 0.5 * ppos_l) : 0.0
-    f_pos_h = has_h ? fix_pos_sim(param, gH, 0.5 * ppos_h) : 0.0
+    f_neg = B * fix_neg(param, 0.5 * p_strong + 0.5 * p_weak)
+    f_pos_l = has_l ? fix_pos_sim(param, γ_weak, 0.5 * p_weak) : 0.0
+    f_pos_h = has_h ? fix_pos_sim(param, γ_strong, 0.5 * p_strong) : 0.0
 
     _sfs_dac!(ps_row, pn_row, buf, param, op)
 
     @inbounds m_row[1] = B * 1000
-    @inbounds m_row[2] = al_low
-    @inbounds m_row[3] = al_tot
-    @inbounds m_row[4] = gam_flanking
-    @inbounds m_row[5] = gL
-    @inbounds m_row[6] = gH
+    @inbounds m_row[2] = α_weak
+    @inbounds m_row[3] = α
+    @inbounds m_row[4] = γ_flanking
+    @inbounds m_row[5] = γ_weak
+    @inbounds m_row[6] = γ_strong
     @inbounds m_row[7] = shape
     @inbounds m_row[8] = -(shape / scale)
     @inbounds m_row[9] = param.ρ
@@ -334,16 +334,16 @@ function simulate_models!(
     pn_view::AbstractMatrix,
     f_view::AbstractMatrix,
 )
-    (gH, gL, gam_flanking, gam_dfe, shape, alpha, alpha_low, rho) = var_params
+    (γ_strong, γ_weak, γ_flanking, γ_deleterious, shape, alpha, alpha_low, rho) = var_params
 
     param.shape = shape
-    param.gam_dfe = gam_dfe
-    param.scale = abs(shape / gam_dfe)
-    param.gH = Int(gH)
-    param.gL = Int(gL)
-    param.gam_flanking = Int(gam_flanking)
-    param.al_tot = alpha
-    param.al_low = alpha * alpha_low
+    param.γ_deleterious = γ_deleterious
+    param.scale = abs(shape / γ_deleterious)
+    param.γ_strong = Int(γ_strong)
+    param.γ_weak = Int(γ_weak)
+    param.γ_flanking = Int(γ_flanking)
+    param.α = alpha
+    param.α_weak = alpha * alpha_low
     # Before set_θ!, which uses ρ.
     param.ρ = rho
 
@@ -355,9 +355,9 @@ function simulate_models!(
         return nothing
     end
     # Starting point for the next model of this task (only if both are non-zero).
-    if param.ppos_l > 0.0 && param.ppos_h > 0.0
-        buf.prev_ppos[1] = param.ppos_l
-        buf.prev_ppos[2] = param.ppos_h
+    if param.p_weak > 0.0 && param.p_strong > 0.0
+        buf.prev_ppos[1] = param.p_weak
+        buf.prev_ppos[2] = param.p_strong
     end
 
     @inbounds for j in 1:length(B_bins)
@@ -375,9 +375,9 @@ function simulate_models!(
 end
 
 """
-    rates(param; iterations, output_file, gH = [100, 1000], gL = [1, 10],
-          gam_flanking = [-1000, -500], gam_dfe = [-1000, -200], alpha = [0.1, 0.9],
-          rho = nothing, B_bins = vcat(0.1:0.025:0.975, 0.999), weak = true)
+    rates(param; iterations, output_file, γ_strong = [100, 1000], γ_weak = [1, 10],
+          γ_flanking = [-1000, -500], γ_deleterious = [-1000, -200], α = [0.1, 0.9],
+          ρ = nothing, B_bins = vcat(0.1:0.025:0.975, 0.999), weak = true)
 
 Build the ABC-MK reference table: draw `iterations` models from the priors, solve each in
 every `B` bin, and append the table to the JLD2 file `output_file`.
@@ -397,16 +397,16 @@ seed, the table reproduces only at the same thread count.
    `iterations * length(B_bins)` rows.
  - `output_file::String`: JLD2 file, opened in append mode; the block is written under
    the group `"N/n/cutoff=[lo,hi]"`, which must not exist yet.
- - `gH`, `gL::Vector{Int64}`: ranges of the strongly and weakly beneficial coefficients,
-   drawn as `floor(Uniform(lo, hi))` (so `gL` reaches 9, not 10).
- - `gam_flanking`, `gam_dfe::Vector{Int64}`: ranges of the flanking and coding
+ - `γ_strong`, `γ_weak::Vector{Int64}`: ranges of the strongly and weakly beneficial coefficients,
+   drawn as `floor(Uniform(lo, hi))` (so `γ_weak` reaches 9, not 10).
+ - `γ_flanking`, `γ_deleterious::Vector{Int64}`: ranges of the flanking and coding
    deleterious coefficients (mean of the DFE), drawn the same way.
- - `alpha::Vector{Float64}`: range of `al_tot`, drawn uniformly and rounded to 2 digits.
- - `rho`: `nothing` keeps `param.ρ`; a positive number fixes ρ; `[lo, hi]` draws
+ - `α::Vector{Float64}`: range of `param.α`, drawn uniformly and rounded to 2 digits.
+ - `ρ`: `nothing` keeps `param.ρ`; a positive number fixes ρ; `[lo, hi]` draws
    `ρ ~ Uniform(lo, hi)` per model. A fixed ρ draws no random numbers.
  - `B_bins::Vector{Float64}`: background selection values (37 by default).
- - `weak::Bool`: draw the weak share of α from `0:0.05:1` (`al_low = al_tot * share`);
-   `false` sets `al_low = 0`.
+ - `weak::Bool`: draw the weak share of α from `0:0.05:1` (`α_weak = α * share`);
+   `false` sets `α_weak = 0`.
  - `basesize`, `distributed`: not used.
 
 The DFE shape is drawn from `Uniform(shape/4, 4 shape)`. All coefficients are `2N` times
@@ -414,8 +414,10 @@ the heterozygote selection coefficient.
 
 # Returns
 A `Dict` with the same content as the file block:
- - `:models`: `DataFrame`, one row per (draw, B), columns `B` (B x 1000), `al_low`,
-   `al_tot`, `gam_flanking`, `gL`, `gH`, `shape`, `gam_dfe`, `rho`, `ne_ratio` (always 1).
+ - `:models`: `DataFrame`, one row per (draw, B). Its columns keep their stored names, so
+   earlier tables stay readable: `B` (B x 1000), `al_low` (`α_weak`), `al_tot` (`α`),
+   `gam_flanking` (`γ_flanking`), `gL` (`γ_weak`), `gH` (`γ_strong`), `shape`, `gam_dfe`
+   (`γ_deleterious`), `rho` (`ρ`), `ne_ratio` (always 1).
  - `:neut`, `:sel`: `OrderedDict{Int,Array}` from each DAC to the expected synonymous and
    nonsynonymous tails of every row.
  - `:dsdn`: matrix of fixation rates, columns `Ds`, `Dn`, and the parts of `Dn` from
@@ -428,12 +430,12 @@ function rates(
     param::parameters;
     iterations::Int64,
     output_file::String,
-    gH::Vector{Int64}=[100,1000],
-    gL::Vector{Int64}=[1,10],
-    gam_flanking::Vector{Int64}=[-1000,-500],
-    gam_dfe::Vector{Int64}=[-1000,-200],
-    alpha::Vector{Float64}=[0.1, 0.9],
-    rho::Union{Nothing,Real,AbstractVector{<:Real}}=nothing,
+    γ_strong::Vector{Int64}=[100,1000],
+    γ_weak::Vector{Int64}=[1,10],
+    γ_flanking::Vector{Int64}=[-1000,-500],
+    γ_deleterious::Vector{Int64}=[-1000,-200],
+    α::Vector{Float64}=[0.1, 0.9],
+    ρ::Union{Nothing,Real,AbstractVector{<:Real}}=nothing,
     B_bins::Vector{Float64}=vcat(collect(0.1:0.025:0.975), 0.999),
     weak::Bool=true,
     basesize::Int64=10,
@@ -450,20 +452,20 @@ function rates(
     @info "Creating priors distributions"
 
     # Parameters ranges
-    u_gh = Uniform(gH[1], gH[end])
-    u_gl = Uniform(gL[1], gL[end])
-    u_gam_flanking = Uniform(gam_flanking[1], gam_flanking[end])
-    u_gam_dfe = Uniform(gam_dfe[1], gam_dfe[end])
+    u_gh = Uniform(γ_strong[1], γ_strong[end])
+    u_gl = Uniform(γ_weak[1], γ_weak[end])
+    u_gam_flanking = Uniform(γ_flanking[1], γ_flanking[end])
+    u_gam_dfe = Uniform(γ_deleterious[1], γ_deleterious[end])
 
     # DFE shape prior
     afac = Uniform(shape * 2^-2, shape * 2^2)
 
-    u_tot = Uniform(alpha[1], alpha[end])
+    u_tot = Uniform(α[1], α[end])
     u_low = ifelse(weak, 0.0:0.05:1, [0])
 
     # Recombination rate: drawn per model or fixed. A fixed value draws no random
     # numbers. The draw is not rounded: the `rho` column stores the value used.
-    u_rho, rho_fixed = _rho_prior(rho, param)
+    u_rho, rho_fixed = _rho_prior(ρ, param)
 
     priors = Vector{Float64}[]
     for i::Int64 = 1:iterations

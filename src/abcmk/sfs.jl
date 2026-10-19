@@ -25,7 +25,7 @@ function sfs_neut(param::parameters, binom::SparseMatrixCSC{Float64,Int64})
     binom_nn = size(binom, 1)  # = nn - 1 rows
     neut_key = (param.NN, binom_nn, param.B)
     if haskey(_NEUT_CACHE, neut_key)
-        return param.B * param.θ_coding * param.syn_nonsyn_ratio .* _NEUT_CACHE[neut_key]
+        return param.B * param.θ_coding * param.f_syn .* _NEUT_CACHE[neut_key]
     end
 
     NN2 = ceil(Int, param.NN * param.B)
@@ -34,7 +34,7 @@ function sfs_neut(param::parameters, binom::SparseMatrixCSC{Float64,Int64})
     replace!(solved_neutral_sfs, Inf => 0.0)
     v = binom * solved_neutral_sfs
     _NEUT_CACHE[neut_key] = v
-    return param.B * param.θ_coding * param.syn_nonsyn_ratio .* v
+    return param.B * param.θ_coding * param.f_syn .* v
 end
 
 ############Positive############
@@ -48,7 +48,7 @@ heterozygote coefficient), at derived allele counts `1:nn-1`, under background s
 Background selection reduces `Ne` to `B N`: the spectrum is scaled by `B`, like
 [`sfs_neut`](@ref) and [`sfs_neg`](@ref), the sojourn time is evaluated at `γ B`, and
 [`Φ`](@ref) multiplies the whole spectrum. `p` is the probability that a new mutation
-belongs to this class (`ppos_l` or `ppos_h`); `p = 0` returns zeros. `binom` is the
+belongs to this class (`p_weak` or `p_strong`); `p = 0` returns zeros. `binom` is the
 projection matrix of [`binom_op`](@ref) for `param.B`.
 """
 function sfs_pos(
@@ -72,7 +72,7 @@ function sfs_pos(
         replace!(solved_positive_sfs, NaN => 0.0)
 
         out::Vector{Float64} =
-            param.B * (param.θ_coding) * red_plus * (1 - param.syn_nonsyn_ratio) * (binom * solved_positive_sfs)
+            param.B * (param.θ_coding) * red_plus * (1 - param.f_syn) * (binom * solved_positive_sfs)
     end
 
     return out
@@ -103,7 +103,7 @@ end
 
 Beneficial source vector of length `ncols = NN2 + 1`, written into `scratch`. `g` is the
 coefficient of the sojourn time, `s·B`. The caller applies the projection and the factor
-`B * θ_coding * Φ(param, s) * (1 - syn_nonsyn_ratio)`.
+`B * θ_coding * Φ(param, s) * (1 - f_syn)`.
 """
 function _src_pos!(
     scratch::AbstractVector{Float64},
@@ -134,7 +134,7 @@ end
     _src_neg!(scratch, param, p, ncols) -> view
 
 Deleterious source vector of length `ncols = NN2 + 1`, as `_src_pos!`. The caller applies
-the projection and the factor `B * θ_coding * (1 - syn_nonsyn_ratio)`. The loop matches
+the projection and the factor `B * θ_coding * (1 - f_syn)`. The loop matches
 `sfs_neg`, including its early stop, so both give the same values.
 """
 function _src_neg!(
@@ -181,7 +181,7 @@ Expected SFS of deleterious nonsynonymous mutations, integrated over the gamma D
 selection (`Ne = B N`).
 
 `p` is the probability that a new nonsynonymous mutation is beneficial, so `1 - p` are
-deleterious (callers pass `ppos_l + ppos_h`). The sum over population frequencies stops
+deleterious (callers pass `p_weak + p_strong`). The sum over population frequencies stops
 once a term falls below `1e-12` of the largest one. `binom` is the projection matrix of
 [`binom_op`](@ref) for `param.B`.
 """
@@ -219,7 +219,7 @@ function sfs_neg(param::parameters, p::Float64, binom::SparseMatrixCSC{Float64,I
 
     solved_negative = (1.0 / NN2) .* solve_z
 
-    out = param.B * (param.θ_coding) * (1 - param.syn_nonsyn_ratio) * (binom * solved_negative)
+    out = param.B * (param.θ_coding) * (1 - param.f_syn) * (binom * solved_negative)
 
     return out
 end

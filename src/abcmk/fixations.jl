@@ -15,11 +15,11 @@ synonymous fraction times the neutral fixation probability at `Ne = B N`,
 \\mathbb{E}[D_{s}] = p_{syn} \\frac{1}{2 B N}
 ```
 
-with `p_syn = param.syn_nonsyn_ratio`. `rates` and `analytical_alpha` multiply it by `B`.
+with `p_syn = param.f_syn`. `rates` and `analytical_alpha` multiply it by `B`.
 """
 function fix_neut(param::parameters)
     # Synonymous probabilty * (fixation probabilty corrected by BGS value)
-    out::Float64 = (param.syn_nonsyn_ratio) * (1.0 / (param.B * param.NN))
+    out::Float64 = (param.f_syn) * (1.0 / (param.B * param.NN))
     return out
 end
 
@@ -37,12 +37,12 @@ over the gamma DFE (`param.shape`, `param.scale`) at `Ne = B N`:
 
 with `a` the shape, `b` the scale, `ζ` the Hurwitz zeta function and `p₊ = ppos` the
 probability that a nonsynonymous mutation is beneficial (callers pass
-`0.5 ppos_l + 0.5 ppos_h`).
+`0.5 p_weak + 0.5 p_strong`).
 """
 function fix_neg(param::parameters, ppos::Float64)
     # Non-synonymous proportion * negative alleles probability * fixation probability from gamma distribution
     out::Float64 =
-        (1 - param.syn_nonsyn_ratio) *
+        (1 - param.f_syn) *
         (1 - ppos) *
         (2^(-param.shape)) *
         (param.B^(-param.shape)) *
@@ -102,12 +102,12 @@ coefficient `gamma`, reduced by background selection and linkage:
 \\mathbb{E}[D_{n+}] = (1 - p_{syn})\\, p_{+}\\, \\Phi(\\gamma)\\, p_{fix}(\\gamma)
 ```
 
-with `p₊ = ppos` (callers pass `0.5 ppos_l` or `0.5 ppos_h`), [`Φ`](@ref) the linkage
+with `p₊ = ppos` (callers pass `0.5 p_weak` or `0.5 p_strong`), [`Φ`](@ref) the linkage
 reduction and [`p_fix`](@ref) the fixation probability.
 """
 function fix_pos_sim(param::parameters, gamma::Int64, ppos::Float64)
     red_plus = Φ(param, gamma)
     # Non-synonymous * positive alleles probability * B reduction * fixation probility
-    out::Float64 = (1 - param.syn_nonsyn_ratio) * ppos * red_plus * p_fix(param, gamma)
+    out::Float64 = (1 - param.f_syn) * ppos * red_plus * p_fix(param, gamma)
     return out
 end
