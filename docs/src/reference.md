@@ -145,6 +145,8 @@ MKtest.FitContext
 ```@docs
 MKtest.parameters
 MKtest.rates
+MKtest.load_rates
+MKtest.RatesTable
 MKtest.valid_data
 MKtest.summary_statistics
 MKtest.abcmk

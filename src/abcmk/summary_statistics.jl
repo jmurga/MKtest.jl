@@ -500,28 +500,51 @@ _row_weights(::TableRowPrior, dsdn::AbstractMatrix, idx; B = nothing) = nothing
 
 function _row_weights(p::FlatAlphaPrior, dsdn::AbstractMatrix, idx; B = nothing)
     p.by_B && B === nothing && throw(ArgumentError("FlatAlphaPrior(by_B = true) needs the B column"))
-    key = Vector{Tuple{Float64,Int}}(undef, length(idx))
-    cnt = Dict{Tuple{Float64,Int},Int}()
-    nB  = Dict{Float64,Int}()
+    # Each row's group (its B value, or one group) and α bin; bin -1 (a non-finite or
+    # negative α) gets weight 0. Counts in arrays over the groups and occupied bins: the
+    # same weights as counting in Dicts, about 2x faster on a 15M-row table.
+    groups = p.by_B ? unique(Float64(B[i]) for i in idx) : [0.0]
+    gpos = Dict(g => j for (j, g) in enumerate(groups))
+    gi = Vector{Int}(undef, length(idx))
+    ai = Vector{Int}(undef, length(idx))
+    amin, amax = typemax(Int), -1
     @inbounds for (k, i) in enumerate(idx)
         α = (dsdn[i, 3] + dsdn[i, 4]) / dsdn[i, 2]
-        g = p.by_B ? Float64(B[i]) : 0.0
-        key[k] = (g, isfinite(α) ? floor(Int, α / p.bin) : -1)
-        nB[g] = get(nB, g, 0) + 1
-        key[k][2] >= 0 && (cnt[key[k]] = get(cnt, key[k], 0) + 1)
+        gi[k] = p.by_B ? gpos[Float64(B[i])] : 1
+        a = isfinite(α) ? floor(Int, α / p.bin) : -1
+        ai[k] = a
+        a >= 0 && (amin = min(amin, a); amax = max(amax, a))
+    end
+    nB = zeros(Int, length(groups))
+    cnt = zeros(Int, length(groups), amax >= 0 ? amax - amin + 1 : 0)
+    @inbounds for k in eachindex(idx)
+        nB[gi[k]] += 1
+        ai[k] >= 0 && (cnt[gi[k], ai[k] - amin + 1] += 1)
     end
     # by_B: each B value carries its share of rows, split equally over its occupied α bins
-    nbin = Dict{Float64,Int}()
-    for k in keys(cnt); nbin[k[1]] = get(nbin, k[1], 0) + 1; end
-    share(g) = p.by_B ? nB[g] / (length(idx) * nbin[g]) : 1.0
-    return [x[2] >= 0 ? share(x[1]) / max(cnt[x], p.floor * nB[x[1]]) : 0.0 for x in key]
+    nbin = vec(count(>(0), cnt; dims = 2))
+    w = Vector{Float64}(undef, length(idx))
+    @inbounds for k in eachindex(idx)
+        g = gi[k]
+        w[k] = ai[k] >= 0 ?
+            (p.by_B ? nB[g] / (length(idx) * nbin[g]) : 1.0) / max(cnt[g, ai[k] - amin + 1], p.floor * nB[g]) :
+            0.0
+    end
+    return w
 end
 
 "Draw `n` rows of `idx` under `prior`."
-function _sample_rows(prior::AbstractRowPrior, dsdn::AbstractMatrix, idx, n::Int; B = nothing)
-    w = _row_weights(prior, dsdn, idx; B)
-    return w === nothing ? sample(idx, n; replace = true) : sample(idx, Weights(w), n; replace = true)
-end
+_sample_rows(prior::AbstractRowPrior, dsdn::AbstractMatrix, idx, n::Int; B = nothing) =
+    _sample_rows(_row_weights(prior, dsdn, idx; B), idx, n)
+
+"Draw `n` rows of `idx` with weights `w` (`nothing` = uniform)."
+_sample_rows(w, idx, n::Int) =
+    w === nothing ? sample(idx, n; replace = true) : sample(idx, Weights(w), n; replace = true)
+
+# `out[i, j] = col[idx[j]]`; a function barrier, since the table's `neut` / `sel` hold
+# their columns as `Array` (abstract), which made the inline loop type-unstable.
+_gather_row!(out::AbstractMatrix, i::Int, col::AbstractVector, idx) =
+    @inbounds for j in eachindex(idx); out[i, j] = col[idx[j]]; end
 
 _row_prior_desc(::TableRowPrior) = "TableRowPrior (uniform rows)"
 _row_prior_desc(p::FlatAlphaPrior) = "FlatAlphaPrior (bin $(p.bin), floor $(p.floor), by_B $(p.by_B))"
@@ -693,6 +716,8 @@ NaN, then `|gam_dfe|, shape, gL, gH, B x 1000`, then α(x) at each `param.dac`) 
 # Keywords
  - `h5_file::String`: reference table written by [`rates`](@ref) (JLD2, group
    `"N/n/cutoff"` of `param`).
+ - `rates`: instead of `h5_file`, a table loaded once with [`load_rates`](@ref) (or a
+   path). Give `h5_file` or `rates`, not both.
  - `summstat_size::Real`: rows per dataset, a positive whole number (`1e5` works).
  - `output_folder::String`: created if missing; use one folder per analysis.
  - `alpha::Union{Nothing,Vector{Float64}} = nothing`: keep only rows with `al_tot` in
@@ -714,7 +739,8 @@ function summary_statistics(
     param::parameters,
     sfs::Vector,
     divergence::Vector;
-    h5_file::String,
+    h5_file::Union{Nothing,String} = nothing,
+    rates = nothing,                    # a path or a load_rates table (RatesTable)
     summstat_size::Real,
     output_folder::String,
     alpha::Union{Nothing,Vector{Float64}} = nothing,
@@ -740,7 +766,7 @@ function summary_statistics(
         end
     end
 
-    st = _summaries_setup(param, sfs, divergence; h5_file, summstat_size, alpha, B_bins,
+    st = _summaries_setup(param, sfs, divergence; h5_file, rates, summstat_size, alpha, B_bins,
                           sampling, row_prior, provenance_folder = output_folder)
 
     # Making summaries
@@ -763,11 +789,12 @@ function summary_statistics(
 end
 
 """
-    _summaries_setup(param, sfs, divergence; h5_file, summstat_size, alpha, B_bins,
+    _summaries_setup(param, sfs, divergence; h5_file, rates, summstat_size, alpha, B_bins,
                      sampling, row_prior, provenance_folder = nothing)
 
 Everything `summary_statistics` does before the per-dataset Poisson draws, shared with the
-in-memory ABC route: read the rates table, filter and draw its rows under `row_prior`, lay
+in-memory ABC route: read the rates table (or take the loaded one, `rates`), filter and
+draw its rows under `row_prior`, lay
 out the sampled spectra, and prepare one sampler and the observed α(x) per dataset. The
 row draw is the only random step here, so both routes consume the global RNG identically.
 Writes `provenance.txt` into `provenance_folder` when one is given.
@@ -776,7 +803,8 @@ function _summaries_setup(
     param::parameters,
     sfs::Vector,
     divergence::Vector;
-    h5_file::String,
+    h5_file::Union{Nothing,String} = nothing,
+    rates = nothing,
     summstat_size::Int,
     alpha::Union{Nothing,Vector{Float64}},
     B_bins::Union{Nothing,Vector{Float64}},
@@ -787,14 +815,13 @@ function _summaries_setup(
     @assert 1 ∉ param.dac "Please exclude singletons from the inference"
     assertion_params(param)
 
-    @info "Opening and random sampling expected SFS and fixation rates"
-    tmp = _read_rates(h5_file, param)
+    tmp = _rates_table(h5_file, rates, param)
     @info "rates built with: " * tmp.options
 
     # Record how the summaries were made. `Base.open`, since this module imports
     # `GZip.open`.
     isnothing(provenance_folder) || Base.open(joinpath(provenance_folder, "provenance.txt"), "w") do io
-        println(io, "rates_file  = ", h5_file)
+        println(io, "rates_file  = ", tmp.file)
         println(io, "rates_opts  = ", tmp.options)
         println(io, "sampling    = ", nameof(typeof(sampling)), _sampling_desc(sampling, param))
         println(io, "row_prior   = ", _row_prior_desc(row_prior))
@@ -843,12 +870,14 @@ function _summaries_setup(
     # Increasing manually the summstat_size to ensure we retrieved the input summaries size
     increased_summstat = 1 * summstat_size
 
-    sampled_idx = _sample_rows(row_prior, tmp.dsdn, idx, increased_summstat; B = tmp.models.B)
+    # Weights cached in the table: a loaded table computes them once for all its calls
+    w = _table_weights(tmp, row_prior, alpha, B_bins, idx)
+    sampled_idx = _sample_rows(w, idx, increased_summstat)
 
     @assert length(sampled_idx) >=  increased_summstat "Check the filters or increase the number of rates solutions"
 
-    models_full = Matrix{Float64}(tmp.models)
-    models = models_full[sampled_idx, :]
+    # Only the sampled rows (copying the whole table first cost 1.1 GB at 15M rows)
+    models = Matrix{Float64}(tmp.models[sampled_idx, :])
     dsdn   = tmp.dsdn[sampled_idx, :]
 
     # Pre-transposed SFS layout: (n_dac × N).
@@ -856,13 +885,9 @@ function _summaries_setup(
     N = increased_summstat
     neut = Matrix{Float64}(undef, n_dac, N)
     sel  = Matrix{Float64}(undef, n_dac, N)
-    @inbounds for (i, v) in enumerate(param.dac)
-        neut_col = tmp.neut[v]
-        sel_col  = tmp.sel[v]
-        for j in 1:N
-            neut[i, j] = neut_col[sampled_idx[j]]
-            sel[i,  j] = sel_col[sampled_idx[j]]
-        end
+    for (i, v) in enumerate(param.dac)
+        _gather_row!(neut, i, tmp.neut[v], sampled_idx)
+        _gather_row!(sel, i, tmp.sel[v], sampled_idx)
     end
 
     # Model columns by position, the same in old (8 columns) and new (10) rates files:

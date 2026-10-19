@@ -147,6 +147,31 @@ branch) the in-memory ABCreg took 71 s against 685 s for `summary_statistics` pl
 binary (470 s writing the files, 215 s in ABCreg), with the same posteriors to 6 digits
 for all 1000 sets.
 
+### Many calls on one table: `load_rates`
+
+Each `abcmk` call reads the rates table and computes the row-prior weights again. When the
+same table serves several calls in one Julia session (cases and controls, several gene
+sets), load it once and pass it as `rates`:
+
+```julia
+t = MKtest.load_rates("rates_tgp.jld2", param)
+cases    = MKtest.abcmk(param, sfs_cases, div_cases; rates = t, summstat_size = 1e5,
+                        tol = 1000, in_memory = true)
+controls = MKtest.abcmk(param, sfs_ctl, div_ctl; rates = t, summstat_size = 1e5,
+                        tol = 1000, in_memory = true)
+```
+
+The results are the same as with `h5_file`, which keeps working; `rates` also accepts a
+path. Give one of the two. The table must match `param` (`N`, `n`, `cutoff` and every DAC
+of `param.dac`), and stays in memory, with its cached weights, as long as `t` does.
+`summary_statistics` takes `rates` too.
+
+On a 3.7M-row human table with 1000 control sets (8 threads, laptop, five warm calls each,
+measured on the development branch) the setup before the Poisson draws took a median
+1.20 s per call before this change, 0.76 s through `h5_file` now and 0.24 s with
+`rates = t`, plus 7.7 s once for `load_rates`, most of it compiling the table's types on
+first use.
+
 ### Things to know
 
 - **The SFS must be raw.** Passing a cumulative SFS cumulates it twice.

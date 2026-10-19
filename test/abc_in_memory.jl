@@ -119,3 +119,94 @@
     # the file route still needs a folder
     @test_throws ArgumentError MKtest.abcmk(p(), sfs, div; h5_file = tab, summstat_size = 5000)
 end
+
+# A table loaded once (`load_rates`) and passed as `rates = t`. Oracles: the `h5_file` route
+# on the same table and seed (identical files and posteriors), and the Dict-counting
+# `_row_weights` that the array version replaced (copied below, identical weights).
+@testset "load_rates" begin
+    quiet(f) = Logging.with_logger(f, Logging.NullLogger())
+    function weights_dict(p::MKtest.FlatAlphaPrior, dsdn, idx; B = nothing)
+        key = Vector{Tuple{Float64,Int}}(undef, length(idx))
+        cnt = Dict{Tuple{Float64,Int},Int}(); nB = Dict{Float64,Int}()
+        for (k, i) in enumerate(idx)
+            α = (dsdn[i, 3] + dsdn[i, 4]) / dsdn[i, 2]
+            g = p.by_B ? Float64(B[i]) : 0.0
+            key[k] = (g, isfinite(α) ? floor(Int, α / p.bin) : -1)
+            nB[g] = get(nB, g, 0) + 1
+            key[k][2] >= 0 && (cnt[key[k]] = get(cnt, key[k], 0) + 1)
+        end
+        nbin = Dict{Float64,Int}()
+        for k in keys(cnt); nbin[k[1]] = get(nbin, k[1], 0) + 1; end
+        share(g) = p.by_B ? nB[g] / (length(idx) * nbin[g]) : 1.0
+        return [x[2] >= 0 ? share(x[1]) / max(cnt[x], p.floor * nB[x[1]]) : 0.0 for x in key]
+    end
+    rng = MersenneTwister(5)
+    R = 20_000
+    dsdn = hcat(rand(rng, R) .+ 0.5, rand(rng, R) .+ 1.0, rand(rng, R) .* 0.4, rand(rng, R) .* 0.4)
+    dsdn[1:50, 2] .= 0.0                               # α = Inf -> weight 0
+    dsdn[51:80, 3] .= -2.0                             # α < 0 -> weight 0
+    Bc = rand(rng, [200.0, 500.0, 999.0, -0.0, 0.0], R)
+    idx = sort(unique(rand(rng, 1:R, 15_000)))
+    for pr in (MKtest.FlatAlphaPrior(), MKtest.FlatAlphaPrior(by_B = false),
+               MKtest.FlatAlphaPrior(floor = 0.05), MKtest.FlatAlphaPrior(bin = 0.05, floor = 0.0))
+        @test MKtest._row_weights(pr, dsdn, idx; B = Bc) == weights_dict(pr, dsdn, idx; B = Bc)
+    end
+    @test all(iszero, MKtest._row_weights(MKtest.FlatAlphaPrior(), dsdn, 1:50; B = Bc))
+
+    best = JLD2.load(joinpath(@__DIR__, "fixtures", "abcmk_best_model.jld2"))
+    p() = MKtest.parameters(N = 500, n = 50, dac = [2, 4, 5, 10, 20, 50])
+    td = mktempdir()
+    tab = joinpath(td, "t.jld2")
+    seed!(1)
+    quiet(() -> MKtest.rates(p(); iterations = 300, output_file = tab))
+    sfs = [best["sfs"] for _ in 1:3]
+    div = [[3000.0, 2000.0 * (1 - 0.06k), best["div"][3], best["div"][4]] for k in 1:3]
+
+    t = MKtest.load_rates(tab, p())
+    @test t isa MKtest.RatesTable
+    @test occursin("RatesTable(", sprint(show, t)) && occursin("rows", sprint(show, t))
+    @test t.dac == MKtest.load_rates(tab, p()).dac
+    @test isempty(t.weights)
+
+    # summary files: h5_file, rates = t (twice: the second takes the cached weights) and
+    # rates = path are the same files
+    function sumfiles(src)
+        f = mktempdir()
+        seed!(2)
+        quiet(() -> MKtest.summary_statistics(p(), sfs, div; src..., summstat_size = 4000, output_folder = f))
+        [MKtest.read_gz(joinpath(f, "$(pre)$k.txt.gz")) for k in 1:3 for pre in ("summstat_", "alphas_")]
+    end
+    ref = sumfiles((h5_file = tab,))
+    @test sumfiles((rates = t,)) == ref
+    @test length(t.weights) == 1
+    w1 = only(values(t.weights))
+    @test sumfiles((rates = t,)) == ref
+    @test only(values(t.weights)) === w1              # reused, not recomputed
+    @test sumfiles((rates = tab,)) == ref
+
+    # a filtered prior gets its own weights
+    seed!(2)
+    quiet(() -> MKtest.summary_statistics(p(), sfs, div; rates = t, summstat_size = 2000,
+                                          output_folder = mktempdir(), B_bins = [0.3, 0.999]))
+    @test length(t.weights) == 2
+
+    # abcmk, in memory and on files: the same posteriors as h5_file
+    am(src; o...) = (seed!(3); quiet(() -> MKtest.abcmk(p(), sfs, div; src..., summstat_size = 4000,
+                                                       tol = 150, abc_method = "abc", o...)))
+    @test am((rates = t,); in_memory = true)[:inference] == am((h5_file = tab,); in_memory = true)[:inference]
+    @test am((rates = t,); output_folder = mktempdir())[:inference] ==
+          am((h5_file = tab,); output_folder = mktempdir())[:inference]
+
+    # exactly one source, and a loaded table must match param
+    @test_throws ArgumentError MKtest.abcmk(p(), sfs, div; summstat_size = 4000, in_memory = true)
+    @test_throws ArgumentError MKtest.abcmk(p(), sfs, div; h5_file = tab, rates = t,
+                                            summstat_size = 4000, in_memory = true)
+    @test_throws ArgumentError quiet(() -> MKtest.summary_statistics(p(), sfs, div; summstat_size = 4000,
+                                                                     output_folder = mktempdir()))
+    p_n = MKtest.parameters(N = 500, n = 40, dac = [2, 4, 5, 10, 20, 40])
+    @test_throws ArgumentError quiet(() -> MKtest.abcmk(p_n, sfs, div; rates = t, summstat_size = 4000,
+                                                        in_memory = true))
+    p_dac = MKtest.parameters(N = 500, n = 50, dac = [2, 4, 5, 10, 20, 30])
+    @test_throws ArgumentError quiet(() -> MKtest.abcmk(p_dac, sfs, div; rates = t, summstat_size = 4000,
+                                                        in_memory = true))
+end
