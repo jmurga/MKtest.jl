@@ -5,10 +5,10 @@ of deleterious mutations by approximate Bayesian computation (Murga-Moreno et al
 It compares the observed alpha(x) curve and divergence with those of an analytical model
 (Uricchio et al. 2019) that includes:
 
-- a gamma DFE of deleterious mutations (shape, mean `gam_dfe`);
-- weakly (`gL`) and strongly (`gH`) beneficial mutations, the part of alpha due to the
-  weak ones (`al_low`, alpha_W), and the total alpha (`al_tot`);
-- background selection `B` from deleterious flanking sites (`gam_flanking`), with
+- a gamma DFE of deleterious mutations (`shape`, mean `γ_deleterious`);
+- weakly (`γ_weak`) and strongly (`γ_strong`) beneficial mutations, the part of alpha due
+  to the weak ones (`α_weak`), and the total alpha (`α`);
+- background selection `B` from deleterious flanking sites (`γ_flanking`), with
   recombination `ρ`, and its reduction of the fixation probability of beneficial
   mutations (selective interference).
 
@@ -30,10 +30,10 @@ param = MKtest.parameters(N = 1000, n = 661, dac = [2, 4, 5, 10, 20, 50, 200, 66
 | `N` | 1000 | population size of the model |
 | `n` | 500 | sample size (individuals; `nn = 2n` chromosomes) |
 | `dac` | `[2,4,5,10,20,50,200,500,700]` | derived allele counts at which alpha(x) is summarised: ascending, `< 2n`, no singletons |
-| `shape`, `gam_dfe` | 0.184, -457 | DFE of deleterious mutations (shape, mean `2 N s`) |
-| `gL`, `gH` | 10, 500 | weakly and strongly beneficial `2 N s` |
-| `al_low`, `al_tot` | 0.2, 0.4 | weak and total alpha |
-| `B`, `ρ`, `gam_flanking`, `Lf` | 0.999, 0.001, -500, 2e5 | background selection, recombination, flanking selection and length |
+| `shape`, `γ_deleterious` | 0.184, -457 | DFE of deleterious mutations (shape, mean `2 N s`) |
+| `γ_weak`, `γ_strong` | 10, 500 | weakly and strongly beneficial `2 N s` |
+| `α_weak`, `α` | 0.2, 0.4 | weak and total alpha |
+| `B`, `ρ`, `γ_flanking`, `L_flanking` | 0.999, 0.001, -500, 2e5 | background selection, recombination, flanking selection and length |
 | `cutoff` | `[0.0, 1.0]` | frequency range of the data |
 
 Most of these are drawn from priors when the table is built; set `N`, `n`, `dac` and
@@ -50,10 +50,10 @@ Each iteration draws a model from the priors and solves its expected SFS (at the
 
 | keyword | default | prior |
 |---|---|---|
-| `alpha` | `[0.1, 0.9]` | `al_tot ~ U` |
-| `gam_dfe` | `[-1000, -200]` | mean deleterious `2 N s` |
-| `gL`, `gH` | `[1, 10]`, `[100, 1000]` | weakly / strongly beneficial `2 N s` |
-| `gam_flanking` | `[-1000, -500]` | flanking `2 N s` |
+| `α` | `[0.1, 0.9]` | `param.α ~ U` |
+| `γ_deleterious` | `[-1000, -200]` | mean deleterious `2 N s` |
+| `γ_weak`, `γ_strong` | `[1, 10]`, `[100, 1000]` | weakly / strongly beneficial `2 N s` |
+| `γ_flanking` | `[-1000, -500]` | flanking `2 N s` |
 | `rho` | `nothing` (= `param.ρ`) | a value, or `[lo, hi]` for a uniform prior |
 | `B_bins` | 0.1 to 0.975 by 0.025, and 0.999 | background selection values |
 
@@ -101,8 +101,8 @@ res[:inference]     # one row per dataset
 It returns an `OrderedDict`:
 
 - `:inference`: one row per dataset, with the posterior statistic of `α_weak`,
-  `α_strong`, `α`, `ωₐ_weak`, `ωₐ_strong`, `ωₐ`, `ωₙₐ`, the DFE (`γ₋`, `β`), `γ₊`,
-  `γ₊₊` and `B` (x1000);
+  `α_strong`, `α`, `ωₐ_weak`, `ωₐ_strong`, `ωₐ`, `ωₙₐ`, the DFE (`γ_deleterious`, `β`), `γ_weak`,
+  `γ_strong` and `B` (x1000);
 - `:quantiles`: the same values as strings with their 95% interval;
 - `:stats`: every statistic (minimum, quantiles, median, mean, mode, maximum).
 

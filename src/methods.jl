@@ -861,7 +861,7 @@ warning, so the rows then no longer follow the dataset order.
 # Returns
 `OrderedDict` from [`summary_abc`](@ref):
  - `:inference`: `DataFrame`, one row per dataset with the `stat` of each parameter:
-   `α_weak, α_strong, α, ωₐ_weak, ωₐ_strong, ωₐ, ωₙₐ, γ₋, β, γ₊, γ₊₊, B` (the four ω
+   `α_weak, α_strong, α, ωₐ_weak, ωₐ_strong, ωₐ, ωₙₐ, γ_deleterious, β, γ_weak, γ_strong, B` (the four ω
    columns are absent when `divergence` has no Ln and Ls).
  - `:quantiles`: the same values as strings with the 95% interval, `"0.2 [0.1-0.3]"`.
  - `:stats`: Min., 2.5% Perc., Median, Mean, Mode, 97.5% Perc. and Max. of every

@@ -10,7 +10,7 @@ import Logging
 
     # --- rho prior in rates() ------------------------------------------------
     # `ρ` reaches the model through `set_θ!` (the flanking mutation rate that produces
-    # the target B) and `Φ`. `rates(...; rho = [lo, hi])` draws one value per model and
+    # the target B) and `Φ`. `rates(...; ρ = [lo, hi])` draws one value per model and
     # records it in the `rho` column. The default `rho = nothing` consumes NO RNG.
     @testset "rho prior" begin
         param  = MKtest.parameters(N=500, n=100, dac=[2, 4, 5, 10, 20, 50],
@@ -24,7 +24,7 @@ import Logging
             f = joinpath(od, "rates_$(counter[]).jld2")
             seed!(7)
             r = MKtest.rates(param; iterations=iterations, output_file=f, B_bins=B_bins,
-                             rho=rho)
+                             ρ=rho)
             return r, f
         end
 
@@ -53,9 +53,9 @@ import Logging
         p = MKtest.copy_param(param)
         p.B = m.B[1] / 1000
         p.ρ = m.rho[1]
-        p.gam_flanking = Int(m.gam_flanking[1])
+        p.γ_flanking = Int(m.gam_flanking[1])
         @test MKtest.set_θ!(p) ≈
-              -log(p.B) * (p.Lf * m.rho[1] - m.gam_flanking[1]) / (2.0 * p.Lf)
+              -log(p.B) * (p.L_flanking * m.rho[1] - m.gam_flanking[1]) / (2.0 * p.L_flanking)
     end
 
     # --- the projection the rates table is built with -----------------------
@@ -73,21 +73,21 @@ import Logging
         # every stored row equals the full-spectrum model at the same parameters
         for i in (1, 2, 3, nrow(m))
             q = MKtest.copy_param(param)
-            q.gH, q.gL = Int(m.gH[i]), Int(m.gL[i])
-            q.gam_flanking, q.gam_dfe = Int(m.gam_flanking[i]), Int(m.gam_dfe[i])
-            q.shape = m.shape[i]; q.scale = abs(q.shape / q.gam_dfe)
-            q.al_tot, q.al_low, q.ρ = m.al_tot[i], m.al_low[i], m.rho[i]
+            q.γ_strong, q.γ_weak = Int(m.gH[i]), Int(m.gL[i])
+            q.γ_flanking, q.γ_deleterious = Int(m.gam_flanking[i]), Int(m.gam_dfe[i])
+            q.shape = m.shape[i]; q.scale = abs(q.shape / q.γ_deleterious)
+            q.α, q.α_weak, q.ρ = m.al_tot[i], m.al_low[i], m.rho[i]
             q.B = m.B[i] / 1000; MKtest.set_θ!(q)
             # ppos recovered EXACTLY from the stored fixation rates:
             # f_pos = 0.75 * (ppos/2) * Φ * p_fix
             pp(f, g) = f == 0 ? 0.0 : 2f / (0.75 * MKtest.Φ(q, g) * MKtest.p_fix(q, g))
-            q.ppos_l = pp(r[:dsdn][i, 3], q.gL)
-            q.ppos_h = pp(r[:dsdn][i, 4], q.gH)
+            q.p_weak = pp(r[:dsdn][i, 3], q.γ_weak)
+            q.p_strong = pp(r[:dsdn][i, 4], q.γ_strong)
             bn = MKtest.binom_op(q)
             neut = MKtest.cumulative_vector!(MKtest.sfs_neut(q, bn))
-            sel  = MKtest.cumulative_vector!(MKtest.sfs_pos(q, q.gH, q.ppos_h, bn) .+
-                                             MKtest.sfs_pos(q, q.gL, q.ppos_l, bn) .+
-                                             MKtest.sfs_neg(q, q.ppos_l + q.ppos_h, bn))
+            sel  = MKtest.cumulative_vector!(MKtest.sfs_pos(q, q.γ_strong, q.p_strong, bn) .+
+                                             MKtest.sfs_pos(q, q.γ_weak, q.p_weak, bn) .+
+                                             MKtest.sfs_neg(q, q.p_weak + q.p_strong, bn))
             @test reldiff([r[:neut][k][i] for k in param.dac], neut[param.dac]) < 1e-12
             @test reldiff([r[:sel][k][i]  for k in param.dac], sel[param.dac])  < 1e-12
         end
@@ -124,28 +124,28 @@ import Logging
         mkp() = MKtest.parameters(N = 500, n = 50, dac = [2, 4, 5, 10, 20, 50])
 
         # A feasible target is solved to the residual tolerance.
-        pa = mkp(); pa.al_tot = 0.4; pa.al_low = 0.2; MKtest.set_θ!(pa)
+        pa = mkp(); pa.α = 0.4; pa.α_weak = 0.2; MKtest.set_θ!(pa)
         MKtest.set_ppos!(pa)
-        @test maximum(MKtest._ppos_residual(pa, pa.ppos_l, pa.ppos_h)) < 1e-6
-        @test pa.ppos_l > 0 && pa.ppos_h > 0
+        @test maximum(MKtest._ppos_residual(pa, pa.p_weak, pa.p_strong)) < 1e-6
+        @test pa.p_weak > 0 && pa.p_strong > 0
 
         # al_low == 0 means ppos_l == 0 IS the root, not a failure.
-        pz = mkp(); pz.al_tot = 0.4; pz.al_low = 0.0; MKtest.set_θ!(pz)
+        pz = mkp(); pz.α = 0.4; pz.α_weak = 0.0; MKtest.set_θ!(pz)
         MKtest.set_ppos!(pz)
-        @test pz.ppos_l < 1e-20
-        @test maximum(MKtest._ppos_residual(pz, pz.ppos_l, pz.ppos_h)) < 1e-6
+        @test pz.p_weak < 1e-20
+        @test maximum(MKtest._ppos_residual(pz, pz.p_weak, pz.p_strong)) < 1e-6
 
         # An INFEASIBLE target is refused, not written: a very peaked deleterious DFE
         # produces almost no deleterious fixations, so a low al_tot cannot be reached.
-        pj = mkp(); pj.shape = 7.5; pj.gam_dfe = -500
-        pj.scale = abs(pj.shape / pj.gam_dfe)
-        pj.al_tot = 0.06; pj.al_low = 0.054; MKtest.set_θ!(pj)
+        pj = mkp(); pj.shape = 7.5; pj.γ_deleterious = -500
+        pj.scale = abs(pj.shape / pj.γ_deleterious)
+        pj.α = 0.06; pj.α_weak = 0.054; MKtest.set_θ!(pj)
         @test_throws ErrorException MKtest.set_ppos!(pj)
 
         # the model record is written next to the table
         seed!(1)
         f = joinpath(mktempdir(), "prov.jld2")
-        MKtest.rates(mkp(); iterations = 8, output_file = f, rho = 0.001)
+        MKtest.rates(mkp(); iterations = 8, output_file = f, ρ = 0.001)
         o = MKtest._read_rates(f, mkp()).options
         @test o == MKtest._rates_options()
         @test startswith(o, "model=best-2026-09-28")
@@ -153,9 +153,9 @@ import Logging
 
     # --- the forward model: what each choice is -------------------------------
     @testset "best-model physics" begin
-        p = MKtest.parameters(N = 7310, n = 661, gam_dfe = -457,
-                              gam_flanking = -457, Lf = 200_000,
-                              gL = 10, gH = 500, ρ = 0.001, B = 0.4,
+        p = MKtest.parameters(N = 7310, n = 661, γ_deleterious = -457,
+                              γ_flanking = -457, L_flanking = 200_000,
+                              γ_weak = 10, γ_strong = 500, ρ = 0.001, B = 0.4,
                               dac = [2, 4, 5, 10, 20, 50, 200, 661, 925])
         MKtest.set_θ!(p)
 
@@ -167,10 +167,10 @@ import Logging
 
         # sfs_pos is the paper's "replace N with Ne in the frequency spectra": a literal
         # transcription -- level B, sojourn exp-form at γ·B, Φ flat.
-        q = MKtest.parameters(N = 1000, n = 661, gam_dfe = -457, gam_flanking = -500,
-                              Lf = 200_000, gL = 5, gH = 500, ρ = 0.001, B = 0.4,
+        q = MKtest.parameters(N = 1000, n = 661, γ_deleterious = -457, γ_flanking = -500,
+                              L_flanking = 200_000, γ_weak = 5, γ_strong = 500, ρ = 0.001, B = 0.4,
                               dac = [4, 5, 10, 20, 50, 200, 661, 925])
-        q.ppos_l, q.ppos_h = 0.0077070856, 0.00015930139
+        q.p_weak, q.p_strong = 0.0077070856, 0.00015930139
         MKtest.set_θ!(q)
         function sfs_pos_ref(q, s, pp, binom)
             NN2 = ceil(Int, q.NN * q.B)
@@ -182,7 +182,7 @@ import Logging
             return q.B * q.θ_coding * MKtest.Φ(q, s) * 0.75 * (binom * (v ./ NN2))
         end
         bn = MKtest.binom_op(q)
-        for (s, pp) in ((q.gL, q.ppos_l), (q.gH, q.ppos_h))
+        for (s, pp) in ((q.γ_weak, q.p_weak), (q.γ_strong, q.p_strong))
             @test isapprox(MKtest.sfs_pos(q, s, pp, bn), sfs_pos_ref(q, s, pp, bn); rtol = 1e-10)
         end
 
@@ -192,7 +192,7 @@ import Logging
             r = MKtest.copy_param(q); r.B = B; MKtest.set_θ!(r)
             b = MKtest.binom_op(r)
             nt = MKtest.cumulative_vector!(MKtest.sfs_neut(r, b))
-            sl = MKtest.cumulative_vector!(MKtest.sfs_pos(r, r.gL, r.ppos_l, b))
+            sl = MKtest.cumulative_vector!(MKtest.sfs_pos(r, r.γ_weak, r.p_weak, b))
             sl[925] / nt[925]
         end
         ratio = sel_over_neut(0.4) / sel_over_neut(0.999)
@@ -202,8 +202,8 @@ import Logging
         function src_rel(B)
             r = MKtest.copy_param(q); r.B = B
             NN2 = ceil(Int, r.NN * B); sc = zeros(NN2 + 1); sc2 = zeros(NN2 + 1)
-            a = MKtest._src_pos!(sc,  r, r.gL * B, r.ppos_l, NN2 + 1)
-            b = MKtest._src_pos!(sc2, r, r.gL,     r.ppos_l, NN2 + 1)
+            a = MKtest._src_pos!(sc,  r, r.γ_weak * B, r.p_weak, NN2 + 1)
+            b = MKtest._src_pos!(sc2, r, r.γ_weak,     r.p_weak, NN2 + 1)
             maximum(abs.(a[2:end-1] .- b[2:end-1]) ./ abs.(b[2:end-1]))
         end
         @test src_rel(0.4) > 0.05
@@ -213,10 +213,10 @@ import Logging
     # --- syn_nonsyn_ratio reaches the table ------------------------------------
     # `rates()` solves each task on `copy_param(param)`, which lists the fields one by
     # one: a field it misses silently falls back to its default.
-    @testset "syn_nonsyn_ratio" begin
+    @testset "f_syn" begin
         mkp(x) = MKtest.parameters(N = 500, n = 50, dac = [2, 4, 5, 10, 20, 50],
-                                   syn_nonsyn_ratio = x)
-        @test MKtest.copy_param(mkp(0.3)).syn_nonsyn_ratio == 0.3
+                                   f_syn = x)
+        @test MKtest.copy_param(mkp(0.3)).f_syn == 0.3
         od = mktempdir()
         seed!(3)
         a = MKtest.rates(mkp(0.25); iterations = 5, output_file = joinpath(od, "a.jld2"))
@@ -234,13 +234,13 @@ import Logging
         seed!(7)
         out = MKtest.rates(MKtest.parameters(N = 500, n = 50, shape = 0.184,
                                              dac = [2, 4, 5, 10, 20, 50]);
-                           iterations = 10, output_file = joinpath(od, "s1.jld2"), rho = 0.001)
+                           iterations = 10, output_file = joinpath(od, "s1.jld2"), ρ = 0.001)
         @test minimum(out[:models].shape) >= lo - 1e-12
         @test maximum(out[:models].shape) <= hi + 1e-12
         seed!(7)
         out2 = MKtest.rates(MKtest.parameters(N = 500, n = 50, shape = 0.4,
                                               dac = [2, 4, 5, 10, 20, 50]);
-                            iterations = 10, output_file = joinpath(od, "s2.jld2"), rho = 0.001)
+                            iterations = 10, output_file = joinpath(od, "s2.jld2"), ρ = 0.001)
         @test maximum(out2[:models].shape) > hi
     end
 
@@ -269,14 +269,14 @@ import Logging
         td = mktempdir()
         seed!(20260928)
         tab = joinpath(td, "t.jld2")
-        MKtest.rates(mkparam(); iterations = 20, rho = 0.001, output_file = tab)
+        MKtest.rates(mkparam(); iterations = 20, ρ = 0.001, output_file = tab)
         r = MKtest._read_rates(tab, mkparam())
         check_table(r, fx, DAC)
 
         for (B, key) in ((0.4, "aa_04"), (0.999, "aa_0999"))
-            p = MKtest.parameters(N = 500, n = 50, dac = DAC, B = B, al_tot = 0.4,
-                                  al_low = 0.2, gam_dfe = -457, gam_flanking = -500,
-                                  gL = 5, gH = 500, ρ = 0.001)
+            p = MKtest.parameters(N = 500, n = 50, dac = DAC, B = B, α = 0.4,
+                                  α_weak = 0.2, γ_deleterious = -457, γ_flanking = -500,
+                                  γ_weak = 5, γ_strong = 500, ρ = 0.001)
             @test MKtest.analytical_alpha(p) == fx[key]
         end
 
@@ -310,7 +310,7 @@ import Logging
         td = mktempdir()
         seed!(20261008)
         tab = joinpath(td, "rho.jld2")
-        MKtest.rates(mkparam(); iterations = 20, rho = [0.0001, 0.004], output_file = tab)
+        MKtest.rates(mkparam(); iterations = 20, ρ = [0.0001, 0.004], output_file = tab)
         r = MKtest._read_rates(tab, mkparam())
         check_table(r, fx, DAC)
         @test r.options == fx["options"]
@@ -498,7 +498,7 @@ import Logging
     # --- summary_abc --------------------------------------------------------------
     @testset "summary_abc" begin
         rng = MersenneTwister(11)
-        cn = [:α_weak, :α_strong, :α, :γ₋, :β, :γ₊, :γ₊₊, :B]
+        cn = [:α_weak, :α_strong, :α, :γ_deleterious, :β, :γ_weak, :γ_strong, :B]
         post = [MKtest.DataFrame(rand(rng, 500, 8), cn) for _ in 1:3]
         q(v, p) = MKtest.quantile(v, p)
         for (k, P) in ((1, post[1:1]), (3, post), (3, Matrix.(post)))

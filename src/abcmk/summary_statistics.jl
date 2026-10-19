@@ -716,7 +716,7 @@ Use [`valid_data`](@ref) first to drop the datasets that would stop the run.
 
 For dataset `i`, `output_folder` receives `summstat_i.txt.gz` (one row per sampled
 table row: `α_weak, α_strong, α`, then `ωₐ_weak, ωₐ_strong, ωₐ, ωₙₐ` unless any is
-NaN, then `|gam_dfe|, shape, gL, gH, B x 1000`, then α(x) at each `param.dac`) and
+NaN, then `|γ_deleterious|, shape, γ_weak, γ_strong, B x 1000`, then α(x) at each `param.dac`) and
 `alphas_i.txt.gz` (the observed α(x)), plus a `provenance.txt`. Earlier `summstat_*`,
 `alphas_*` and `out_*` files in `output_folder` are deleted.
 

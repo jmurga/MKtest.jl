@@ -52,9 +52,9 @@ columns, `P` is reduced by 4.
 
 # Returns
 One `DataFrame` per dataset, in dataset order, with columns
-`α_weak, α_strong, α, ωₐ_weak, ωₐ_strong, ωₐ, ωₙₐ, γ₋, β, γ₊, γ₊₊, B` (12), or
-the same without the four ω columns (8) when the summaries have none. `γ₋` is the mean
-deleterious coefficient (absolute value), `β` the DFE shape, `γ₊`/`γ₊₊` the weakly and
+`α_weak, α_strong, α, ωₐ_weak, ωₐ_strong, ωₐ, ωₙₐ, γ_deleterious, β, γ_weak, γ_strong, B` (12), or
+the same without the four ω columns (8) when the summaries have none. `γ_deleterious` is the mean
+deleterious coefficient (absolute value), `β` the DFE shape, `γ_weak`/`γ_strong` the weakly and
 strongly beneficial coefficients, and `B` is B x 1000.
 Datasets whose ABCreg output is missing or empty are dropped with a warning, so the
 rows after them no longer match the dataset numbers.
@@ -117,9 +117,9 @@ function ABCreg(;
     posteriors = posteriors[ok]
 
     if P != 12
-        c_names = [:α_weak, :α_strong, :α, :γ₋, :β,:γ₊,:γ₊₊,:B]
+        c_names = [:α_weak, :α_strong, :α, :γ_deleterious, :β,:γ_weak,:γ_strong,:B]
     else
-        c_names = [:α_weak, :α_strong, :α,:ωₐ_weak,:ωₐ_strong,:ωₐ,:ωₙₐ,:γ₋,:β,:γ₊,:γ₊₊,:B]
+        c_names = [:α_weak, :α_strong, :α,:ωₐ_weak,:ωₐ_strong,:ωₐ,:ωₙₐ,:γ_deleterious,:β,:γ_weak,:γ_strong,:B]
     end
 
     posteriors = map(x -> DataFrame(x,c_names),posteriors)
@@ -236,8 +236,8 @@ end
 
 function summary_abc(posteriors::Vector{Matrix{Float64}}; stat::String = "Mode")
     c_names(x) = size(x, 2) == 12 ?
-        [:α_weak, :α_strong, :α, :ωₐ_weak, :ωₐ_strong, :ωₐ, :ωₙₐ, :γ₋, :β, :γ₊, :γ₊₊, :B] :
-        [:α_weak, :α_strong, :α, :γ₋, :β, :γ₊, :γ₊₊, :B]
+        [:α_weak, :α_strong, :α, :ωₐ_weak, :ωₐ_strong, :ωₐ, :ωₙₐ, :γ_deleterious, :β, :γ_weak, :γ_strong, :B] :
+        [:α_weak, :α_strong, :α, :γ_deleterious, :β, :γ_weak, :γ_strong, :B]
     return summary_abc([DataFrame(x, c_names(x)) for x in posteriors]; stat = stat)
 end
 
@@ -272,9 +272,9 @@ columns, `P` is reduced by 4.
 `OrderedDict("rejection" => posteriors, "loclinear" => adjusted)`: two
 `Vector{DataFrame}`, one per dataset, with the accepted and the regression-adjusted
 values. Columns
-`α_weak, α_strong, α, ωₐ_weak, ωₐ_strong, ωₐ, ωₙₐ, γ₋, β, γ₊, γ₊₊, B` (12), or
-the same without the four ω columns (8) when the summaries have none. `γ₋` is the mean
-deleterious coefficient (absolute value), `β` the DFE shape, `γ₊`/`γ₊₊` the weakly and
+`α_weak, α_strong, α, ωₐ_weak, ωₐ_strong, ωₐ, ωₙₐ, γ_deleterious, β, γ_weak, γ_strong, B` (12), or
+the same without the four ω columns (8) when the summaries have none. `γ_deleterious` is the mean
+deleterious coefficient (absolute value), `β` the DFE shape, `γ_weak`/`γ_strong` the weakly and
 strongly beneficial coefficients, and `B` is B x 1000.
 """
 function abc(; output_folder::String,
@@ -321,9 +321,9 @@ function abc(; output_folder::String,
     end
 
     if P != 12
-        c_names = [:α_weak, :α_strong, :α, :γ₋, :β,:γ₊,:γ₊₊,:B]
+        c_names = [:α_weak, :α_strong, :α, :γ_deleterious, :β,:γ_weak,:γ_strong,:B]
     else
-        c_names = [:α_weak, :α_strong, :α,:ωₐ_weak,:ωₐ_strong,:ωₐ,:ωₙₐ,:γ₋,:β,:γ₊,:γ₊₊,:B]
+        c_names = [:α_weak, :α_strong, :α,:ωₐ_weak,:ωₐ_strong,:ωₐ,:ωₙₐ,:γ_deleterious,:β,:γ_weak,:γ_strong,:B]
     end
 
     posteriors = map(x -> DataFrame(x,c_names),posteriors)
@@ -754,7 +754,7 @@ function _abc_in_memory(param::parameters, sfs::Vector, divergence::Vector;
     ok = [!isempty(p) && !iszero(p) for (_, p) in posteriors]
     all(ok) || @warn "ABC gave no posterior for datasets $(findall(!, ok)); they are dropped"
     c_names = only(Ps) == 12 ?
-        [:α_weak, :α_strong, :α, :ωₐ_weak, :ωₐ_strong, :ωₐ, :ωₙₐ, :γ₋, :β, :γ₊, :γ₊₊, :B] :
-        [:α_weak, :α_strong, :α, :γ₋, :β, :γ₊, :γ₊₊, :B]
+        [:α_weak, :α_strong, :α, :ωₐ_weak, :ωₐ_strong, :ωₐ, :ωₙₐ, :γ_deleterious, :β, :γ_weak, :γ_strong, :B] :
+        [:α_weak, :α_strong, :α, :γ_deleterious, :β, :γ_weak, :γ_strong, :B]
     return [DataFrame(p, c_names) for (_, p) in posteriors[ok]]
 end
