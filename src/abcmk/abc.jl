@@ -674,7 +674,7 @@ function abcreg_loclinear(target::AbstractVector, param::AbstractMatrix, sumstat
 end
 
 """
-    _abc_in_memory(param, sfs, divergence; abc_method, tol, h5_file, summstat_size, alpha,
+    _abc_in_memory(param, sfs, divergence; abc_method, tol, h5_file, rates, summstat_size, alpha,
                    B_bins, sampling, row_prior) -> Vector{DataFrame}
 
 The ABC step of [`abcmk`](@ref) without files: the same table rows, Poisson realisations
@@ -685,10 +685,11 @@ One dataset per thread; only its posterior is kept. Datasets with an empty poste
 dropped with a warning, as [`ABCreg`](@ref) does.
 """
 function _abc_in_memory(param::parameters, sfs::Vector, divergence::Vector;
-                        abc_method::String, tol::Int, h5_file::String, summstat_size::Int,
+                        abc_method::String, tol::Int, h5_file::Union{Nothing,String} = nothing,
+                        rates = nothing, summstat_size::Int,
                         alpha, B_bins, sampling::AbstractPoissonSampling,
                         row_prior::AbstractRowPrior)
-    st = _summaries_setup(param, sfs, divergence; h5_file, summstat_size, alpha, B_bins,
+    st = _summaries_setup(param, sfs, divergence; h5_file, rates, summstat_size, alpha, B_bins,
                           sampling, row_prior)
     S = length(param.dac)
 

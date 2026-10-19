@@ -93,6 +93,95 @@ function _read_rates(input_file::String, param::parameters)
     end
 end
 
+"""
+    RatesTable
+
+One `(N, n, cutoff)` block of a rates file, loaded by [`load_rates`](@ref) and passed to
+[`abcmk`](@ref) or [`summary_statistics`](@ref) as `rates = t` instead of a file path.
+Fields: `file`, `N`, `n`, `cutoff`, `models`, `neut`, `sel`, `dsdn`, `dac`, `options` (as
+[`rates`](@ref) wrote them), plus a cache of row-prior weights, computed by the first call
+that needs them and reused by every later call with the same `row_prior`, `alpha` and
+`B_bins`.
+"""
+struct RatesTable{TM,TN,TS,TD}
+    file::String
+    N::Int
+    n::Int
+    cutoff::Tuple{Float64,Float64}
+    models::TM
+    neut::TN
+    sel::TS
+    dsdn::TD
+    dac::Vector{Int}
+    options::String
+    weights::Dict{Any,Union{Nothing,Vector{Float64}}}
+    lock::ReentrantLock
+end
+
+function RatesTable(file::String, param::parameters, tmp)
+    return RatesTable(file, param.N, param.n, (Float64(param.cutoff[1]), Float64(param.cutoff[end])),
+                      tmp.models, tmp.neut, tmp.sel, tmp.dsdn, Vector{Int}(tmp.dac), String(tmp.options),
+                      Dict{Any,Union{Nothing,Vector{Float64}}}(), ReentrantLock())
+end
+
+"""
+    load_rates(h5_file, param) -> RatesTable
+
+Read the `(param.N, param.n, param.cutoff)` block of a rates file once, for several
+[`abcmk`](@ref) or [`summary_statistics`](@ref) calls in the same Julia session:
+
+```julia
+t = MKtest.load_rates("rates.jld2", param)
+cases    = MKtest.abcmk(param, sfs_cases, div_cases; rates = t, summstat_size = 1e5, in_memory = true)
+controls = MKtest.abcmk(param, sfs_ctl, div_ctl; rates = t, summstat_size = 1e5, in_memory = true)
+```
+
+Each call then skips the read and, from the second call with the same `row_prior`,
+`alpha` and `B_bins`, the row-prior weights. The results are the same as with
+`h5_file = "rates.jld2"`: the table is not changed and the random draws are the same.
+The table stays in memory as long as `t` does.
+"""
+load_rates(h5_file::String, param::parameters) = RatesTable(h5_file, param, _read_rates(h5_file, param))
+
+Base.show(io::IO, t::RatesTable) =
+    print(io, "RatesTable(\"", t.file, "\", N = ", t.N, ", n = ", t.n, ", cutoff = ",
+          collect(t.cutoff), ", ", size(t.dsdn, 1), " rows, dac = ", t.dac, ")")
+
+_check_rates_source(h5_file, rates) =
+    isnothing(h5_file) == isnothing(rates) && throw(ArgumentError(
+        "give the rates table as h5_file = \"file.jld2\" or rates = (a path or a " *
+        "load_rates table), exactly one of them"))
+
+# The table to use: a loaded `rates` table (checked against `param`) or a file read now,
+# from `rates` or `h5_file` (exactly one of the two).
+function _rates_table(h5_file, rates, param::parameters)
+    _check_rates_source(h5_file, rates)
+    src = isnothing(rates) ? h5_file : rates
+    src isa Union{AbstractString,RatesTable} || throw(ArgumentError(
+        "rates must be a path or a load_rates table, got $(typeof(src))"))
+    if src isa RatesTable
+        (src.N, src.n, src.cutoff) == (param.N, param.n, (Float64(param.cutoff[1]), Float64(param.cutoff[end]))) ||
+            throw(ArgumentError("the loaded rates table is N = $(src.N), n = $(src.n), cutoff = " *
+                                "$(collect(src.cutoff)); param is N = $(param.N), n = $(param.n), " *
+                                "cutoff = $(param.cutoff)"))
+        missing_dac = setdiff(param.dac, src.dac)
+        isempty(missing_dac) || throw(ArgumentError(
+            "the loaded rates table has no DAC $(missing_dac) (it has $(src.dac))"))
+        @info "Random sampling expected SFS and fixation rates from the loaded table $(src.file)"
+        return src
+    end
+    @info "Opening and random sampling expected SFS and fixation rates"
+    return load_rates(String(src), param)
+end
+
+# Row-prior weights over `idx`, computed once per (row_prior, alpha, B_bins) and table.
+function _table_weights(t::RatesTable, row_prior, alpha, B_bins, idx)
+    key = (row_prior, isnothing(alpha) ? nothing : copy(alpha), isnothing(B_bins) ? nothing : copy(B_bins))
+    lock(t.lock) do
+        get!(() -> _row_weights(row_prior, t.dsdn, idx; B = t.models.B), t.weights, key)
+    end
+end
+
 ################################
 ######   Solving models   ######
 ################################

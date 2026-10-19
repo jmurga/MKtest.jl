@@ -797,7 +797,7 @@ end
 
 
 """
-    abcmk(param::parameters, sfs, divergence; h5_file, summstat_size, output_folder = "",
+    abcmk(param::parameters, sfs, divergence; h5_file (or rates), summstat_size, output_folder = "",
           alpha = nothing, B_bins = nothing, tol = 1000, abc_method = "abcreg",
           in_memory = false, rm_summaries = true, stat = "median", sampling = RjSampling(),
           row_prior = FlatAlphaPrior())
@@ -821,6 +821,10 @@ each dataset; [`summary_abc`](@ref) summarizes the posteriors.
 
 # Keywords
  - `h5_file::String`: JLD2 rates file written by [`rates`](@ref).
+ - `rates`: instead of `h5_file`, a table loaded once with [`load_rates`](@ref), for
+   several calls in one session (`t = MKtest.load_rates(h5_file, param)`, then
+   `rates = t`): the calls skip the read and reuse the row-prior weights, with the same
+   results as `h5_file`. A path is also accepted. Give `h5_file` or `rates`, not both.
  - `summstat_size::Real`: rows sampled from the rates table per dataset, a positive whole
    number (`1e5` works).
  - `output_folder::String`: folder for the summary statistics and ABC outputs; created if
@@ -867,7 +871,8 @@ function abcmk(
     param::parameters,
     sfs::Vector,
     divergence::Vector;
-    h5_file::String,
+    h5_file::Union{Nothing,String}=nothing,
+    rates::Union{Nothing,String,RatesTable}=nothing,
     summstat_size::Real,
     output_folder::String="",
     alpha::Union{Nothing,Vector{Float64}} = nothing,
@@ -884,9 +889,10 @@ function abcmk(
     @assert abc_method ∈ ["abcreg","abc"] "Please select ABCreg or abc from R package"
     summstat_size = _as_count(summstat_size, "summstat_size")
     tol = _as_count(tol, "tol")
+    _check_rates_source(h5_file, rates)
 
     if in_memory
-        posteriors = _abc_in_memory(param, sfs, divergence; abc_method, tol, h5_file,
+        posteriors = _abc_in_memory(param, sfs, divergence; abc_method, tol, h5_file, rates,
                                     summstat_size, alpha, B_bins, sampling, row_prior)
         if abc_method == "abc" && all(isnan.(posteriors[1][:,1]))
             foreach(df -> foreach(c -> replace!(c, NaN => 0.0), eachcol(df)), posteriors)
@@ -895,7 +901,7 @@ function abcmk(
     end
     isempty(output_folder) && throw(ArgumentError("output_folder is required unless in_memory = true"))
 
-    summ_stats = summary_statistics(param,sfs,divergence,h5_file=h5_file,output_folder=output_folder,summstat_size=summstat_size,alpha=alpha,B_bins=B_bins,sampling=sampling,row_prior=row_prior);
+    summ_stats = summary_statistics(param,sfs,divergence,h5_file=h5_file,rates=rates,output_folder=output_folder,summstat_size=summstat_size,alpha=alpha,B_bins=B_bins,sampling=sampling,row_prior=row_prior);
 
     if lowercase(abc_method) == "abcreg"
         posteriors = ABCreg(output_folder=output_folder,S=length(param.dac),tol=tol,rm_summaries=rm_summaries);
