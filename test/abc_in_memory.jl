@@ -98,6 +98,26 @@
     @test MKtest.abc_loclinear(f1, s1; P = Pc, tol = 200) ==
           MKtest.abc_loclinear(vec(MKtest.read_gz(f1)), tbl[:, 1:Pc], tbl[:, (Pc+1):end]; tol = 200)
 
+    # GSL's quantile from two order statistics equals it on the sorted data
+    for x in (rand(MersenneTwister(4), 1001), [3.0, 1.0, 1.0, 2.0, 2.0], [5.0])
+        for f in (0.0, 0.01, 0.5, 0.9999, 1.0)
+            @test MKtest._gsl_quantile_unsorted(x, f) == MKtest._gsl_quantile(sort(x), f)
+        end
+    end
+
+    # summary buffers are reused across datasets: none allocated once the pool has one,
+    # and a reused buffer gives the summaries of a fresh one
+    st = quiet(() -> (seed!(2); MKtest._summaries_setup(p(), sfs, div; kw...)))
+    pool = MKtest._BufferPool()
+    asm(buf, i) = Matrix(MKtest._assemble_summaries!(buf, st.sfs_p[i], st.divergence_p[i], st.neut,
+        st.sel, st.dsdn, st.gn, st.sh, st.gL, st.gH, st.B, st.summstat_size, st.samplers[i]))
+    seed!(9); fresh = [asm(MKtest._dataset_buffer(st), i) for i in 1:K]
+    seed!(9); @test [MKtest._with_buffer(b -> asm(b, i), pool, st) for i in 1:K] == fresh
+    @test length(pool.free) == 1
+    reuse() = MKtest._with_buffer(b -> nothing, pool, st)
+    reuse()
+    @test @allocated(reuse()) < 10_000
+
     # the in-memory ABCreg port asks to cite ABCreg, as the binary route does
     seed!(2)
     @test_logs (:info, r"10\.1186/1471-2156-10-35") match_mode = :any MKtest._abc_in_memory(

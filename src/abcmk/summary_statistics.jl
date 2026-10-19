@@ -584,6 +584,9 @@ Draw one dataset's Poisson realisations for every sampled table row, assemble
 `[α(3), ω(4, dropped if any is NaN), gn, sh, gL, gH, B, α(x)(n_dac)]`, drop the
 non-finite rows and keep at most `summstat_size`: the matrix `sampling_summaries!`
 writes. The in-memory ABC route (`abcmk(...; in_memory = true)`) uses it directly.
+
+The result is a view of `buf`'s memory: use it before `buf` is filled for the next
+dataset.
 """
 function _assemble_summaries!(
     buf::SamplingBuffers,
@@ -679,19 +682,23 @@ function _assemble_summaries!(
         n_kept = target
     end
 
-    # Materialise the kept rows (single allocation).
-    out = Matrix{Float64}(undef, n_kept, n_cols)
-    row = 0
-    @inbounds for i in 1:N
-        if buf.mask[i]
-            row += 1
-            for c in 1:n_cols
-                out[row, c] = ev[i, c]
+    # Pack the kept rows, column by column, into the first n_kept * n_cols entries of the
+    # buffer's memory: an n_kept x n_cols column-major block, laid out as a Matrix (so the
+    # statistics over its columns sum in the same order as on a Matrix). In place and in
+    # order: entry (row, c) goes to (c-1) n_kept + row, never past an entry not yet moved.
+    flat = vec(buf.expected_values)
+    N_ev = size(buf.expected_values, 1)
+    @inbounds for c in 1:n_cols
+        row = 0
+        for i in 1:N
+            if buf.mask[i]
+                row += 1
+                flat[(c - 1) * n_kept + row] = flat[(c - 1) * N_ev + i]
             end
         end
     end
 
-    return out
+    return reshape(view(flat, 1:(n_kept * n_cols)), n_kept, n_cols)
 end
 
 """
@@ -774,11 +781,15 @@ function summary_statistics(
 
     @info "Estimating and writting summary statistics at $output_folder"
 
-    # One SamplingBuffers per dataset; the threaded loop only mutates its own buffer.
+    # SamplingBuffers reused across datasets: each task takes one from the pool for one
+    # dataset and gives it back (a fresh one per dataset was 42 MB at 1e5 rows).
+    pool = _BufferPool()
     ThreadsX.map(
-        (i, z) -> sampling_summaries!(_dataset_buffer(st), st.sfs_p[i], st.divergence_p[i],
-                                      st.neut, st.sel, st.dsdn, st.gn, st.sh, st.gL, st.gH,
-                                      st.B, z, st.summstat_size, st.samplers[i]),
+        (i, z) -> _with_buffer(pool, st) do buf
+            sampling_summaries!(buf, st.sfs_p[i], st.divergence_p[i],
+                                st.neut, st.sel, st.dsdn, st.gn, st.sh, st.gL, st.gH,
+                                st.B, z, st.summstat_size, st.samplers[i])
+        end,
         eachindex(st.sfs_p),
         summ_output,
     );
@@ -907,6 +918,28 @@ end
 
 "Fresh `SamplingBuffers` for one dataset of a `_summaries_setup` result."
 _dataset_buffer(st) = SamplingBuffers(st.N, st.n_dac)
+
+# Buffers shared by the tasks of one threaded loop. `_assemble_summaries!` writes every
+# entry it reads, so a reused buffer gives the same result as a fresh one.
+struct _BufferPool
+    free::Vector{SamplingBuffers}
+    lock::ReentrantLock
+end
+_BufferPool() = _BufferPool(SamplingBuffers[], ReentrantLock())
+
+"Run `f(buf)` with a pooled buffer that fits `st`, then return the buffer to the pool."
+function _with_buffer(f, pool::_BufferPool, st)
+    buf = lock(pool.lock) do
+        k = findfirst(b -> b.N == st.N && b.n_dac == st.n_dac, pool.free)
+        isnothing(k) ? nothing : popat!(pool.free, k)
+    end
+    isnothing(buf) && (buf = _dataset_buffer(st))
+    try
+        return f(buf)
+    finally
+        lock(() -> push!(pool.free, buf), pool.lock)
+    end
+end
 
 # One set, as `parse_sfs` returns it for a single gene list.
 summary_statistics(param::parameters, sfs::AbstractMatrix{<:Real}, divergence::AbstractVector{<:Real}; kwargs...) =

@@ -571,6 +571,18 @@ function _gsl_quantile(sorted::AbstractVector{Float64}, f::Float64)
     return (1 - δ) * sorted[lhs+1] + δ * sorted[lhs+2]
 end
 
+# The same on unsorted data: only the two order statistics it interpolates are needed.
+function _gsl_quantile_unsorted(x::AbstractVector{Float64}, f::Float64)
+    n = length(x)
+    idx = f * (n - 1)
+    lhs = floor(Int, idx)
+    δ = idx - lhs
+    v = copy(x)
+    lhs == n - 1 && return maximum(v)
+    a, b = partialsort!(v, (lhs+1):(lhs+2))
+    return (1 - δ) * a + δ * b
+end
+
 # gsl_linalg_balance_columns: scale column j by the power of 2 that brings its L1 norm into
 # [0.5, 1]. Returns the factors.
 function _gsl_balance_columns!(A::AbstractMatrix{Float64})
@@ -650,24 +662,32 @@ function abcreg_loclinear(target::AbstractVector, param::AbstractMatrix, sumstat
 
     lo = vec(minimum(param, dims = 1))'
     hi = vec(maximum(param, dims = 1))'
-    θ = _abcreg_transform.(param, transformation, lo, hi)
 
     μ = vec(mean(sumstat, dims = 1))
     σ = vec(std(sumstat, dims = 1))
-    Z = (sumstat .- μ') ./ σ'
     z0 = (target .- μ) ./ σ
-    dist = vec(sqrt.(sum((Z .- z0') .^ 2, dims = 2)))
-    q = _gsl_quantile(sort(dist), tol / n)
+    # Distances without a scaled copy of the table: the same operations, in the same order,
+    # one column at a time.
+    dist = zeros(n)
+    @inbounds for j in 1:S
+        for i in 1:n
+            dist[i] += ((sumstat[i, j] - μ[j]) / σ[j] - z0[j])^2
+        end
+    end
+    dist .= sqrt.(dist)
+    q = _gsl_quantile_unsorted(dist, tol / n)
 
+    # Only the accepted rows are scaled and transformed (row by row, as before).
     if abs(q) <= eps(Float64)
-        return _abcreg_untransform.(θ[dist .<= q, :], transformation, lo, hi)
+        return _abcreg_untransform.(_abcreg_transform.(param[dist .<= q, :], transformation, lo, hi),
+                                    transformation, lo, hi)
     end
     acc = findall(<(q), dist)
     isempty(acc) && return zeros(0, size(param, 2))
 
     w = @. 1.0 - dist[acc]^2 / q^2
-    X = hcat(ones(length(acc)), Z[acc, :])
-    Y = θ[acc, :]
+    X = hcat(ones(length(acc)), (sumstat[acc, :] .- μ') ./ σ')
+    Y = _abcreg_transform.(param[acc, :], transformation, lo, hi)
     C = _gsl_wlinear_svd(X, w, Y, 1 / length(acc))
     adjusted = (vcat(1.0, z0)' * C) .+ (Y .- X * C)
     return _abcreg_untransform.(adjusted, transformation, lo, hi)
@@ -700,22 +720,28 @@ function _abc_in_memory(param::parameters, sfs::Vector, divergence::Vector;
     end
 
     # BLAS on one thread: the datasets run in parallel; restored even if a fit throws.
+    # One buffer per running task, reused across datasets; the summaries are a view of it,
+    # used before the buffer goes back to the pool.
     nthreads_og = get_num_threads()
     set_num_threads(1)
+    pool = _BufferPool()
     posteriors = try
         ThreadsX.map(eachindex(st.sfs_p)) do i
-            out = _assemble_summaries!(_dataset_buffer(st), st.sfs_p[i], st.divergence_p[i],
-                                       st.neut, st.sel, st.dsdn, st.gn, st.sh, st.gL, st.gH,
-                                       st.B, st.summstat_size, st.samplers[i])
-            # The ω block is dropped when any ω is NaN, as ABCreg / abc then read P = 8.
-            P = size(out, 2) == 12 + S ? 12 : 8
-            target = vec(st.α[i])
-            post = if abc_method == "abcreg"
-                abcreg_loclinear(target, out[:, 1:P], out[:, (P+1):end]; tol)
-            else
-                abc_loclinear(target, out[:, 1:P], out[:, (P+1):end]; tol)[2]
+            _with_buffer(pool, st) do buf
+                out = _assemble_summaries!(buf, st.sfs_p[i], st.divergence_p[i],
+                                           st.neut, st.sel, st.dsdn, st.gn, st.sh, st.gL, st.gH,
+                                           st.B, st.summstat_size, st.samplers[i])
+                # The ω block is dropped when any ω is NaN, as ABCreg / abc then read P = 8.
+                P = size(out, 2) == 12 + S ? 12 : 8
+                target = vec(st.α[i])
+                pa, ss = view(out, :, 1:P), view(out, :, (P+1):size(out, 2))
+                post = if abc_method == "abcreg"
+                    abcreg_loclinear(target, pa, ss; tol)
+                else
+                    abc_loclinear(target, pa, ss; tol)[2]     # copies its inputs
+                end
+                (P, post)
             end
-            (P, post)
         end
     finally
         set_num_threads(nthreads_og)
