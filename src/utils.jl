@@ -276,7 +276,8 @@ function write_files(x::Matrix{Float64}, name::String)
     CSV.write(name, Tables.table(x), delim = '\t', header = false, compress = endswith(name, ".gz"))
 end;
 
-function write_files(x::SubArray, name::String)
+# Views, and the packed summaries of `_assemble_summaries!` (a reshaped view of a buffer).
+function write_files(x::Union{SubArray,AbstractMatrix{Float64}}, name::String)
     CSV.write(name, Tables.table(x), delim = '\t', header = false, compress = endswith(name, ".gz"))
 end;
 
