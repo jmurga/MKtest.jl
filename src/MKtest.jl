@@ -101,8 +101,9 @@ percentile band of control curves. Requires `using Plots`.
    `.pdf`, `.ps`, `.html`; any other throws `ArgumentError`). Default `nothing`.
  - `sample_size::Union{Nothing,Int}`: project the SFS first (sfs/divergence only).
  - `cumulative::Bool`: use the cumulative SFS (sfs/divergence only). Default `true`.
- - Other keywords (`xlim`, `ylim`, `size`, `title`, ...) are passed to `Plots.plot` and
-   override the defaults (`title = "αₓ values"`, `lw = 2`, `xlabel = "DAC"`, `ylabel = "α"`).
+ - Other keywords (`xlim`, `ylim`, `size`, `dpi`, `title`, ...) are passed to `Plots.plot`
+   and override the defaults (`title = "αₓ values"`, `lw = 2`, `xlabel = "DAC"`,
+   `ylabel = "α"`). `size` is in pixels; a saved PNG is `size .* dpi / 100` pixels.
 
 # Returns
  - `Plots.Plot`.
@@ -110,9 +111,10 @@ percentile band of control curves. Requires `using Plots`.
 function plot_α_x end
 
 """
-    plot_asymptotic_mk(result::NamedTuple; output_path = nothing)
+    plot_asymptotic_mk(result::NamedTuple; output_path = nothing, size = nothing, dpi = nothing)
     plot_asymptotic_mk(sfs::Matrix, divergence::Vector; model = ExponentialFit(),
-                       cutoff = [0.0, 1.0], cumulative = true, n = nothing, output_path = nothing)
+                       cutoff = [0.0, 1.0], cumulative = true, n = nothing, output_path = nothing,
+                       size = nothing, dpi = nothing)
 
 Plot an asymptotic MK fit: the observed alpha(x) against the derived allele frequency, and,
 when the asymptote is finite, the fitted curve of the model used ([`ExponentialFit`](@ref)
@@ -126,6 +128,9 @@ or [`LinearFit`](@ref), drawn over x in [0.05, 1]), the asymptote as a dashed li
    [`asymptotic_mk`](@ref), whose result is then plotted.
  - `output_path`: save the figure; format from the extension (`.png`, `.svg`, `.pdf`,
    `.ps`, `.html`; any other throws `ArgumentError`). Default `nothing`.
+ - `size`, `dpi`: figure size in pixels, `(width, height)`, and resolution; a saved PNG is
+   `size .* dpi / 100` pixels (GR may round a side down by a pixel or two). Default
+   `nothing` (Plots' 600 x 400 and dpi).
 
 # Returns
  - `Plots.Plot`.
@@ -151,6 +156,7 @@ case and stars its empirical p-value. Requires `using StatsPlots`.
    `.ps`, `.html`; any other throws `ArgumentError`). Default `nothing`.
  - Other keywords (`size`, `dpi`, ...) are passed to the final `plot` and override the
    defaults (layout one row per parameter, size scaled with the number of analyses).
+   `size` is in pixels; a saved PNG is `size .* dpi / 100` pixels.
 
 # Returns
  - `Plots.Plot`.

@@ -131,6 +131,18 @@ function _check_output_path(output_path)
         ". Use one of " * join(_PLOT_EXTS, ", ")))
 end
 
+# Set the figure `size` (pixels) and `dpi` when given, then save it to `output_path` when
+# given (the format comes from the extension). A PNG is `size .* dpi / 100` pixels.
+function _finish_plot!(p, output_path, size, dpi)
+    isnothing(size) || plot!(p; size = size)
+    isnothing(dpi) || plot!(p; dpi = dpi)
+    if !isnothing(output_path)
+        _check_output_path(output_path)
+        savefig(p, output_path)
+    end
+    return p
+end
+
 function _plot_α_x(
     curves::Vector{Vector{Float64}};
     control=nothing,
@@ -266,6 +278,8 @@ end
 function plot_asymptotic_mk(
     result::NamedTuple;
     output_path::Union{Nothing,AbstractString}=nothing,
+    size::Union{Nothing,Tuple{Real,Real}}=nothing,
+    dpi::Union{Nothing,Real}=nothing,
 )
     p = plot(result.f, result.alpha_x,
         label="Observed α(x)",
@@ -307,11 +321,7 @@ function plot_asymptotic_mk(
         plot!(p, x_curve, y_curve, color=:red, linewidth=2, label=fit_label)
     end
 
-    if !isnothing(output_path)
-        _check_output_path(output_path)
-        savefig(p, output_path)
-    end
-    return p
+    return _finish_plot!(p, output_path, size, dpi)
 end
 
 function plot_asymptotic_mk(
@@ -322,9 +332,11 @@ function plot_asymptotic_mk(
     cumulative::Bool=true,
     n::Union{Nothing,Int}=nothing,
     output_path::Union{Nothing,AbstractString}=nothing,
+    size::Union{Nothing,Tuple{Real,Real}}=nothing,
+    dpi::Union{Nothing,Real}=nothing,
 )
     result = asymptotic_mk(sfs, divergence; model=model, cutoff=cutoff, cumulative=cumulative, n=n)
-    return plot_asymptotic_mk(result; output_path=output_path)
+    return plot_asymptotic_mk(result; output_path=output_path, size=size, dpi=dpi)
 end
 
 end
