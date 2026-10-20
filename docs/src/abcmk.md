@@ -174,6 +174,12 @@ first use.
 
 ### Things to know
 
+- **NaN ω.** A dataset with little divergence can draw `Ds = 0` with no adaptive fixation
+  in some table row, which leaves ω undefined for that row. Its summaries are then built
+  without the ω block, its ABC runs on the other parameters, and its four ω columns are
+  reported as `NaN` (and their statistics in `summary_abc`). The other parameters are
+  unaffected: each one is regressed on its own over the same accepted rows.
+
 - **The SFS must be raw.** Passing a cumulative SFS cumulates it twice.
 - **Run-to-run noise.** Two runs with different seeds differ by about 0.006 in alpha
   RMSE; compare configurations over two or more seeds. A seed reproduces a run only at

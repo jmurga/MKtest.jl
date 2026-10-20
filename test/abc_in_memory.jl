@@ -230,3 +230,71 @@ end
     @test_throws ArgumentError quiet(() -> MKtest.abcmk(p_dac, sfs, div; rates = t, summstat_size = 4000,
                                                         in_memory = true))
 end
+
+# A dataset whose summaries lose the ω block (a draw with Ds = 0 and no adaptive fixation
+# leaves ω undefined) next to one that keeps it: no error, the same columns for both, NaN ω
+# for the first. Oracles: the ABC on that dataset's 8-parameter table (the regression of
+# every other column is independent of ω), the file route with the binary (6 digits) and
+# with `abc` (exact), on the same draws.
+@testset "datasets without the ω block" begin
+    quiet(f) = Logging.with_logger(f, Logging.NullLogger())
+    closeNaN(a, b) = size(a) == size(b) &&
+        all((isnan(x) && isnan(y)) || abs(x - y) <= 1e-5 * abs(y) + 1e-9 for (x, y) in zip(a, b))
+    reg = joinpath(pkgdir(MKtest), "scripts", "reg")
+    have_reg = Sys.islinux() && isfile(reg)
+    best = JLD2.load(joinpath(@__DIR__, "fixtures", "abcmk_best_model.jld2"))
+    p() = MKtest.parameters(N = 500, n = 50, dac = [2, 4, 5, 10, 20, 50])
+    td = mktempdir()
+    tab = joinpath(td, "t.jld2")
+    seed!(1)
+    quiet(() -> MKtest.rates(p(); iterations = 300, output_file = tab))
+    sfs = [best["sfs"], best["sfs"]]
+    div = [best["div"], [6.0, 4.0, best["div"][3], best["div"][4]]]   # Dn + Ds = 10
+    S = length(p().dac)
+    kw = (h5_file = tab, summstat_size = 5000, alpha = nothing, B_bins = nothing,
+          sampling = MKtest.RjSampling(), row_prior = MKtest.FlatAlphaPrior())
+    mem(m) = (seed!(2); quiet(() -> MKtest._abc_in_memory(p(), sfs, div; abc_method = m, tol = 200, kw...)))
+    fo = joinpath(td, "files")
+    seed!(2)
+    quiet(() -> MKtest.summary_statistics(p(), sfs, div; h5_file = tab, summstat_size = 5000,
+                                          output_folder = fo))
+    files = MKtest._dataset_files(fo, "summstat_")
+    @test MKtest._count_cols.(files) == [12 + S, 8 + S]
+    t2 = quiet(() -> MKtest.read_gz(files[2]))
+    a2 = vec(quiet(() -> MKtest.read_gz(MKtest._dataset_files(fo, "alphas_")[2])))
+    ω = 4:7
+    rest = [1:3; 8:12]
+
+    names12 = MKtest._abc_param_names(12)
+    for (m, direct) in (("abcreg", MKtest.abcreg_loclinear(a2, t2[:, 1:8], t2[:, 9:end]; tol = 200)),
+                        ("abc", MKtest.abc_loclinear(a2, t2[:, 1:8], t2[:, 9:end]; tol = 200)[2]))
+        post = mem(m)
+        @test length(post) == 2
+        @test names(post[1]) == names(post[2]) == string.(names12)
+        @test !any(isnan, Matrix(post[1]))
+        @test all(isnan, Matrix(post[2][:, ω])) && !any(isnan, Matrix(post[2][:, rest]))
+        @test Matrix(post[2][:, rest]) == direct
+    end
+
+    # file route: the same posteriors, NaN ω included
+    fa = quiet(() -> MKtest.abc(output_folder = fo, S = S, tol = 200))["loclinear"]
+    @test all(isequal(Matrix(a), Matrix(b)) for (a, b) in zip(fa, mem("abc")))
+    @test names(fa[2]) == string.(names12)
+    if have_reg
+        fr = quiet(() -> MKtest.ABCreg(output_folder = fo, S = S, tol = 200))
+        @test all(closeNaN(Matrix(a), Matrix(b)) for (a, b) in zip(fr, mem("abcreg")))
+    else
+        @test_skip "ABCreg binary not available"
+    end
+
+    # summaries: NaN statistics for the unestimated ω, the usual ones elsewhere
+    post = mem("abcreg")
+    res = quiet(() -> MKtest.summary_abc(post; stat = "median"))
+    @test all(isnan, Matrix(res[:inference][2:2, ω])) && !any(isnan, Matrix(res[:inference][:, rest]))
+    @test isequal(Matrix(res[:inference][1:1, :]), Matrix(quiet(() -> MKtest.summary_abc(post[1:1]; stat = "median"))[:inference]))
+    @test occursin("NaN", res[:quantiles][2, :ωₐ])
+    # and through abcmk
+    r = quiet(() -> (seed!(2); MKtest.abcmk(p(), sfs, div; h5_file = tab, summstat_size = 5000,
+                                            tol = 200, in_memory = true)))
+    @test isequal(Matrix(r[:inference]), Matrix(res[:inference]))
+end

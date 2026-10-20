@@ -26,6 +26,28 @@ function _dataset_files(output_folder::String, prefix::String)
     return sort(files, by = _dataset_index)
 end
 
+# Columns of a (possibly gzipped) table, from its first line only.
+_count_cols(file::String) = _with_gz(io -> count(==('\t'), readline(io)) + 1, file)
+
+# Posterior column names for P = 8 (no ω block) or 12 parameters.
+_abc_param_names(P::Integer) = P == 12 ?
+    [:α_weak, :α_strong, :α, :ωₐ_weak, :ωₐ_strong, :ωₐ, :ωₙₐ, :γ_deleterious, :β, :γ_weak, :γ_strong, :B] :
+    [:α_weak, :α_strong, :α, :γ_deleterious, :β, :γ_weak, :γ_strong, :B]
+
+# A dataset's summaries lose the ω block when a draw leaves ω undefined (Ds = 0 with no
+# adaptive fixation: 0/0), so its ABC runs on 8 parameters. Its ω columns are then
+# reported as NaN, after the α columns, so every posterior has them. Each parameter is
+# regressed on its own over the same accepted rows, so the other columns are what the ABC
+# gives on the table without the block.
+_with_ω_columns(post::AbstractMatrix, P::Integer) =
+    P == 12 ? post : hcat(post[:, 1:3], fill(NaN, size(post, 1), 4), post[:, 4:end])
+
+function _report_ω_missing(Ps)
+    k = count(<(12), Ps)
+    k > 0 && @info "ω not estimated for $k of $(length(Ps)) datasets (a draw left ω " *
+                   "undefined: Ds = 0 with no adaptive fixation); their ω columns are NaN"
+end
+
 """
     ABCreg(; output_folder, S, P = 12, tol, rm_summaries = false, abcreg = nothing,
            T = false, L = false) -> Vector{DataFrame}
@@ -36,8 +58,8 @@ Run the ABCreg binary (rejection plus local-linear regression ABC,
 posteriors.
 
 Each pair `alphas_i.txt.gz` / `summstat_i.txt.gz` is run on its own thread, accepting the
-`tol` closest table rows; ABCreg writes `out_i*.post.gz`. If the summaries have no ω
-columns, `P` is reduced by 4.
+`tol` closest table rows; ABCreg writes `out_i.0.post.gz`. A dataset whose summaries have
+no ω columns (a draw left ω undefined) runs with `P - 4` and reports its ω columns as NaN.
 
 # Keywords
  - `output_folder::String`: folder with the observed α(x) and the summaries.
@@ -52,8 +74,8 @@ columns, `P` is reduced by 4.
 
 # Returns
 One `DataFrame` per dataset, in dataset order, with columns
-`α_weak, α_strong, α, ωₐ_weak, ωₐ_strong, ωₐ, ωₙₐ, γ_deleterious, β, γ_weak, γ_strong, B` (12), or
-the same without the four ω columns (8) when the summaries have none. `γ_deleterious` is the mean
+`α_weak, α_strong, α, ωₐ_weak, ωₐ_strong, ωₐ, ωₙₐ, γ_deleterious, β, γ_weak, γ_strong, B` (12); the
+four ω columns are NaN for a dataset whose summaries have none. `γ_deleterious` is the mean
 deleterious coefficient (absolute value), `β` the DFE shape, `γ_weak`/`γ_strong` the weakly and
 strongly beneficial coefficients, and `B` is B x 1000.
 Datasets whose ABCreg output is missing or empty are dropped with a warning, so the
@@ -82,10 +104,10 @@ function ABCreg(;
 
     tol = _as_count(tol, "tol")
 
-    # Change P if omega was not estimated
-    if size(_with_gz(readdlm, sum_file[1]), 2) != (P+S)
-        P = P - 4
-    end
+    # Per file: P, or P - 4 when that dataset's summaries have no ω block (see
+    # `_with_ω_columns`). Taking it from the first file alone made the binary read a mixed
+    # set's summary columns as parameters.
+    Ps = ThreadsX.map(f -> _count_cols(f) == P + S ? P : P - 4, sum_file)
 
     # Creating output names
     out = output_folder .* "/out_" .* string.(_dataset_index.(a_file))
@@ -94,17 +116,19 @@ function ABCreg(;
     @info "Running ABCreg. Please cite https://doi.org/10.1186/1471-2156-10-35"
     # Using mapi instead map to limit tasks. Bash interaction not working as expected
     ThreadsX.mapi(
-        (x, y, z, t) -> run(`$abcreg -d $x -p $y -P $P -S $S -t $t -b $z`),
+        (x, y, z, t, Pi) -> run(`$abcreg -d $x -p $y -P $Pi -S $S -t $t -b $z`),
         a_file,
         sum_file,
         out,
         tol_abcreg,
+        Ps,
         ntasks = Threads.nthreads(),
     )
 
     @info "Opening and filtering posteriors distributions"
-    out = filter(x -> occursin("post", x), _dataset_files(output_folder, "out_"))
-    out = filter(x -> !occursin(".1.", x), out)
+    # Exactly the file each dataset's run wrote, so each posterior stays paired with its P
+    # (a glob over `out_*post*` lost the pairing when a run wrote nothing).
+    out = out .* ".0.post.gz"
 
     # Move from CSV.read to readdlm, bug when threads enable in node server.
     # open(x) = Array(CSV.read(x, DataFrame))
@@ -114,14 +138,10 @@ function ABCreg(;
     # dataset numbers.
     ok = @. !iszero(posteriors)
     all(ok) || @warn "ABCreg failed for datasets $(_dataset_index.(out[.!ok])); their posteriors are dropped"
-    posteriors = posteriors[ok]
+    posteriors = [_with_ω_columns(x, Pi) for (x, Pi) in zip(posteriors[ok], Ps[ok])]
+    _report_ω_missing(Ps[ok])
 
-    if P != 12
-        c_names = [:α_weak, :α_strong, :α, :γ_deleterious, :β,:γ_weak,:γ_strong,:B]
-    else
-        c_names = [:α_weak, :α_strong, :α,:ωₐ_weak,:ωₐ_strong,:ωₐ,:ωₙₐ,:γ_deleterious,:β,:γ_weak,:γ_strong,:B]
-    end
-
+    c_names = _abc_param_names(size(first(posteriors), 2))
     posteriors = map(x -> DataFrame(x,c_names),posteriors)
 
     # Remove summstat files
@@ -192,6 +212,16 @@ An `OrderedDict` with
  - `:stats`: `DataFrame` with a `Stats` column and, per dataset, 7 rows (one per
    statistic).
 """
+# The seven statistics of one posterior column, in `summary_abc`'s order. NaN for a column
+# with NaN: an ω the ABC did not estimate (see `_with_ω_columns`).
+function _posterior_stats(c::AbstractVector)
+    any(isnan, c) && return fill(NaN, 7)
+    v = Vector{Float64}(c)
+    y = kde(v)
+    mode = collect(y.x)[y.density.==maximum(y.density)][1]
+    return [minimum(v), only(q_lower(v)), median(v), mean(v), mode, only(q_upper(v)), maximum(v)]
+end
+
 function summary_abc(posteriors::Vector{DataFrame}; stat::String = "Mode")
     @info "Computing statistics over posteriors distributions"
 
@@ -204,18 +234,7 @@ function summary_abc(posteriors::Vector{DataFrame}; stat::String = "Mode")
     c_names = propertynames(first(posteriors))
 
     # One 7 x P block per dataset, rows in the order of `labels`.
-    blocks = ThreadsX.map(posteriors) do x
-        cols = eachcol(x)
-        vcat(
-            minimum.(cols)',
-            (only.(q_lower.(Vector{Float64}.(cols))))',
-            median.(cols)',
-            mean.(cols)',
-            get_mode(x),
-            (only.(q_upper.(Vector{Float64}.(cols))))',
-            maximum.(cols)',
-        )
-    end
+    blocks = ThreadsX.map(x -> reduce(hcat, _posterior_stats.(eachcol(x))), posteriors)
 
     df = vcat([hcat(DataFrame(:Stats => labels), DataFrame(b, c_names)) for b in blocks]...)
 
@@ -254,8 +273,8 @@ with heteroscedastic correction, a port of the R package abc (`method = "locline
 The alternative to [`ABCreg`](@ref) in `abcmk(...; abc_method = "abc")`.
 
 Each pair `alphas_i.txt.gz` / `summstat_i.txt.gz` goes through `abc_loclinear`,
-one dataset per thread (BLAS runs on one thread meanwhile). If the summaries have no ω
-columns, `P` is reduced by 4.
+one dataset per thread (BLAS runs on one thread meanwhile). A dataset whose summaries have
+no ω columns (a draw left ω undefined) runs with `P - 4` and reports its ω columns as NaN.
 
 # Keywords
  - `output_folder::String`: folder with the observed α(x) and the summaries.
@@ -272,8 +291,8 @@ columns, `P` is reduced by 4.
 `OrderedDict("rejection" => posteriors, "loclinear" => adjusted)`: two
 `Vector{DataFrame}`, one per dataset, with the accepted and the regression-adjusted
 values. Columns
-`α_weak, α_strong, α, ωₐ_weak, ωₐ_strong, ωₐ, ωₙₐ, γ_deleterious, β, γ_weak, γ_strong, B` (12), or
-the same without the four ω columns (8) when the summaries have none. `γ_deleterious` is the mean
+`α_weak, α_strong, α, ωₐ_weak, ωₐ_strong, ωₐ, ωₙₐ, γ_deleterious, β, γ_weak, γ_strong, B` (12); the
+four ω columns are NaN for a dataset whose summaries have none. `γ_deleterious` is the mean
 deleterious coefficient (absolute value), `β` the DFE shape, `γ_weak`/`γ_strong` the weakly and
 strongly beneficial coefficients, and `B` is B x 1000.
 """
@@ -301,31 +320,26 @@ function abc(; output_folder::String,
     set_num_threads(1)
     try
 
-    # Change P if omega was not estimated
-    if size(CSV.read(param_summaries[1],matrix,header=false), 2) != (P + S)
-        P -= 4
-    end
+    # Per file: P, or P - 4 when that dataset's summaries have no ω block (see ABCreg)
+    Ps = ThreadsX.map(f -> _count_cols(f) == P + S ? P : P - 4, param_summaries)
 
     @info "Running ABC"
     # Using mapi instead of map to limit tasks. Bash interaction not working as expected
-    posteriors, posteriors_adjusted = unzip(ThreadsX.map((x, y) -> abc_loclinear(x,y, P=P, tol=tol, transformation=transformation, kernel=kernel), targets, param_summaries))
+    posteriors, posteriors_adjusted = unzip(ThreadsX.map((x, y, Pi) -> abc_loclinear(x,y, P=Pi, tol=tol, transformation=transformation, kernel=kernel), targets, param_summaries, Ps))
 
     @info "Filtering posterior distributions"
-    # Remove if some file wasn't computed
-    posteriors = filter(!iszero, posteriors)
-    posteriors_adjusted = filter(!iszero, posteriors_adjusted)
+    # Remove if some file wasn't computed; a dataset without the ω block reports NaN ω
+    posteriors = [_with_ω_columns(x, Pi) for (x, Pi) in zip(posteriors, Ps) if !iszero(x)]
+    ok = .!iszero.(posteriors_adjusted)
+    posteriors_adjusted = [_with_ω_columns(x, Pi) for (x, Pi) in zip(posteriors_adjusted[ok], Ps[ok])]
+    _report_ω_missing(Ps[ok])
 
     # Remove summstat files
     if rm_summaries
         rm.(filter(x -> occursin("summstat", x) || occursin("alphas_", x), readdir(output_folder, join = true)))
     end
 
-    if P != 12
-        c_names = [:α_weak, :α_strong, :α, :γ_deleterious, :β,:γ_weak,:γ_strong,:B]
-    else
-        c_names = [:α_weak, :α_strong, :α,:ωₐ_weak,:ωₐ_strong,:ωₐ,:ωₙₐ,:γ_deleterious,:β,:γ_weak,:γ_strong,:B]
-    end
-
+    c_names = _abc_param_names(size(first(posteriors_adjusted), 2))
     posteriors = map(x -> DataFrame(x,c_names),posteriors)
     posteriors_adjusted = map(x -> DataFrame(x,c_names),posteriors_adjusted)
 
@@ -747,14 +761,11 @@ function _abc_in_memory(param::parameters, sfs::Vector, divergence::Vector;
         set_num_threads(nthreads_og)
     end
 
-    Ps = unique(first.(posteriors))
-    length(Ps) == 1 || throw(ArgumentError(
-        "the datasets have different parameter columns ($Ps): the ω block is dropped for " *
-        "some of them (a NaN ω); run them separately"))
     ok = [!isempty(p) && !iszero(p) for (_, p) in posteriors]
     all(ok) || @warn "ABC gave no posterior for datasets $(findall(!, ok)); they are dropped"
-    c_names = only(Ps) == 12 ?
-        [:α_weak, :α_strong, :α, :ωₐ_weak, :ωₐ_strong, :ωₐ, :ωₙₐ, :γ_deleterious, :β, :γ_weak, :γ_strong, :B] :
-        [:α_weak, :α_strong, :α, :γ_deleterious, :β, :γ_weak, :γ_strong, :B]
-    return [DataFrame(p, c_names) for (_, p) in posteriors[ok]]
+    _report_ω_missing(first.(posteriors[ok]))
+    # A dataset without the ω block reports NaN ω (see `_with_ω_columns`)
+    full = [_with_ω_columns(p, P) for (P, p) in posteriors[ok]]
+    c_names = _abc_param_names(size(first(full), 2))
+    return [DataFrame(p, c_names) for p in full]
 end
