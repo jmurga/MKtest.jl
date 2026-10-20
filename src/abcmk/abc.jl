@@ -187,6 +187,16 @@ end
 
 
 
+# The seven statistics of one posterior column, in `summary_abc`'s order. NaN for a column
+# with NaN: an ω the ABC did not estimate (see `_with_ω_columns`).
+function _posterior_stats(c::AbstractVector)
+    any(isnan, c) && return fill(NaN, 7)
+    v = Vector{Float64}(c)
+    y = kde(v)
+    mode = collect(y.x)[y.density.==maximum(y.density)][1]
+    return [minimum(v), only(q_lower(v)), median(v), mean(v), mode, only(q_upper(v)), maximum(v)]
+end
+
 """
     summary_abc(posteriors; stat = "Mode") -> OrderedDict
 
@@ -212,16 +222,6 @@ An `OrderedDict` with
  - `:stats`: `DataFrame` with a `Stats` column and, per dataset, 7 rows (one per
    statistic).
 """
-# The seven statistics of one posterior column, in `summary_abc`'s order. NaN for a column
-# with NaN: an ω the ABC did not estimate (see `_with_ω_columns`).
-function _posterior_stats(c::AbstractVector)
-    any(isnan, c) && return fill(NaN, 7)
-    v = Vector{Float64}(c)
-    y = kde(v)
-    mode = collect(y.x)[y.density.==maximum(y.density)][1]
-    return [minimum(v), only(q_lower(v)), median(v), mean(v), mode, only(q_upper(v)), maximum(v)]
-end
-
 function summary_abc(posteriors::Vector{DataFrame}; stat::String = "Mode")
     @info "Computing statistics over posteriors distributions"
 
