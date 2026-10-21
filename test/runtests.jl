@@ -338,7 +338,7 @@ import Logging
                                   row_prior = MKtest.TableRowPrior())
         @test MKtest._with_gz(readdlm, joinpath(of, "summstat_1.txt.gz")) == fx["summ_indep"]
 
-        # the defaults are RjSampling(w = (0, 2.5), tilt = 0.05) with FlatAlphaPrior(by_B = true)
+        # the defaults are RjSampling(w = (0.5, 1.5), tilt = 0.05) with FlatAlphaPrior(by_B = true)
         summ(; kw...) = begin
             of = mktempdir()
             seed!(7)
@@ -346,7 +346,7 @@ import Logging
                                       summstat_size = 200, output_folder = of, kw...)
             MKtest._with_gz(readdlm, joinpath(of, "summstat_1.txt.gz"))
         end
-        @test summ() == summ(sampling = MKtest.RjSampling(w = (0.0, 2.5), tilt = 0.05),
+        @test summ() == summ(sampling = MKtest.RjSampling(w = (0.5, 1.5), tilt = 0.05),
                              row_prior = MKtest.FlatAlphaPrior(by_B = true))
         @test summ() != fx["summ_indep"]
     end
@@ -614,7 +614,7 @@ import Logging
             syn_sfs = hcat(1:(q.nn - 1), MKtest.pois_rand.(sel .* sc_p), MKtest.pois_rand.(neut .* sc_p))
             syn_div = [Float64(MKtest.pois_rand(dn * sc_d)), Float64(MKtest.pois_rand(ds * sc_d)),
                        best["div"][3], best["div"][4]]
-            @test only(MKtest.valid_data(p(), [syn_sfs], [syn_div]))   # main: a Bool mask
+            @test only(MKtest.valid_mask(p(), [syn_sfs], [syn_div]))   # main: a Bool mask
             post = stages(Float64.(syn_sfs), syn_div, "comp_synthetic")
             # the posterior holds the truth of each component and of the composition
             for (j, tv) in enumerate(truth)
@@ -858,7 +858,7 @@ import Logging
         @test polydraw(pt) != polydraw(p0)
         # defaults
         d = MKtest.RjSampling()
-        @test (d.w_lo, d.w_hi, d.anchor_lo, d.anchor_hi, d.tilt) == (0.0, 2.5, 0.15, 0.70, 0.05)
+        @test (d.w_lo, d.w_hi, d.anchor_lo, d.anchor_hi, d.tilt) == (0.5, 1.5, 0.15, 0.70, 0.05)
     end
 
     # --- FlatAlphaPrior -----------------------------------------------------------
@@ -910,9 +910,13 @@ import Logging
         d = [3000.0, 2000.0, 1e6, 3e5]
         sfs = [raw, gap, top, raw, raw]
         div = [d, d, d, [0.0, 2000.0, 1e6, 3e5], permutedims(d)]   # Dn = 0; 1 x 4 form
-        @test MKtest.valid_data(param, sfs, div) == [true, false, false, false, true]
-        @test MKtest.valid_data(param, sfs, div; sampling = MKtest.IndependentSampling()) ==
+        @test MKtest.valid_mask(param, sfs, div) == [true, false, false, false, true]
+        @test MKtest.valid_mask(param, sfs, div; sampling = MKtest.IndependentSampling()) ==
               [true, true, false, false, true]
+        # valid_data applies the mask and returns the pair to pass on
+        s2, d2 = @test_logs (:warn, r"dropping 3 of 5") MKtest.valid_data(param, sfs, div)
+        @test s2 == [raw, raw] && d2 == [d, permutedims(d)]
+        @test MKtest.valid_data(param, sfs[[1, 5]], div[[1, 5]]) == (sfs[[1, 5]], div[[1, 5]])
         # the same intervals as the sampler: what valid_data rejects, RjSampling throws for
         @test MKtest._interval_ps(raw, dac) == MKtest._prepare_sampling(MKtest.RjSampling(), raw, dac, 1322).ps_obs
         @test_throws ArgumentError MKtest._prepare_sampling(MKtest.RjSampling(), gap, dac, 1322)

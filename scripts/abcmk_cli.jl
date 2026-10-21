@@ -88,8 +88,8 @@ Fire.@main function abcmk(N::Int64,
     if sfs isa Matrix
         sfs, div = [sfs], [div]
     end
-    ok = MKtest.valid_data(param, sfs, div)
-    all(ok) || @warn "dropping $(count(!, ok)) of $(length(ok)) datasets (valid_data)"
+    ok = MKtest.valid_mask(param, sfs, div)
+    all(ok) || @warn "dropping $(count(!, ok)) of $(length(ok)) datasets (valid_mask)"
     mkpath(output_folder)
     res = MKtest.abcmk(param, sfs[ok], div[ok]; h5_file = rates_file,
                        summstat_size = summsize, output_folder = output_folder,

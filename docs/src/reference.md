@@ -148,6 +148,7 @@ MKtest.rates
 MKtest.load_rates
 MKtest.RatesTable
 MKtest.valid_data
+MKtest.valid_mask
 MKtest.summary_statistics
 MKtest.abcmk
 MKtest.RjSampling

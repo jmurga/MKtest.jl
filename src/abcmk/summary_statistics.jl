@@ -197,7 +197,7 @@ observed spectrum ([`RjSampling`](@ref)) returns a filled copy.
 _prepare_sampling(sampling::AbstractPoissonSampling, sfs::AbstractMatrix, dac::Vector{Int64}, nn::Integer) = sampling
 
 """
-    RjSampling(; w = (0.0, 2.5), anchor = (0.15, 0.70), tilt = 0.05)
+    RjSampling(; w = (0.5, 1.5), anchor = (0.15, 0.70), tilt = 0.05)
 
 [`IndependentSampling`](@ref) with a demographic nuisance on the polymorphism: the
 data's synonymous SFS distortion `r_i` (GRAPES' r_j), normalised on an anchor band, is
@@ -209,7 +209,7 @@ The default sampler of [`summary_statistics`](@ref) and [`abcmk`](@ref), used th
 [`FlatAlphaPrior`](@ref) and `stat = PosteriorMedian()`.
 
 # Keywords
- - `w = (0.0, 2.5)`: range of `w ~ Uniform(w...)`, drawn per table row. `w = 0`:
+ - `w = (0.5, 1.5)`: range of `w ~ Uniform(w...)`, drawn per table row. `w = 0`:
    nonsynonymous sites ignore the distortion; `w = 1`: the same distortion on both
    classes (GRAPES); `w > 1`: stronger on nonsynonymous sites. Needs `0 <= w[1] <= w[2]`.
  - `anchor = (0.15, 0.70)`: band of derived-allele frequency on which `r` is normalised,
@@ -238,9 +238,13 @@ whole interval inside the anchor band (at n = 50, DACs 20 and 50 give the interv
 20-49). Each violation throws an `ArgumentError`; [`valid_data`](@ref) finds the datasets
 that would fail. Pass the RAW per-frequency SFS: `summary_statistics` builds the tails.
 
-The defaults were selected on SLiM simulations (two-epoch histories at n = 50 and the
-Tennessen history at n = 661), where they gave an α RMSE of 0.029 and 0.030 against
-0.055 and 0.039 for the v1.0.0 sampler and prior.
+The anchor and tilt were selected on SLiM simulations (two-epoch histories at n = 50 and
+the Tennessen history at n = 661) with `w = (0, 2.5)`, where they gave an α RMSE of 0.029
+and 0.030 against 0.055 and 0.039 for the v1.0.0 sampler and prior. `w = (0.5, 1.5)`
+(2026-10-21) is paired-equal to that range on the same 14 cells (α RMSE 0.031 / 0.027,
+α_weak +0.008 on the Tennessen grid, α_strong +0.002) and keeps w off the ridge that
+w > 1.5 opens on the 1000 Genomes data, where a wide w absorbs the nonsynonymous
+rare-variant excess and halves α_strong.
 """
 struct RjSampling <: AbstractPoissonSampling
     w_lo::Float64
@@ -256,7 +260,7 @@ end
 RjSampling(w_lo, w_hi, anchor_lo, anchor_hi, ps_obs, band) =
     RjSampling(w_lo, w_hi, anchor_lo, anchor_hi, ps_obs, band, 0.0, Float64[])
 
-function RjSampling(; w = (0.0, 2.5), anchor = (0.15, 0.70), tilt = 0.05)
+function RjSampling(; w = (0.5, 1.5), anchor = (0.15, 0.70), tilt = 0.05)
     lo, hi = Float64(first(w)), Float64(last(w))
     (isfinite(lo) && isfinite(hi) && 0 <= lo <= hi) ||
         throw(ArgumentError("w must satisfy 0 <= w[1] <= w[2] < Inf, got $w"))
@@ -294,12 +298,12 @@ function _interval_ps(sfs::AbstractMatrix, dac::Vector{Int64})
 end
 
 """
-    valid_data(param, sfs, divergence; sampling = RjSampling()) -> Vector{Bool}
+    valid_mask(param, sfs, divergence; sampling = RjSampling()) -> Vector{Bool}
 
 Which datasets `summary_statistics` and [`abcmk`](@ref) can use with `sampling`, one `Bool`
-per dataset, so that datasets that would stop the run are discarded beforehand:
+per dataset. [`valid_data`](@ref) applies it:
 
-    ok = MKtest.valid_data(param, sfs, divergence)
+    ok = MKtest.valid_mask(param, sfs, divergence)
     sfs, divergence = sfs[ok], divergence[ok]
 
 Every sampler needs `Dn > 0`, `Ds > 0` and, at every DAC of `param.dac`, Pn > 0 and Ps > 0
@@ -312,11 +316,29 @@ throws for it.
 `sfs` and `divergence` as for `summary_statistics`: RAW per-frequency SFS `[DAC Pn Ps]`
 and divergence `[Dn, Ds, ...]`. Throws an `ArgumentError` if their lengths differ.
 """
-function valid_data(param::parameters, sfs::Vector, divergence::Vector;
+function valid_mask(param::parameters, sfs::Vector, divergence::Vector;
                     sampling::AbstractPoissonSampling = RjSampling())
     length(sfs) == length(divergence) || throw(ArgumentError(
         "got $(length(sfs)) SFS for $(length(divergence)) divergence datasets"))
     return [_valid_data(sampling, x, d, param.dac) for (x, d) in zip(sfs, divergence)]
+end
+
+"""
+    valid_data(param, sfs, divergence; sampling = RjSampling()) -> (sfs, divergence)
+
+The datasets `summary_statistics` and [`abcmk`](@ref) can use with `sampling`, as the pair
+of vectors to pass on; the others are dropped and named in a warning:
+
+    sfs, divergence = MKtest.valid_data(param, sfs, divergence)
+
+See [`valid_mask`](@ref) for the rule (and for the `Bool` mask itself).
+"""
+function valid_data(param::parameters, sfs::Vector, divergence::Vector;
+                    sampling::AbstractPoissonSampling = RjSampling())
+    ok = valid_mask(param, sfs, divergence; sampling)
+    all(ok) || @warn "valid_data: dropping $(count(!, ok)) of $(length(ok)) datasets " *
+                     "(indices $(findall(!, ok)))"
+    return sfs[ok], divergence[ok]
 end
 
 function _valid_data(::AbstractPoissonSampling, sfs::AbstractMatrix, d, dac::Vector{Int64})

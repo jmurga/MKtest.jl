@@ -78,12 +78,12 @@ itself) and the divergence of one or several datasets:
 sfs, div, _ = MKtest.parse_sfs("data/MKdata_tgp_may2023.txt"; sample_size = 661,
                                gene_list = "data/DNAonly_nonVIPs.txt.gz")   # 1000 sets
 
-ok = MKtest.valid_data(param, sfs, div)     # one Bool per dataset
-sfs, div = sfs[ok], div[ok]
+sfs, div = MKtest.valid_data(param, sfs, div)   # drops and names the unusable sets
 ```
 
 `valid_data` drops the datasets the sampler cannot use: those with `Dn` or `Ds` equal
-to 0, or with no polymorphism above some DAC of `param.dac`.
+to 0, or with no polymorphism above some DAC of `param.dac` (`valid_mask` gives the
+`Bool` mask instead).
 
 ## 4. The inference: `abcmk`
 
