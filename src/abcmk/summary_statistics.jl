@@ -206,7 +206,7 @@ nonsynonymous class. With `tilt > 0` the nonsynonymous class also gets a random 
 tilt. Fixations are drawn as in `IndependentSampling`.
 
 The default sampler of [`summary_statistics`](@ref) and [`abcmk`](@ref), used there with
-[`FlatAlphaPrior`](@ref) and `stat = "median"`.
+[`FlatAlphaPrior`](@ref) and `stat = PosteriorMedian()`.
 
 # Keywords
  - `w = (0.0, 2.5)`: range of `w ~ Uniform(w...)`, drawn per table row. `w = 0`:

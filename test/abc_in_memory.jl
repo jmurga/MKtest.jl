@@ -289,9 +289,9 @@ end
 
     # summaries: NaN statistics for the unestimated ω, the usual ones elsewhere
     post = mem("abcreg")
-    res = quiet(() -> MKtest.summary_abc(post; stat = "median"))
+    res = quiet(() -> MKtest.summary_abc(post; stat = MKtest.PosteriorMedian()))
     @test all(isnan, Matrix(res[:inference][2:2, ω])) && !any(isnan, Matrix(res[:inference][:, rest]))
-    @test isequal(Matrix(res[:inference][1:1, :]), Matrix(quiet(() -> MKtest.summary_abc(post[1:1]; stat = "median"))[:inference]))
+    @test isequal(Matrix(res[:inference][1:1, :]), Matrix(quiet(() -> MKtest.summary_abc(post[1:1]; stat = MKtest.PosteriorMedian()))[:inference]))
     @test occursin("NaN", res[:quantiles][2, :ωₐ])
     # and through abcmk
     r = quiet(() -> (seed!(2); MKtest.abcmk(p(), sfs, div; h5_file = tab, summstat_size = 5000,

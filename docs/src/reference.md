@@ -159,6 +159,16 @@ MKtest.abc
 MKtest.abc_loclinear
 MKtest.abcreg_loclinear
 MKtest.summary_abc
+MKtest.AbstractPointEstimate
+MKtest.PosteriorMedian
+MKtest.PosteriorMean
+MKtest.PosteriorMode
+MKtest.PosteriorQuantile
+MKtest.point_estimate
+MKtest.AbstractComponents
+MKtest.Marginal
+MKtest.Composed
+MKtest.compose!
 MKtest.analytical_alpha
 MKtest.set_ppos!
 MKtest.set_θ!

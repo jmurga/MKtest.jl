@@ -12,6 +12,22 @@ using MKtest, CSV
 
 _floats(x::String) = parse.(Float64, split(x, ","))
 _ints(x::String) = parse.(Int64, split(x, ","))
+# `--stat` and `--components` arrive as strings; MKtest takes types
+function _point_estimate(x::String)
+    k = lowercase(strip(x))
+    k == "median" && return MKtest.PosteriorMedian()
+    k == "mean" && return MKtest.PosteriorMean()
+    k == "mode" && return MKtest.PosteriorMode()
+    q = tryparse(Float64, k)
+    q === nothing && throw(ArgumentError("--stat $x: use median, mean, mode or a quantile in [0, 1]"))
+    return MKtest.PosteriorQuantile(q)
+end
+function _components(x::String)
+    k = lowercase(strip(x))
+    k == "marginal" && return MKtest.Marginal()
+    k == "composed" && return MKtest.Composed()
+    throw(ArgumentError("--components $x: use marginal or composed"))
+end
 
 """
     rates N n iterations [--dac ...] [--alpha lo,hi] [--gam_dfe lo,hi] [--gL lo,hi]
@@ -45,10 +61,12 @@ end
 """
     abcmk N n data rates_file output_folder [--genes file] [--dac ...] [--cutoff 0.0,1.0]
           [--summsize 100000] [--tol 1000] [--method abcreg] [--stat median]
+          [--components marginal]
 
 Run `MKtest.abcmk` on the datasets of `data` (one dataset, or one per line of `--genes`,
 read with `MKtest.parse_sfs`) against the table `rates_file`. Datasets that fail
-`MKtest.valid_data` are dropped. Writes `abcmk_inference.tsv` (one row per dataset) and
+`MKtest.valid_data` are dropped. `--stat` is median, mean, mode or a quantile in [0, 1];
+`--components` is marginal or composed (alpha_strong = alpha - alpha_weak of the estimate). Writes `abcmk_inference.tsv` (one row per dataset) and
 `abcmk_quantiles.tsv` to `output_folder`.
 """
 Fire.@main function abcmk(N::Int64,
@@ -62,7 +80,8 @@ Fire.@main function abcmk(N::Int64,
                      summsize::Int64 = 100000,
                      tol::Int64 = 1000,
                      method::String = "abcreg",
-                     stat::String = "median")
+                     stat::String = "median",
+                     components::String = "marginal")
     param = MKtest.parameters(N = N, n = n, dac = _ints(dac), cutoff = _floats(cutoff))
     sfs, div, _ = MKtest.parse_sfs(data; sample_size = n, cutoff = _floats(cutoff),
                                    gene_list = isempty(genes) ? nothing : genes)
@@ -74,7 +93,8 @@ Fire.@main function abcmk(N::Int64,
     mkpath(output_folder)
     res = MKtest.abcmk(param, sfs[ok], div[ok]; h5_file = rates_file,
                        summstat_size = summsize, output_folder = output_folder,
-                       tol = tol, abc_method = method, stat = stat)
+                       tol = tol, abc_method = method, stat = _point_estimate(stat),
+                       components = _components(components))
     CSV.write(joinpath(output_folder, "abcmk_inference.tsv"), res[:inference]; delim = '\t')
     CSV.write(joinpath(output_folder, "abcmk_quantiles.tsv"), res[:quantiles]; delim = '\t')
     @info "Results written to $output_folder"
