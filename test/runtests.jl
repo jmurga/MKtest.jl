@@ -135,12 +135,33 @@ import Logging
         @test pz.p_weak < 1e-20
         @test maximum(MKtest._ppos_residual(pz, pz.p_weak, pz.p_strong)) < 1e-6
 
-        # An INFEASIBLE target is refused, not written: a very peaked deleterious DFE
-        # produces almost no deleterious fixations, so a low al_tot cannot be reached.
+        # A very peaked deleterious DFE fixes almost nothing, so a low al_tot needs a tiny
+        # ppos that nlsolve misses from every start. The system is linear in ppos and its
+        # exact root is accepted.
         pj = mkp(); pj.shape = 7.5; pj.γ_deleterious = -500
         pj.scale = abs(pj.shape / pj.γ_deleterious)
         pj.α = 0.06; pj.α_weak = 0.054; MKtest.set_θ!(pj)
-        @test_throws ErrorException MKtest.set_ppos!(pj)
+        @test MKtest._set_ppos!(pj) === :linear
+        @test maximum(MKtest._ppos_residual(pj, pj.p_weak, pj.p_strong)) < 1e-12
+        @test 0 < pj.p_weak < 1e-10 && 0 < pj.p_strong < pj.p_weak
+        @test MKtest.set_ppos!(pj) == (pj.p_weak, pj.p_strong)
+        # Oracle for the closed form: the fixation alpha of its root, recomputed by hand
+        # from the three fixation terms.
+        fw = MKtest.fix_pos_sim(pj, pj.γ_weak, 0.5pj.p_weak)
+        fs = MKtest.fix_pos_sim(pj, pj.γ_strong, 0.5pj.p_strong)
+        fn = MKtest.fix_neg(pj, 0.5(pj.p_weak + pj.p_strong))
+        @test (fw + fs) / (fw + fs + fn) ≈ 0.06 rtol = 1e-10
+        @test fw / (fw + fs + fn) ≈ 0.054 rtol = 1e-10
+        # Where nlsolve converges it keeps the root (and its bits); the closed form is the
+        # same root to nlsolve's tolerance.
+        @test MKtest._set_ppos!(pa) === :nlsolve
+        @test sum(MKtest._ppos_linear(pa)) ≈ pa.p_weak + pa.p_strong rtol = 1e-6
+
+        # No finite root: refused. shape == 1 is the pole of the Hurwitz zeta in fix_neg.
+        p1 = mkp(); p1.shape = 1.0; p1.γ_deleterious = -500
+        p1.scale = abs(p1.shape / p1.γ_deleterious)
+        p1.α = 0.06; p1.α_weak = 0.054; MKtest.set_θ!(p1)
+        @test_throws ErrorException MKtest.set_ppos!(p1)
 
         # the model record is written next to the table
         seed!(1)
@@ -242,6 +263,32 @@ import Logging
                                               dac = [2, 4, 5, 10, 20, 50]);
                             iterations = 10, output_file = joinpath(od, "s2.jld2"), ρ = 0.001)
         @test maximum(out2[:models].shape) > hi
+    end
+
+    @testset "shape_factor widens the DFE shape prior" begin
+        # f = 2 is the published window exactly (powers of two), so old tables keep bits.
+        u2 = MKtest._shape_prior(0.184, 2)
+        @test (u2.a, u2.b) == (0.184 * 2^-2, 0.184 * 2^2)
+        u3 = MKtest._shape_prior(0.184, 3)
+        @test u3.a ≈ 0.184 / 9 && u3.b ≈ 0.184 * 9
+        @test_throws ArgumentError MKtest._shape_prior(0.184, 0.5)
+        @test_throws ArgumentError MKtest._shape_prior(0.184, Inf)
+        od = mktempdir()
+        mkp() = MKtest.parameters(N = 500, n = 50, shape = 0.184, dac = [2, 4, 5, 10, 20, 50])
+        seed!(11)
+        d = MKtest.rates(mkp(); iterations = 10, output_file = joinpath(od, "d.jld2"), ρ = 0.001)
+        seed!(11)
+        d2 = MKtest.rates(mkp(); iterations = 10, output_file = joinpath(od, "d2.jld2"),
+                          ρ = 0.001, shape_factor = 2)
+        @test d[:sel] == d2[:sel] && d[:dsdn] == d2[:dsdn]
+        # f = 4: [0.0115, 2.944]; draws above shape 1 are solved, not refused
+        seed!(11)
+        w = MKtest.rates(mkp(); iterations = 40, output_file = joinpath(od, "w.jld2"),
+                         ρ = 0.001, shape_factor = 4)
+        sh = w[:models].shape
+        @test minimum(sh) >= 0.184 / 16 - 1e-12 && maximum(sh) <= 0.184 * 16 + 1e-12
+        @test count(>(1), sh) >= 10
+        @test size(w[:models], 1) == 40 * 37               # nothing refused
     end
 
     # --- reference outputs ----------------------------------------------------
