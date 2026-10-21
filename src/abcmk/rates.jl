@@ -61,6 +61,15 @@ end
 # Reported by `_read_rates` for files that do not record their model.
 const _NO_PROVENANCE = "unrecorded (file predates option provenance)"
 
+# DFE shape prior of `rates`. f = 2 gives exactly `Uniform(shape*2^-2, shape*2^2)`: powers
+# of two are exact, so tables built before the keyword keep their bits.
+function _shape_prior(shape::Real, shape_factor::Real)
+    (isfinite(shape_factor) && shape_factor >= 1) ||
+        throw(ArgumentError("shape_factor must be finite and >= 1, got $shape_factor"))
+    f = Float64(shape_factor)
+    return Uniform(shape * f^-2, shape * f^2)
+end
+
 """
     _rates_options() -> String
 
@@ -349,13 +358,15 @@ function simulate_models!(
 
     param.B = 0.999
     set_θ!(param)
-    try
-        set_ppos!(param; warm_start=buf.prev_ppos)
+    route = try
+        _set_ppos!(param; warm_start=buf.prev_ppos)
     catch
         return nothing
     end
-    # Starting point for the next model of this task (only if both are non-zero).
-    if param.p_weak > 0.0 && param.p_strong > 0.0
+    # Starting point for the next model of this task (only if both are non-zero). A
+    # `:linear` root (nlsolve failed, p ~ 1e-7) is not reused: the next draw then starts
+    # where it did before the closed form existed, so its bits do not change.
+    if route === :nlsolve && param.p_weak > 0.0 && param.p_strong > 0.0
         buf.prev_ppos[1] = param.p_weak
         buf.prev_ppos[2] = param.p_strong
     end
@@ -377,7 +388,8 @@ end
 """
     rates(param; iterations, output_file, γ_strong = [100, 1000], γ_weak = [1, 10],
           γ_flanking = [-1000, -500], γ_deleterious = [-1000, -200], α = [0.1, 0.9],
-          ρ = nothing, B_bins = vcat(0.1:0.025:0.975, 0.999), weak = true)
+          ρ = nothing, shape_factor = 2, B_bins = vcat(0.1:0.025:0.975, 0.999),
+          weak = true)
 
 Build the ABC-MK reference table: draw `iterations` models from the priors, solve each in
 every `B` bin, and append the table to the JLD2 file `output_file`.
@@ -404,13 +416,17 @@ seed, the table reproduces only at the same thread count.
  - `α::Vector{Float64}`: range of `param.α`, drawn uniformly and rounded to 2 digits.
  - `ρ`: `nothing` keeps `param.ρ`; a positive number fixes ρ; `[lo, hi]` draws
    `ρ ~ Uniform(lo, hi)` per model. A fixed ρ draws no random numbers.
+ - `shape_factor::Real`: width of the DFE shape prior (default 2, must be >= 1); see
+   below.
  - `B_bins::Vector{Float64}`: background selection values (37 by default).
  - `weak::Bool`: draw the weak share of α from `0:0.05:1` (`α_weak = α * share`);
    `false` sets `α_weak = 0`.
  - `basesize`, `distributed`: not used.
 
-The DFE shape is drawn from `Uniform(shape/4, 4 shape)`. All coefficients are `2N` times
-the heterozygote selection coefficient.
+The DFE shape is drawn from `Uniform(shape/f^2, f^2 shape)` with `f = shape_factor`
+(default 2: `[shape/4, 4 shape]`). Above shape ~1 at the default coefficients almost no
+deleterious mutation fixes, so such a draw keeps a realistic Dn/Ds only at an α close to 1.
+All coefficients are `2N` times the heterozygote selection coefficient.
 
 # Returns
 A `Dict` with the same content as the file block:
@@ -436,6 +452,7 @@ function rates(
     γ_deleterious::Vector{Int64}=[-1000,-200],
     α::Vector{Float64}=[0.1, 0.9],
     ρ::Union{Nothing,Real,AbstractVector{<:Real}}=nothing,
+    shape_factor::Real=2,
     B_bins::Vector{Float64}=vcat(collect(0.1:0.025:0.975), 0.999),
     weak::Bool=true,
     basesize::Int64=10,
@@ -458,7 +475,7 @@ function rates(
     u_gam_dfe = Uniform(γ_deleterious[1], γ_deleterious[end])
 
     # DFE shape prior
-    afac = Uniform(shape * 2^-2, shape * 2^2)
+    afac = _shape_prior(shape, shape_factor)
 
     u_tot = Uniform(α[1], α[end])
     u_low = ifelse(weak, 0.0:0.05:1, [0])

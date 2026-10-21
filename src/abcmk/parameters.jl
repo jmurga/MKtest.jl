@@ -215,21 +215,38 @@ function solv_eqns(param, config)
 end
 
 """
-    set_ppos!(param; warm_start = [0.0, 0.0], atol = 1e-6)
+    set_ppos!(param; warm_start = [0.0, 0.0], atol = 1e-6, iterations = 50)
 
 Solve `param.p_weak` and `param.p_strong`, the probabilities of weakly and strongly
 beneficial mutations, so that the model's fixation α equals `param.α` and its weak
 part equals `param.α_weak` at the current `B` and `θ_flanking`.
 
 `NLsolve.nlsolve` runs from `warm_start`, then `[0.001, 0.001]`, `[0, 0.001]` and
-`[0.001, 0]`; negative roots are clamped to 0 and the first root whose residuals are
-`<= atol` is kept. A zero component is accepted when it satisfies the system (the right
-root when `α_weak == 0` or `α_weak == α`). Returns the tuple `(p_weak, p_strong)`.
+`[0.001, 0]`, at most `iterations` steps each; negative roots are clamped to 0 and the
+first root whose residuals are `<= atol` is kept. A zero component is accepted when it
+satisfies the system (the right root when `α_weak == 0` or `α_weak == α`).
 
-Throws an `ErrorException` if no start reaches `atol`; `rates` then drops the model.
+If no start reaches `atol`, the exact root of the system is tried: every fixation rate is
+linear in `p_weak` and `p_strong`, so it has a closed form (`_ppos_linear`). nlsolve
+fails where the deleterious DFE fixes almost nothing (shape above ~0.8 at the default
+coefficients): the root is then `p ~ 1e-7` or smaller, far below every start. The closed
+form runs only after nlsolve has failed, so a model nlsolve solves keeps its bits.
+Converging starts take <= 12 steps at the default prior; the cap stops failing ones,
+which would otherwise run nlsolve's default 1000 steps.
+
+Returns the tuple `(p_weak, p_strong)`. Throws an `ErrorException` if neither route
+reaches `atol` (a non-finite fixation rate, e.g. `shape == 1`, the pole of the Hurwitz
+zeta); `rates` then drops the model.
 """
-function set_ppos!(param::parameters; warm_start::Vector{Float64} = [0.0, 0.0],
-                   atol::Float64 = 1e-6)
+function set_ppos!(param::parameters; kw...)
+    _set_ppos!(param; kw...)
+    return param.p_weak, param.p_strong
+end
+
+# set_ppos!, returning the route that solved it: `:nlsolve` or `:linear`. `rates` reuses
+# a root as the next draw's starting point only if nlsolve found it.
+function _set_ppos!(param::parameters; warm_start::Vector{Float64} = [0.0, 0.0],
+                    atol::Float64 = 1e-6, iterations::Int = 50)
     function f!(F, x, param=param)
         F[1] = alpha_exp_sim_tot(param, x[1], x[2]) - param.α
         F[2] = alpha_exp_sim_low(param, x[1], x[2]) - param.α_weak
@@ -238,7 +255,7 @@ function set_ppos!(param::parameters; warm_start::Vector{Float64} = [0.0, 0.0],
     best_l, best_h, best_err = 0.0, 0.0, Inf
     @inbounds for start in (warm_start, [0.001, 0.001], [0.0, 0.001], [0.001, 0.0])
         l, h = try
-            nlsolve(f!, collect(float.(start))).zero
+            nlsolve(f!, collect(float.(start)); iterations = iterations).zero
         catch
             continue
         end
@@ -252,11 +269,48 @@ function set_ppos!(param::parameters; warm_start::Vector{Float64} = [0.0, 0.0],
         err <= atol && break           # a zero component is fine if it satisfies the system
     end
 
+    route = :nlsolve
+    if !(best_err <= atol)
+        l, h = _ppos_linear(param)
+        rt, rl = _ppos_residual(param, l, h)
+        err = max(rt, rl)
+        if err < best_err
+            best_l, best_h, best_err = l, h, err
+            route = :linear
+        end
+    end
+
     best_err <= atol || throw(ErrorException(
         "set_ppos! did not reach α=$(param.α), α_weak=$(param.α_weak) " *
         "(best residual $(best_err)); model rejected"))
 
     param.p_weak, param.p_strong = best_l, best_h
+    return route
+end
+
+"""
+	_ppos_linear(param) -> (p_weak, p_strong)
+
+Exact root of `set_ppos!`'s system. Every fixation rate is linear in ppos:
+`F_weak = a·p_weak/2`, `F_strong = b·p_strong/2`, `F_neg = c·(1 - (p_weak + p_strong)/2)`
+with `a = fix_pos_sim(γ_weak, 1)`, `b = fix_pos_sim(γ_strong, 1)`, `c = fix_neg(0)`.
+Setting `F_weak = α_weak·D`, `F_strong = (α - α_weak)·D`, `F_neg = (1 - α)·D` gives
+
+```
+D = c / ((1 - α) + c·(α_weak/a + (α - α_weak)/b)),
+p_weak = 2·α_weak·D/a,   p_strong = 2·(α - α_weak)·D/b.
+```
+
+Negative components (only if `α_weak > α`) are clipped to 0, as in `set_ppos!`; the
+caller checks the residual.
+"""
+function _ppos_linear(param::parameters)
+    a = fix_pos_sim(param, param.γ_weak, 1.0)
+    b = fix_pos_sim(param, param.γ_strong, 1.0)
+    c = fix_neg(param, 0.0)
+    αt, αw = param.α, param.α_weak
+    D = c / ((1.0 - αt) + c * (αw / a + (αt - αw) / b))
+    return max(2.0 * αw * D / a, 0.0), max(2.0 * (αt - αw) * D / b, 0.0)
 end
 
 # Binomial matrices from binom_op, so they are built once per (N, n, B).
