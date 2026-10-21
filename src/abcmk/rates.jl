@@ -61,13 +61,15 @@ end
 # Reported by `_read_rates` for files that do not record their model.
 const _NO_PROVENANCE = "unrecorded (file predates option provenance)"
 
-# DFE shape prior of `rates`. f = 2 gives exactly `Uniform(shape*2^-2, shape*2^2)`: powers
-# of two are exact, so tables built before the keyword keep their bits.
+# DFE shape prior of `rates`: `Uniform(shape * 2^-f, shape * 2^f)`, f = `shape_factor`,
+# the half-width of the paper's exponent afac (a = a0 * 2^afac, afac on [-2, 2]). f = 2
+# gives exactly `Uniform(shape/4, 4 shape)` (powers of two are exact), so tables built
+# before the keyword keep their bits.
 function _shape_prior(shape::Real, shape_factor::Real)
-    (isfinite(shape_factor) && shape_factor >= 1) ||
-        throw(ArgumentError("shape_factor must be finite and >= 1, got $shape_factor"))
+    (isfinite(shape_factor) && shape_factor > 0) ||
+        throw(ArgumentError("shape_factor must be finite and > 0, got $shape_factor"))
     f = Float64(shape_factor)
-    return Uniform(shape * f^-2, shape * f^2)
+    return Uniform(shape * 2.0^-f, shape * 2.0^f)
 end
 
 """
@@ -416,15 +418,16 @@ seed, the table reproduces only at the same thread count.
  - `α::Vector{Float64}`: range of `param.α`, drawn uniformly and rounded to 2 digits.
  - `ρ`: `nothing` keeps `param.ρ`; a positive number fixes ρ; `[lo, hi]` draws
    `ρ ~ Uniform(lo, hi)` per model. A fixed ρ draws no random numbers.
- - `shape_factor::Real`: width of the DFE shape prior (default 2, must be >= 1); see
-   below.
+ - `shape_factor::Real`: width of the DFE shape prior, as the exponent half-width
+   (default 2, must be > 0); see below.
  - `B_bins::Vector{Float64}`: background selection values (37 by default).
  - `weak::Bool`: draw the weak share of α from `0:0.05:1` (`α_weak = α * share`);
    `false` sets `α_weak = 0`.
  - `basesize`, `distributed`: not used.
 
-The DFE shape is drawn from `Uniform(shape/f^2, f^2 shape)` with `f = shape_factor`
-(default 2: `[shape/4, 4 shape]`). Above shape ~1 at the default coefficients almost no
+The DFE shape is drawn from `Uniform(shape 2^-f, shape 2^f)` with `f = shape_factor`
+(default 2: `[shape/4, 4 shape]`, the paper's range for `afac` in `a = a0 2^afac`; the
+paper draws `afac` uniformly, which makes its shape prior log-uniform). Above shape ~1 at the default coefficients almost no
 deleterious mutation fixes, so such a draw keeps a realistic Dn/Ds only at an α close to 1.
 All coefficients are `2N` times the heterozygote selection coefficient.
 
