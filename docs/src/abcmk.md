@@ -55,10 +55,10 @@ Each iteration draws a model from the priors and solves its expected SFS (at the
 | `γ_weak`, `γ_strong` | `[1, 10]`, `[100, 1000]` | weakly / strongly beneficial `2 N s` |
 | `γ_flanking` | `[-1000, -500]` | flanking `2 N s` |
 | `rho` | `nothing` (= `param.ρ`) | a value, or `[lo, hi]` for a uniform prior |
-| `shape_factor` | `2` | DFE shape `~ U(shape/f^2, f^2 shape)` |
+| `shape_factor` | `2` | DFE shape `~ U(shape 2^-f, shape 2^f)` |
 | `B_bins` | 0.1 to 0.975 by 0.025, and 0.999 | background selection values |
 
-The DFE shape is drawn uniformly in `[shape/f^2, f^2 shape]` (`f = shape_factor`, by
+The DFE shape is drawn uniformly in `[shape 2^-f, shape 2^f]` (`f = shape_factor`, by
 default `[shape/4, 4 shape]`), and the weak share of alpha from `0:0.05:1` (`weak = false`
 for none). Above shape ~1 the deleterious DFE fixes almost nothing, so at the default α
 prior such draws imply a Dn/Ds of 1e-3 or less: a wider `shape_factor` adds rows that real

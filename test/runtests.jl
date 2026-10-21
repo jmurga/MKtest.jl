@@ -268,10 +268,12 @@ import Logging
     @testset "shape_factor widens the DFE shape prior" begin
         # f = 2 is the published window exactly (powers of two), so old tables keep bits.
         u2 = MKtest._shape_prior(0.184, 2)
-        @test (u2.a, u2.b) == (0.184 * 2^-2, 0.184 * 2^2)
+        @test (u2.a, u2.b) === (0.184 / 4, 0.184 * 4)
         u3 = MKtest._shape_prior(0.184, 3)
-        @test u3.a ≈ 0.184 / 9 && u3.b ≈ 0.184 * 9
-        @test_throws ArgumentError MKtest._shape_prior(0.184, 0.5)
+        @test (u3.a, u3.b) === (0.184 / 8, 0.184 * 8)
+        @test MKtest._shape_prior(0.184, 2.5).b ≈ 0.184 * 2^2.5
+        @test_throws ArgumentError MKtest._shape_prior(0.184, 0)
+        @test_throws ArgumentError MKtest._shape_prior(0.184, -1)
         @test_throws ArgumentError MKtest._shape_prior(0.184, Inf)
         od = mktempdir()
         mkp() = MKtest.parameters(N = 500, n = 50, shape = 0.184, dac = [2, 4, 5, 10, 20, 50])
