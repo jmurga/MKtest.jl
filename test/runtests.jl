@@ -1,6 +1,6 @@
 using MKtest
 using Test
-using DataFrames: nrow, names, propertynames
+using DataFrames: nrow, names, propertynames, Not
 using JLD2
 using Random: seed!, MersenneTwister
 using DelimitedFiles: readdlm, writedlm
@@ -485,7 +485,7 @@ import Logging
             res = MKtest.abcmk(p(), sfs, div; h5_file = tab, summstat_size = ss,
                                output_folder = joinpath(td, method), tol = tl,
                                abc_method = method, sampling = MKtest.IndependentSampling(),
-                               row_prior = MKtest.TableRowPrior(), stat = "mode")
+                               row_prior = MKtest.TableRowPrior(), stat = MKtest.PosteriorMode())
             @test issorted(res[:inference].α)
         end
 
@@ -493,6 +493,101 @@ import Logging
         one(s, d) = (seed!(3); MKtest.abcmk(p(), s, d; h5_file = tab, summstat_size = 2000,
                                             output_folder = joinpath(td, "one"), tol = 100))
         @test one(sfs[1], div[1])[:inference] == one([sfs[1]], [div[1]])[:inference]
+
+        # --- alpha composition: α == α_weak + α_strong through the ABC ---------------
+        # α_strong is α - α_weak per Poisson draw (summary_statistics.jl), rounded to 5
+        # digits (gap <= 1.5e-5 per row); the ABCreg regression is linear per column, so
+        # each posterior row keeps its rounding gap, and the mean is additive. The median
+        # and the KDE mode are per-column statistics and do not add up, so Composed()
+        # derives the strong component of the point estimates. The driver
+        # stuck_on_cell/scripts/src/alpha_composition.jl ran the same checks at full scale.
+        @testset "alpha composition" begin
+            cn = [:α_weak, :α_strong, :α, :ωₐ_weak, :ωₐ_strong, :ωₐ, :ωₙₐ,
+                  :γ_deleterious, :β, :γ_weak, :γ_strong, :B]
+            gap3(m) = maximum(abs.(m[:, 3] .- m[:, 1] .- m[:, 2]))
+            # the stages of one dataset: summaries file, ABCreg posterior, point estimates
+            function stages(s, d, tag)
+                of = joinpath(td, tag)
+                seed!(5)
+                MKtest.summary_statistics(p(), [s], [d]; h5_file = tab, summstat_size = 3000,
+                                          output_folder = of)
+                m = MKtest.read_gz(joinpath(of, "summstat_1.txt.gz"))
+                target = vec(MKtest.read_gz(joinpath(of, "alphas_1.txt.gz")))
+                P = size(m, 2) - length(target)
+                @test P in (8, 12)
+                @test gap3(m) <= 1.5e-5
+                post = MKtest.abcreg_loclinear(target, m[:, 1:P], m[:, (P + 1):end]; tol = 200)
+                @test size(post, 1) == 200
+                @test gap3(post) <= 2e-5
+                pdf = [MKtest.DataFrame(post, P == 12 ? cn : cn[[1, 2, 3, 8, 9, 10, 11, 12]])]
+                mdf = Matrix(pdf[1])
+                for st in (MKtest.PosteriorMean(), MKtest.PosteriorMedian(), MKtest.PosteriorMode(),
+                           MKtest.PosteriorQuantile(0.975))
+                    # Composed: exact composition, α_strong derived
+                    r = MKtest.summary_abc(pdf; stat = st, components = MKtest.Composed())[:inference]
+                    @test r.α[1] - r.α_weak[1] - r.α_strong[1] == 0
+                    @test isfinite(r.α_strong[1])
+                    # Marginal (default): α_strong is the statistic of its own column
+                    r = MKtest.summary_abc(pdf; stat = st)[:inference]
+                    @test r.α_strong[1] == MKtest.point_estimate(st, mdf[:, 2])
+                end
+                # the marginal mean composes to rounding without Composed
+                r = MKtest.summary_abc(pdf; stat = MKtest.PosteriorMean())[:inference]
+                @test abs(r.α[1] - r.α_weak[1] - r.α_strong[1]) <= 2e-5
+                return post
+            end
+            stages(sfs[1], div[1], "comp_fixture")
+
+            # a synthetic set with a known composition: the forward model's expected spectra
+            # and fixation rates at α 0.4, α_weak 0.2 (as analytical_alpha computes them),
+            # scaled and Poisson-sampled; truth α_weak + α_strong == α by construction
+            q = p(); q.α = 0.4; q.α_weak = 0.2
+            binom = MKtest.binom_op(q)
+            MKtest.set_θ!(q); MKtest.set_ppos!(q)
+            fN   = q.B * MKtest.fix_neut(q)
+            fNeg = q.B * MKtest.fix_neg(q, 0.5 * q.p_strong + 0.5 * q.p_weak)
+            fL   = MKtest.fix_pos_sim(q, q.γ_weak, 0.5 * q.p_weak)
+            fH   = MKtest.fix_pos_sim(q, q.γ_strong, 0.5 * q.p_strong)
+            neut = MKtest.sfs_neut(q, binom)
+            sel  = MKtest.sfs_pos(q, q.γ_strong, q.p_strong, binom) .+
+                   MKtest.sfs_pos(q, q.γ_weak, q.p_weak, binom) .+
+                   MKtest.sfs_neg(q, q.p_strong + q.p_weak, binom)
+            dn, ds = fNeg + fL + fH, fN
+            truth = (α_weak = fL / dn, α_strong = fH / dn, α = (fL + fH) / dn)
+            @test truth.α_weak + truth.α_strong == truth.α
+            # the label is reached to ~B: B multiplies the deleterious fixations here (as in
+            # rates and analytical_alpha) but not inside the ppos solve
+            @test isapprox(truth.α, 0.4; atol = 1e-3) && isapprox(truth.α_weak, 0.2; atol = 1e-3)
+            @test isapprox(1 .- (ds / dn) .* (sel ./ neut),
+                           MKtest.analytical_alpha(MKtest.copy_param(q))[1]; rtol = 1e-10)
+            seed!(9)
+            sc_p, sc_d = 2e4 / sum(neut), 5e3 / (dn + ds)
+            syn_sfs = hcat(1:(q.nn - 1), MKtest.pois_rand.(sel .* sc_p), MKtest.pois_rand.(neut .* sc_p))
+            syn_div = [Float64(MKtest.pois_rand(dn * sc_d)), Float64(MKtest.pois_rand(ds * sc_d)),
+                       best["div"][3], best["div"][4]]
+            @test only(MKtest.valid_data(p(), [syn_sfs], [syn_div]))   # main: a Bool mask
+            post = stages(Float64.(syn_sfs), syn_div, "comp_synthetic")
+            # the posterior holds the truth of each component and of the composition
+            for (j, tv) in enumerate(truth)
+                @test minimum(post[:, j]) <= tv <= maximum(post[:, j])
+            end
+            # abcmk passes both keywords on: Composed composes exactly with every stat, and
+            # the default Marginal is the same posterior summarised column by column
+            for st in (MKtest.PosteriorMedian(), MKtest.PosteriorMode(), MKtest.PosteriorMean())
+                seed!(10)
+                rc = MKtest.abcmk(p(), syn_sfs, syn_div; h5_file = tab, summstat_size = 2000,
+                                  output_folder = joinpath(td, "comp_abcmk"), tol = 100,
+                                  stat = st, components = MKtest.Composed())[:inference]
+                @test rc.α[1] - rc.α_weak[1] - rc.α_strong[1] == 0
+                @test rc.ωₐ[1] - rc.ωₐ_weak[1] - rc.ωₐ_strong[1] == 0
+                seed!(10)
+                rm = MKtest.abcmk(p(), syn_sfs, syn_div; h5_file = tab, summstat_size = 2000,
+                                  output_folder = joinpath(td, "comp_abcmk"), tol = 100,
+                                  stat = st)[:inference]
+                @test rm.α[1] == rc.α[1] && rm.α_weak[1] == rc.α_weak[1]
+                @test rm.γ_weak[1] == rc.γ_weak[1]
+            end
+        end
     end
 
     # --- summary_abc --------------------------------------------------------------
@@ -501,8 +596,9 @@ import Logging
         cn = [:α_weak, :α_strong, :α, :γ_deleterious, :β, :γ_weak, :γ_strong, :B]
         post = [MKtest.DataFrame(rand(rng, 500, 8), cn) for _ in 1:3]
         q(v, p) = MKtest.quantile(v, p)
+        # default: PosteriorMedian, Marginal; :stats are the seven marginal statistics
         for (k, P) in ((1, post[1:1]), (3, post), (3, Matrix.(post)))
-            r = MKtest.summary_abc(P; stat = "median")
+            r = MKtest.summary_abc(P)
             @test nrow(r[:inference]) == k && nrow(r[:quantiles]) == k
             @test nrow(r[:stats]) == 7k
             @test r[:stats].Stats[1:7] ==
@@ -512,14 +608,61 @@ import Logging
                 blk = r[:stats][(7i - 6):7i, c]
                 @test blk ≈ [minimum(v), q(v, 0.025), MKtest.median(v), MKtest.mean(v),
                              blk[5], q(v, 0.975), maximum(v)]
+                @test blk[5] == vec(MKtest.get_mode(post[i]))[findfirst(==(c), cn)]
                 @test r[:inference][i, c] == MKtest.median(v)
             end
         end
-        # the mode row is get_mode, the inference row follows `stat`
-        r = MKtest.summary_abc(post[1:1]; stat = "Mode")
+        # each estimator is its :stats row; PosteriorQuantile(0)/(1) are min/max
+        for (st, row) in ((MKtest.PosteriorMedian(), 3), (MKtest.PosteriorMean(), 4),
+                          (MKtest.PosteriorMode(), 5), (MKtest.PosteriorQuantile(0.025), 2),
+                          (MKtest.PosteriorQuantile(0.975), 6), (MKtest.PosteriorQuantile(0), 1),
+                          (MKtest.PosteriorQuantile(1), 7))
+            r = MKtest.summary_abc(post; stat = st)
+            for i in 1:3
+                @test Vector(r[:inference][i, :]) == Vector(r[:stats][7(i - 1) + row, cn])
+            end
+        end
+        # the mode row is get_mode; :quantiles starts with the point estimate
+        r = MKtest.summary_abc(post[1:1]; stat = MKtest.PosteriorMode())
         @test vec(Matrix(r[:inference])) == vec(MKtest.get_mode(post[1]))
         @test startswith(r[:quantiles][1, :α], string(round(r[:inference][1, :α], digits = 3)) * " [")
-        @test_throws ArgumentError MKtest.summary_abc(post; stat = "foo")
+        # the median type and the 0.5 quantile agree to rounding
+        @test isapprox(Matrix(MKtest.summary_abc(post; stat = MKtest.PosteriorQuantile(0.5))[:inference]),
+                       Matrix(MKtest.summary_abc(post)[:inference]); rtol = 1e-14)
+        # Composed: α_strong = α - α_weak in :inference and :quantiles; :stats unchanged
+        for st in (MKtest.PosteriorMedian(), MKtest.PosteriorMode(), MKtest.PosteriorQuantile(0.9))
+            rm = MKtest.summary_abc(post; stat = st)
+            rc = MKtest.summary_abc(post; stat = st, components = MKtest.Composed())
+            @test rc[:stats] == rm[:stats]
+            @test rc[:inference].α_strong == rc[:inference].α .- rc[:inference].α_weak
+            @test rc[:inference].α_strong != rm[:inference].α_strong
+            @test rc[:inference][:, Not(:α_strong)] == rm[:inference][:, Not(:α_strong)]
+            @test rc[:quantiles][:, Not(:α_strong)] == rm[:quantiles][:, Not(:α_strong)]
+            @test startswith(rc[:quantiles][1, :α_strong],
+                             string(round(rc[:inference][1, :α_strong], digits = 3)) * " [")
+        end
+        # the ω block composes the same way; a NaN ω stays NaN and α still composes
+        c12 = [:α_weak, :α_strong, :α, :ωₐ_weak, :ωₐ_strong, :ωₐ, :ωₙₐ,
+               :γ_deleterious, :β, :γ_weak, :γ_strong, :B]
+        p12 = [MKtest.DataFrame(rand(rng, 300, 12), c12)]
+        r12 = MKtest.summary_abc(p12; components = MKtest.Composed())[:inference]
+        @test r12.ωₐ[1] - r12.ωₐ_weak[1] - r12.ωₐ_strong[1] == 0
+        @test r12.ωₙₐ[1] == MKtest.median(p12[1].ωₙₐ)
+        p12[1][:, [:ωₐ_weak, :ωₐ_strong, :ωₐ, :ωₙₐ]] .= NaN
+        r12 = MKtest.summary_abc(p12; components = MKtest.Composed())[:inference]
+        @test isnan(r12.ωₐ_strong[1]) && r12.α[1] - r12.α_weak[1] - r12.α_strong[1] == 0
+        # types only: strings are rejected; PosteriorQuantile checks p
+        @test_throws TypeError MKtest.summary_abc(post; stat = "median")
+        @test_throws TypeError MKtest.summary_abc(post; components = "composed")
+        @test_throws ArgumentError MKtest.PosteriorQuantile(1.5)
+        @test_throws ArgumentError MKtest.PosteriorQuantile(-0.1)
+        @test MKtest.PosteriorQuantile(1).p === 1.0
+        # a user-defined estimator needs only a type and a point_estimate method
+        @eval struct TrimmedMean10 <: MKtest.AbstractPointEstimate end
+        @eval MKtest.point_estimate(::TrimmedMean10, v::Vector{Float64}) =
+            MKtest.mean(sort(v)[(length(v) ÷ 10 + 1):(length(v) - length(v) ÷ 10)])
+        r = MKtest.summary_abc(post; stat = TrimmedMean10())[:inference]
+        @test r[1, :β] == MKtest.mean(sort(post[1].β)[51:450])
     end
 
     # --- case/control empirical test ----------------------------------------------

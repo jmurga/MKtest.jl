@@ -114,11 +114,34 @@ The defaults are the measured best configuration:
 |---|---|---|
 | `sampling` | `RjSampling()`: the data's synonymous SFS distortion is carried onto the model's spectra | `IndependentSampling()`: independent Poisson draws (v1.0.0) |
 | `row_prior` | `FlatAlphaPrior()`: table rows drawn flat in alpha within each `B` | `TableRowPrior()`: rows as drawn (v1.0.0) |
-| `stat` | `"median"` | `"mode"` (v1.0.0), `"mean"` |
+| `stat` | `MKtest.PosteriorMedian()` | `MKtest.PosteriorMode()` (v1.0.0), `MKtest.PosteriorMean()`, `MKtest.PosteriorQuantile(p)` |
+| `components` | `MKtest.Marginal()`: every column summarised on its own | `MKtest.Composed()`: `α_strong = α - α_weak` of the point estimate |
 | `alpha`, `B_bins` | the whole table | restrict the prior to an alpha range or `B` values |
 
-`sampling = MKtest.IndependentSampling(), row_prior = MKtest.TableRowPrior(), stat = "mode"`
-reproduces ABC-MK v1.0.0.
+`sampling = MKtest.IndependentSampling(), row_prior = MKtest.TableRowPrior(),
+stat = MKtest.PosteriorMode()` reproduces ABC-MK v1.0.0. `stat` and `components` are types;
+a string is a `TypeError`.
+
+### Weak and strong components: `components`
+
+Every posterior draw satisfies `α = α_weak + α_strong`, but the median, the mode or a
+quantile of the three marginal posteriors need not add up: on 825-gene sets the median
+misses the identity by 0.01-0.02 and the mode by 0.03-0.05. `components = MKtest.Composed()`
+reports `α_strong = α - α_weak` (and `ωₐ_strong = ωₐ - ωₐ_weak`) of the point estimates, so
+they compose exactly. `α`, `α_weak`, the other parameters, the 95% intervals in
+`:quantiles` and every row of `:stats` are the same under both rules. The posterior mean is
+linear, so `PosteriorMean()` composes (to the 5-digit rounding of the summaries) under
+`Marginal()` too.
+
+```julia
+res = MKtest.abcmk(param, sfs, div; h5_file = "rates_tgp.jld2", summstat_size = 1e5,
+                   stat = MKtest.PosteriorMode(), components = MKtest.Composed())
+```
+
+On SLiM resamples (two-epoch and Tennessen histories, 100 per cell), `Composed()` lowered
+the RMSE of `α_strong` in 6 of 8 two-epoch cells with α > 0 and raised it in all 10 α = 0
+cells, where the marginal `α_strong` sits at 0 and `Composed()` passes the spurious α of the
+total on to it. `Marginal()` stays the default.
 
 ### Without files: `in_memory = true`
 

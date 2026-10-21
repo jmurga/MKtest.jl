@@ -187,77 +187,197 @@ end
 
 
 
-# The seven statistics of one posterior column, in `summary_abc`'s order. NaN for a column
-# with NaN: an ω the ABC did not estimate (see `_with_ω_columns`).
-function _posterior_stats(c::AbstractVector)
-    any(isnan, c) && return fill(NaN, 7)
-    v = Vector{Float64}(c)
-    y = kde(v)
-    mode = collect(y.x)[y.density.==maximum(y.density)][1]
-    return [minimum(v), only(q_lower(v)), median(v), mean(v), mode, only(q_upper(v)), maximum(v)]
+"""
+    AbstractPointEstimate
+
+How [`summary_abc`](@ref) (and so [`abcmk`](@ref)) reduces each posterior column to the
+point estimate in `:inference`: [`PosteriorMedian`](@ref) (default), [`PosteriorMean`](@ref),
+[`PosteriorMode`](@ref) or [`PosteriorQuantile`](@ref). A new estimator is a subtype plus
+one method, `MKtest.point_estimate(::MyEstimate, v::Vector{Float64}) -> Float64`.
+"""
+abstract type AbstractPointEstimate end
+
+"""
+    PosteriorMedian()
+
+Posterior median of each column: the ABC-MK point estimate (default).
+"""
+struct PosteriorMedian <: AbstractPointEstimate end
+
+"""
+    PosteriorMean()
+
+Posterior mean of each column. Linear, so it keeps `α = α_weak + α_strong` (to the 5-digit
+rounding of the summaries) without [`Composed`](@ref).
+"""
+struct PosteriorMean <: AbstractPointEstimate end
+
+"""
+    PosteriorMode()
+
+Posterior mode of each column, as the R package abc: the maximum of a kernel density
+estimate (KernelDensity.jl defaults). The ABC-MK v1.0.0 point estimate.
+"""
+struct PosteriorMode <: AbstractPointEstimate end
+
+"""
+    PosteriorQuantile(p)
+
+Posterior `p` quantile of each column, `0 <= p <= 1` (Statistics' default definition, the
+one the `:stats` percentile rows use): `PosteriorQuantile(0)` is the minimum,
+`PosteriorQuantile(1)` the maximum, `PosteriorQuantile(0.05)` a one-sided 95% lower bound.
+Under [`Composed`](@ref) the derived strong component, e.g.
+`q_0.975(α) - q_0.975(α_weak)`, is not a quantile of the α_strong posterior and carries no
+coverage probability.
+"""
+struct PosteriorQuantile <: AbstractPointEstimate
+    p::Float64
+    function PosteriorQuantile(p::Real)
+        0 <= p <= 1 || throw(ArgumentError("PosteriorQuantile: p = $p is outside [0, 1]"))
+        return new(Float64(p))
+    end
 end
 
 """
-    summary_abc(posteriors; stat = "Mode") -> OrderedDict
+    point_estimate(est::AbstractPointEstimate, v::Vector{Float64}) -> Float64
+
+The point estimate `est` of one posterior column `v`.
+"""
+function point_estimate end
+point_estimate(::PosteriorMedian, v::Vector{Float64}) = median(v)
+point_estimate(::PosteriorMean, v::Vector{Float64}) = mean(v)
+point_estimate(::PosteriorMode, v::Vector{Float64}) = _kde_mode(v)
+point_estimate(e::PosteriorQuantile, v::Vector{Float64}) = quantile(v, e.p)
+
+# Maximum of a kernel density estimate, the first grid point if several tie (as R abc).
+function _kde_mode(v::Vector{Float64})
+    y = kde(v)
+    return collect(y.x)[y.density.==maximum(y.density)][1]
+end
+
+"""
+    AbstractComponents
+
+How [`summary_abc`](@ref) (and so [`abcmk`](@ref)) reports the weak and strong components
+of α and ωₐ in the point estimate: [`Marginal`](@ref) (default) or [`Composed`](@ref).
+"""
+abstract type AbstractComponents end
+
+"""
+    Marginal()
+
+Each column summarised on its own (default). Every posterior draw satisfies
+`α = α_weak + α_strong`, but the median, the mode and a quantile of the three marginals
+need not add up: on 825-gene sets the median gap is 0.01-0.02 and the mode gap 0.03-0.05.
+"""
+struct Marginal <: AbstractComponents end
+
+"""
+    Composed()
+
+The strong components of the point estimate are derived from the other two,
+`α_strong = α - α_weak` and `ωₐ_strong = ωₐ - ωₐ_weak` (ωₐ only when the posterior has the
+ω block), so `α == α_weak + α_strong` holds exactly in `:inference`. The 95% interval in
+`:quantiles` and every row of `:stats` stay marginal.
+"""
+struct Composed <: AbstractComponents end
+
+"""
+    compose!(components::AbstractComponents, point::Vector{Float64}, names) -> point
+
+Apply the components rule to one dataset's point estimates, `point[j]` for column
+`names[j]`.
+"""
+function compose! end
+compose!(::Marginal, point::Vector{Float64}, names) = point
+function compose!(::Composed, point::Vector{Float64}, names)
+    for (w, s, t) in ((:α_weak, :α_strong, :α), (:ωₐ_weak, :ωₐ_strong, :ωₐ))
+        jw, js, jt = findfirst(==(w), names), findfirst(==(s), names), findfirst(==(t), names)
+        any(isnothing, (jw, js, jt)) && continue
+        point[js] = point[jt] - point[jw]
+    end
+    return point
+end
+
+# NaN for a column with NaN: an ω the ABC did not estimate (see `_with_ω_columns`).
+_point(est::AbstractPointEstimate, c::AbstractVector) =
+    any(isnan, c) ? NaN : point_estimate(est, Vector{Float64}(c))
+
+# The seven statistics of one posterior column, in `summary_abc`'s order; NaN as `_point`.
+function _posterior_stats(c::AbstractVector)
+    any(isnan, c) && return fill(NaN, 7)
+    v = Vector{Float64}(c)
+    return [minimum(v), only(q_lower(v)), median(v), mean(v), _kde_mode(v), only(q_upper(v)),
+            maximum(v)]
+end
+
+"""
+    summary_abc(posteriors; stat = PosteriorMedian(), components = Marginal()) -> OrderedDict
 
 Summarise each posterior: minimum, 2.5% quantile, median, mean, mode, 97.5% quantile and
-maximum of every column. The mode is the maximum of a kernel density estimate, as in the
-R package abc. [`abcmk`](@ref) calls it with `stat = "median"`.
+maximum of every column, and one point estimate per column and dataset. The mode is the
+maximum of a kernel density estimate, as in the R package abc.
 
 # Arguments
  - `posteriors`: `Vector{DataFrame}` (as [`ABCreg`](@ref) returns) or
    `Vector{Matrix{Float64}}` with 8 or 12 columns, one posterior per dataset.
 
 # Keywords
- - `stat::String = "Mode"`: point estimate, one of `"Min."`, `"Median"`, `"Mean"`,
-   `"Mode"` or `"Max"` (case-insensitive; `"min"` also works). Anything else throws an
-   `ArgumentError`.
+ - `stat::AbstractPointEstimate = PosteriorMedian()`: the point estimate,
+   [`PosteriorMedian`](@ref)`()` (the ABC-MK point estimate), [`PosteriorMean`](@ref)`()`,
+   [`PosteriorMode`](@ref)`()` (the v1.0.0 point estimate) or
+   [`PosteriorQuantile`](@ref)`(p)`. A string is a `TypeError`.
+ - `components::AbstractComponents = Marginal()`: [`Marginal`](@ref)`()` summarises every
+   column on its own; [`Composed`](@ref)`()` reports `α_strong = α - α_weak` and
+   `ωₐ_strong = ωₐ - ωₐ_weak` of the point estimates, so they compose exactly.
 
 # Returns
 An `OrderedDict` with
- - `:inference`: `DataFrame`, one row per dataset with the chosen statistic of every
+ - `:inference`: `DataFrame`, one row per dataset with the point estimate of every
    parameter;
- - `:quantiles`: the same as strings with the 95% interval, `"0.2 [0.1-0.3]"`, rounded to
-   3 digits;
- - `:stats`: `DataFrame` with a `Stats` column and, per dataset, 7 rows (one per
-   statistic).
+ - `:quantiles`: the point estimates as strings with the marginal 95% interval,
+   `"0.2 [0.1-0.3]"`, rounded to 3 digits;
+ - `:stats`: `DataFrame` with a `Stats` column and, per dataset, 7 rows (one per marginal
+   statistic). Neither `stat` nor `components` changes it.
 """
-function summary_abc(posteriors::Vector{DataFrame}; stat::String = "Mode")
+summary_abc(posteriors::Vector{DataFrame}; stat::AbstractPointEstimate = PosteriorMedian(),
+            components::AbstractComponents = Marginal()) =
+    _summary_abc(posteriors, stat, components)
+
+function summary_abc(posteriors::Vector{Matrix{Float64}}; kwargs...)
+    c_names(x) = size(x, 2) == 12 ?
+        [:α_weak, :α_strong, :α, :ωₐ_weak, :ωₐ_strong, :ωₐ, :ωₙₐ, :γ_deleterious, :β, :γ_weak, :γ_strong, :B] :
+        [:α_weak, :α_strong, :α, :γ_deleterious, :β, :γ_weak, :γ_strong, :B]
+    return summary_abc([DataFrame(x, c_names(x)) for x in posteriors]; kwargs...)
+end
+
+function _summary_abc(posteriors::Vector{DataFrame}, est::AbstractPointEstimate,
+                      components::AbstractComponents)
     @info "Computing statistics over posteriors distributions"
 
     labels = ["Min.", "2.5% Perc.", "Median", "Mean", "Mode", "97.5% Perc.", "Max"]
-    key = uppercasefirst(lowercase(stat))
-    key = key == "Min" ? "Min." : key
-    key in labels || throw(ArgumentError(
-        "stat must be one of Min., Median, Mean, Mode or Max; got \"$stat\""))
-
     c_names = propertynames(first(posteriors))
 
-    # One 7 x P block per dataset, rows in the order of `labels`.
+    # One 7 x P block per dataset, rows in the order of `labels`, and one point estimate
+    # per column with the components rule applied.
     blocks = ThreadsX.map(x -> reduce(hcat, _posterior_stats.(eachcol(x))), posteriors)
+    points = ThreadsX.map(x -> compose!(components, [_point(est, c) for c in eachcol(x)], c_names),
+                          posteriors)
 
     df = vcat([hcat(DataFrame(:Stats => labels), DataFrame(b, c_names)) for b in blocks]...)
 
-    i_stat = findfirst(==(key), labels)
-    inference = DataFrame(reduce(vcat, (b[i_stat:i_stat, :] for b in blocks)), c_names)
+    inference = DataFrame(reduce(vcat, (permutedims(p) for p in points)), c_names)
     quantiles = DataFrame(
-        reduce(vcat, (permutedims(string.(round.(b[i_stat, :], digits = 3), " [",
+        reduce(vcat, (permutedims(string.(round.(p, digits = 3), " [",
                                           round.(b[2, :], digits = 3), "-",
                                           round.(b[6, :], digits = 3), "]"))
-                      for b in blocks)),
+                      for (p, b) in zip(points, blocks))),
         c_names,
     )
 
     length(posteriors) == 1 && @info df
 
     return OrderedDict(:inference => inference, :quantiles => quantiles, :stats => df)
-end
-
-function summary_abc(posteriors::Vector{Matrix{Float64}}; stat::String = "Mode")
-    c_names(x) = size(x, 2) == 12 ?
-        [:α_weak, :α_strong, :α, :ωₐ_weak, :ωₐ_strong, :ωₐ, :ωₙₐ, :γ_deleterious, :β, :γ_weak, :γ_strong, :B] :
-        [:α_weak, :α_strong, :α, :γ_deleterious, :β, :γ_weak, :γ_strong, :B]
-    return summary_abc([DataFrame(x, c_names(x)) for x in posteriors]; stat = stat)
 end
 
 #############

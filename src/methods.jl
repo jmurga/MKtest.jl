@@ -799,8 +799,8 @@ end
 """
     abcmk(param::parameters, sfs, divergence; h5_file (or rates), summstat_size, output_folder = "",
           alpha = nothing, B_bins = nothing, tol = 1000, abc_method = "abcreg",
-          in_memory = false, rm_summaries = true, stat = "median", sampling = RjSampling(),
-          row_prior = FlatAlphaPrior())
+          in_memory = false, rm_summaries = true, stat = PosteriorMedian(),
+          components = Marginal(), sampling = RjSampling(), row_prior = FlatAlphaPrior())
 
 ABC-MK inference (Murga-Moreno et al. 2024): posterior distributions of alpha, its weak
 and strong components and the DFE parameters for each dataset.
@@ -842,15 +842,20 @@ each dataset; [`summary_abc`](@ref) summarizes the posteriors.
    faster for many datasets (case/control).
  - `rm_summaries::Bool`: delete the summary statistics files afterwards (and, for
    `"abcreg"`, the posterior files).
- - `stat::String`: point estimate taken from each posterior: `"Min."`, `"Median"`,
-   `"Mean"`, `"Mode"` or `"Max"`, case-insensitive.
+ - `stat::AbstractPointEstimate`: the point estimate of each posterior column,
+   [`PosteriorMedian`](@ref)`()` (default), [`PosteriorMean`](@ref)`()`,
+   [`PosteriorMode`](@ref)`()` (v1.0.0) or [`PosteriorQuantile`](@ref)`(p)`.
+ - `components::AbstractComponents`: [`Marginal`](@ref)`()` (default) summarises each column
+   on its own; [`Composed`](@ref)`()` reports `α_strong = α - α_weak` and
+   `ωₐ_strong = ωₐ - ωₐ_weak` of the point estimates, so `α == α_weak + α_strong` holds
+   exactly in `:inference` (see [`summary_abc`](@ref)).
  - `sampling::AbstractPoissonSampling`: [`RjSampling`](@ref) or
    [`IndependentSampling`](@ref).
  - `row_prior::AbstractRowPrior`: [`FlatAlphaPrior`](@ref) or [`TableRowPrior`](@ref).
 
-The defaults (`RjSampling()`, `FlatAlphaPrior()`, `"median"`) are the configuration
+The defaults (`RjSampling()`, `FlatAlphaPrior()`, `PosteriorMedian()`) are the configuration
 measured against SLiM in the two-epoch and Tennessen benchmarks. ABC-MK v1.0.0 is
-`sampling = IndependentSampling(), row_prior = TableRowPrior(), stat = "mode"`.
+`sampling = IndependentSampling(), row_prior = TableRowPrior(), stat = PosteriorMode()`.
 
 Throws an `AssertionError` for another `abc_method`, a DAC of 1 in `param.dac`, or
 filters that leave fewer than `summstat_size` table rows, and an
@@ -860,11 +865,11 @@ warning, so the rows then no longer follow the dataset order.
 
 # Returns
 `OrderedDict` from [`summary_abc`](@ref):
- - `:inference`: `DataFrame`, one row per dataset with the `stat` of each parameter:
+ - `:inference`: `DataFrame`, one row per dataset with the point estimate of each parameter:
    `α_weak, α_strong, α, ωₐ_weak, ωₐ_strong, ωₐ, ωₙₐ, γ_deleterious, β, γ_weak, γ_strong, B`. The
    four ω columns are NaN for a dataset with too little divergence to define ω in every
    draw (a draw with Ds = 0 and no adaptive fixation); the other columns are unaffected.
- - `:quantiles`: the same values as strings with the 95% interval, `"0.2 [0.1-0.3]"`.
+ - `:quantiles`: the same values as strings with the marginal 95% interval, `"0.2 [0.1-0.3]"`.
  - `:stats`: Min., 2.5% Perc., Median, Mean, Mode, 97.5% Perc. and Max. of every
    parameter, 7 rows per dataset with a `Stats` column.
 """
@@ -882,7 +887,8 @@ function abcmk(
     abc_method::String="abcreg",
     in_memory::Bool=false,
     rm_summaries::Bool=true,
-    stat::String="median",
+    stat::AbstractPointEstimate=PosteriorMedian(),
+    components::AbstractComponents=Marginal(),
     sampling::AbstractPoissonSampling=RjSampling(),
     row_prior::AbstractRowPrior=FlatAlphaPrior(),
 )
@@ -898,7 +904,7 @@ function abcmk(
         if abc_method == "abc" && all(isnan.(posteriors[1][:,1]))
             foreach(df -> foreach(c -> replace!(c, NaN => 0.0), eachcol(df)), posteriors)
         end
-        return summary_abc(posteriors, stat=stat)
+        return summary_abc(posteriors; stat, components)
     end
     isempty(output_folder) && throw(ArgumentError("output_folder is required unless in_memory = true"))
 
@@ -914,7 +920,7 @@ function abcmk(
         end
     end
 
-    df_abcmk = summary_abc(posteriors,stat=stat)
+    df_abcmk = summary_abc(posteriors; stat, components)
 
     return df_abcmk
 end
