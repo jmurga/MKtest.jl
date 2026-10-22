@@ -60,8 +60,8 @@ end
 
 """
     abcmk N n data rates_file output_folder [--genes file] [--dac ...] [--cutoff 0.0,1.0]
-          [--summsize 100000] [--tol 1000] [--method abcreg] [--stat median]
-          [--components marginal]
+          [--summsize 100000] [--tol 1000] [--method abcreg] [--stat mode]
+          [--components composed]
 
 Run `MKtest.abcmk` on the datasets of `data` (one dataset, or one per line of `--genes`,
 read with `MKtest.parse_sfs`) against the table `rates_file`. Datasets that fail
@@ -80,8 +80,8 @@ Fire.@main function abcmk(N::Int64,
                      summsize::Int64 = 100000,
                      tol::Int64 = 1000,
                      method::String = "abcreg",
-                     stat::String = "median",
-                     components::String = "marginal")
+                     stat::String = "mode",
+                     components::String = "composed")
     param = MKtest.parameters(N = N, n = n, dac = _ints(dac), cutoff = _floats(cutoff))
     sfs, div, _ = MKtest.parse_sfs(data; sample_size = n, cutoff = _floats(cutoff),
                                    gene_list = isempty(genes) ? nothing : genes)

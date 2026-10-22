@@ -55,9 +55,9 @@ parameters.
 
 ```julia
 res_case = MKtest.abcmk(param, [case_sfs], [case_div]; h5_file = "rates_tgp.jld2",
-                        summstat_size = 1e5, output_folder = "abc_case", tol = 1000)
+                        summstat_size = 1e5, tol = 1000)
 res_ctl  = MKtest.abcmk(param, ctl_sfs, ctl_div; h5_file = "rates_tgp.jld2",
-                        summstat_size = 1e5, output_folder = "abc_ctl", tol = 1000)
+                        summstat_size = 1e5, tol = 1000)
 tbl = MKtest.case_control_table(res_case, res_ctl; analysis = "DNA VIPs")
 MKtest.empirical_test(tbl)              # α, α_strong, α_weak
 MKtest.empirical_test(tbl; omega = true)

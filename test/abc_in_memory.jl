@@ -134,7 +134,8 @@
         @test isapprox(Matrix(a), Matrix(b); rtol = 1e-4)
     end
     # the file route still needs a folder
-    @test_throws ArgumentError MKtest.abcmk(p(), sfs, div; h5_file = tab, summstat_size = 5000)
+    @test_throws ArgumentError MKtest.abcmk(p(), sfs, div; h5_file = tab, summstat_size = 5000,
+                                            in_memory = false)
 end
 
 # A table loaded once (`load_rates`) and passed as `rates = t`. Oracles: the `h5_file` route
@@ -208,8 +209,8 @@ end
     am(src; o...) = (seed!(3); quiet(() -> MKtest.abcmk(p(), sfs, div; src..., summstat_size = 4000,
                                                        tol = 150, abc_method = "abc", o...)))
     @test am((rates = t,); in_memory = true)[:inference] == am((h5_file = tab,); in_memory = true)[:inference]
-    @test am((rates = t,); output_folder = mktempdir())[:inference] ==
-          am((h5_file = tab,); output_folder = mktempdir())[:inference]
+    @test am((rates = t,); output_folder = mktempdir(), in_memory = false)[:inference] ==
+          am((h5_file = tab,); output_folder = mktempdir(), in_memory = false)[:inference]
 
     # exactly one source, and a loaded table must match param
     @test_throws ArgumentError MKtest.abcmk(p(), sfs, div; summstat_size = 4000, in_memory = true)
@@ -320,8 +321,9 @@ end
     @test !any(isnan, Matrix(res[:inference][1:2, :]))
     @test isequal(Matrix(res[:inference][1:1, :]), Matrix(quiet(() -> MKtest.summary_abc(post[1:1]; stat = MKtest.PosteriorMedian()))[:inference]))
     @test occursin("NaN", res[:quantiles][3, :ωₐ])
-    # and through abcmk
+    # and through abcmk, with summary_abc's statistic
     r = quiet(() -> (seed!(2); MKtest.abcmk(p(), sfs, div; h5_file = tab, summstat_size = 5000,
-                                            tol = 200, in_memory = true)))
+                                            tol = 200, in_memory = true,
+                                            stat = MKtest.PosteriorMedian(), components = MKtest.Marginal())))
     @test isequal(Matrix(r[:inference]), Matrix(res[:inference]))
 end

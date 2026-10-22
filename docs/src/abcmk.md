@@ -56,7 +56,7 @@ that builds a table can pass it on as `rates = t` without reading the file (sect
 | `γ_deleterious` | `[-1000, -200]` | mean deleterious `2 N s` |
 | `γ_weak`, `γ_strong` | `[1, 10]`, `[100, 1000]` | weakly / strongly beneficial `2 N s` |
 | `γ_flanking` | `[-1000, -500]` | flanking `2 N s` |
-| `rho` | `nothing` (= `param.ρ`) | a value, or `[lo, hi]` for a uniform prior |
+| `ρ` | `nothing` (= `param.ρ`) | a value, or `[lo, hi]` for a uniform prior |
 | `shape_factor` | `2` | DFE shape `~ U(shape 2^-f, shape 2^f)` |
 | `B_bins` | 0.1 to 0.975 by 0.025, and 0.999 | background selection values |
 
@@ -93,18 +93,18 @@ to 0, or with no polymorphism above some DAC of `param.dac` (`valid_mask` gives 
 ## 4. The inference: `abcmk`
 
 ```julia
-res = MKtest.abcmk(param, sfs, div; h5_file = "rates_tgp.jld2", summstat_size = 1e5,
-                   output_folder = "abc_vips", tol = 1000)
+res = MKtest.abcmk(param, sfs, div; h5_file = "rates_tgp.jld2", summstat_size = 1e5, tol = 1000)
 res[:inference]     # one row per dataset
 ```
 
 `abcmk`:
 
 1. samples `summstat_size` rows of the table and turns each into the summary
-   statistics the dataset would show under that model (`summary_statistics`), written to
-   `output_folder`;
-2. runs the ABC with the `tol` closest rows (`abc_method = "abcreg"`, the ABCreg binary
-   shipped in `scripts/reg`, or `"abc"`, a pure Julia rejection and local-linear ABC);
+   statistics the dataset would show under that model (in memory; with
+   `in_memory = false`, `summary_statistics` writes them to `output_folder`);
+2. runs the ABC with the `tol` closest rows (`abc_method = "abcreg"`, a Julia port of
+   the ABCreg algorithm, or the ABCreg binary shipped in `scripts/reg` with
+   `in_memory = false`; `"abc"` is a pure Julia rejection and local-linear ABC);
 3. summarises each posterior (`summary_abc`).
 
 It returns an `OrderedDict`:
@@ -117,14 +117,15 @@ It returns an `OrderedDict`:
 
 ### Settings
 
-The defaults are the measured best configuration:
+The defaults (since 2026-10-22):
 
 | keyword | default | alternative |
 |---|---|---|
 | `sampling` | `RjSampling()`: the data's synonymous SFS distortion is carried onto the model's spectra | `IndependentSampling()`: independent Poisson draws (v1.0.0) |
 | `row_prior` | `FlatAlphaPrior()`: table rows drawn flat in alpha within each `B` | `TableRowPrior()`: rows as drawn (v1.0.0) |
-| `stat` | `MKtest.PosteriorMedian()` | `MKtest.PosteriorMode()` (v1.0.0), `MKtest.PosteriorMean()`, `MKtest.PosteriorQuantile(p)` |
-| `components` | `MKtest.Marginal()`: every column summarised on its own | `MKtest.Composed()`: `α_strong = α - α_weak` of the point estimate |
+| `stat` | `MKtest.PosteriorMode()` | `MKtest.PosteriorMedian()`, `MKtest.PosteriorMean()`, `MKtest.PosteriorQuantile(p)` |
+| `components` | `MKtest.Composed()`: `α_strong = α - α_weak` of the point estimate | `MKtest.Marginal()`: every column summarised on its own |
+| `in_memory` | `true`: no files | `false`: summaries written to `output_folder`, ABCreg binary |
 | `alpha`, `B_bins` | the whole table | restrict the prior to an alpha range or `B` values |
 
 `sampling = MKtest.IndependentSampling(), row_prior = MKtest.TableRowPrior(),
@@ -144,24 +145,25 @@ linear, so `PosteriorMean()` composes (to the 5-digit rounding of the summaries)
 
 ```julia
 res = MKtest.abcmk(param, sfs, div; h5_file = "rates_tgp.jld2", summstat_size = 1e5,
-                   stat = MKtest.PosteriorMode(), components = MKtest.Composed())
+                   stat = MKtest.PosteriorMedian(), components = MKtest.Marginal())
 ```
 
 On SLiM resamples (two-epoch and Tennessen histories, 100 per cell), `Composed()` lowered
 the RMSE of `α_strong` in 6 of 8 two-epoch cells with α > 0 and raised it in all 10 α = 0
 cells, where the marginal `α_strong` sits at 0 and `Composed()` passes the spurious α of the
-total on to it. `Marginal()` stays the default.
+total on to it. `Composed()` with the posterior mode is the default since 2026-10-22;
+`Marginal()` is one keyword away.
 
-### Without files: `in_memory = true`
+### On files: `in_memory = false`
 
-By default `abcmk` writes one `summstat_i.txt.gz` per dataset (about 5 MB at
-`summstat_size = 1e5`) and reads it back for the ABC. With `in_memory = true` each
-dataset's summaries are built, used and dropped in memory, one dataset per thread, and no
-`output_folder` is needed:
+By default each dataset's summaries are built, used and dropped in memory, one dataset
+per thread, and no `output_folder` is needed. With `in_memory = false` `abcmk` writes one
+`summstat_i.txt.gz` per dataset (about 5 MB at `summstat_size = 1e5`) to `output_folder`,
+reads it back for the ABC and, for `"abcreg"`, runs the binary:
 
 ```julia
 res = MKtest.abcmk(param, sfs, div; h5_file = "rates_tgp.jld2", summstat_size = 1e5,
-                   tol = 1000, in_memory = true)
+                   tol = 1000, in_memory = false, output_folder = "abc_vips")
 ```
 
 The summaries are the same random draws as on disk at the same seed and thread count, so

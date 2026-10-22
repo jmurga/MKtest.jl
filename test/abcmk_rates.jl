@@ -27,13 +27,14 @@
         # one draw per model, shared by that model's B bins, inside the range
         r, f = run_rates([1e-4, 5e-3])
         m = r.models
-        @test :rho in propertynames(m)
-        @test names(m)[9] == "rho"          # appended last: cols 1-8 keep their meaning
-        @test all(1e-4 .<= m.rho .<= 5e-3)
+        @test :ρ in propertynames(m)
+        @test names(m)[9] == "ρ"            # appended last: cols 1-8 keep their meaning
+        @test all(1e-4 .<= m.ρ .<= 5e-3)
         nmodels = size(m, 1) ÷ nb
-        @test all(allequal(m.rho[(i-1)*nb+1:i*nb]) for i in 1:nmodels)
-        @test length(unique(m.rho)) == nmodels
-        @test names(MKtest._read_rates(f, param).models)[9] == "rho"
+        @test all(allequal(m.ρ[(i-1)*nb+1:i*nb]) for i in 1:nmodels)
+        @test length(unique(m.ρ)) == nmodels
+        @test names(m) == string.(MKtest._MODEL_COLUMNS) && !("ne_ratio" in names(m))
+        @test names(MKtest._read_rates(f, param).models)[9] == "ρ"
         # the return value is the table load_rates reads back, field by field
         @test r isa MKtest.RatesTable
         t = MKtest.load_rates(f, param)
@@ -52,11 +53,13 @@
         end
         @test_throws ArgumentError MKtest._write_rates(f, r)
         @test_throws ArgumentError MKtest.load_rates(f, MKtest.parameters(N = 500, n = 10, dac = [2, 4]))
-        # a file of the layout before 2026-10-22 (DataFrame + OrderedDict{Int,Array}) reads
-        # to the same table
+        # a file of the layout before 2026-10-22 (DataFrame with the old column names and
+        # ne_ratio, OrderedDict{Int,Array} tails) reads to the same table
         f_old = joinpath(od, "old_layout.jld2")
+        old_names = ["B", "al_low", "al_tot", "gam_flanking", "gL", "gH", "shape", "gam_dfe", "rho"]
         jldopen(f_old, "w") do h
-            h[grp * "/models"] = r.models
+            h[grp * "/models"] = hcat(MKtest.rename(r.models, old_names),
+                                      MKtest.DataFrame(ne_ratio = ones(size(r.models, 1))))
             h[grp * "/neut"]   = MKtest.OrderedDict{Int,Array}(k => r.neut[k] for k in r.dac)
             h[grp * "/sel"]    = MKtest.OrderedDict{Int,Array}(k => r.sel[k] for k in r.dac)
             h[grp * "/dsdn"]   = r.dsdn
@@ -73,7 +76,7 @@
         @test MKtest._rho_prior(0.002, param) === (nothing, 0.002)
         @test MKtest._rho_prior([0.002], param) === (nothing, 0.002)
         @test MKtest._rho_prior(nothing, param) === (nothing, param.ρ)
-        @test all(==(0.002), run_rates(0.002; iterations=10)[1].models.rho)
+        @test all(==(0.002), run_rates(0.002; iterations=10)[1].models.ρ)
 
         # invalid ranges must throw rather than silently pick something
         for bad in ([-1.0, 1.0], [5e-3, 1e-4], -0.001, Float64[])
@@ -83,10 +86,10 @@
         # the recorded rho is the one set_θ! actually used
         p = MKtest.copy_param(param)
         p.B = m.B[1] / 1000
-        p.ρ = m.rho[1]
-        p.γ_flanking = Int(m.gam_flanking[1])
+        p.ρ = m.ρ[1]
+        p.γ_flanking = Int(m.γ_flanking[1])
         @test MKtest.set_θ!(p) ≈
-              -log(p.B) * (p.L_flanking * m.rho[1] - m.gam_flanking[1]) / (2.0 * p.L_flanking)
+              -log(p.B) * (p.L_flanking * m.ρ[1] - m.γ_flanking[1]) / (2.0 * p.L_flanking)
     end
 
     # --- the projection the rates table is built with -----------------------
@@ -104,10 +107,10 @@
         # every stored row equals the full-spectrum model at the same parameters
         for i in (1, 2, 3, nrow(m))
             q = MKtest.copy_param(param)
-            q.γ_strong, q.γ_weak = Int(m.gH[i]), Int(m.gL[i])
-            q.γ_flanking, q.γ_deleterious = Int(m.gam_flanking[i]), Int(m.gam_dfe[i])
+            q.γ_strong, q.γ_weak = Int(m.γ_strong[i]), Int(m.γ_weak[i])
+            q.γ_flanking, q.γ_deleterious = Int(m.γ_flanking[i]), Int(m.γ_deleterious[i])
             q.shape = m.shape[i]; q.scale = abs(q.shape / q.γ_deleterious)
-            q.α, q.α_weak, q.ρ = m.al_tot[i], m.al_low[i], m.rho[i]
+            q.α, q.α_weak, q.ρ = m.α[i], m.α_weak[i], m.ρ[i]
             q.B = m.B[i] / 1000; MKtest.set_θ!(q)
             # ppos recovered EXACTLY from the stored fixation rates:
             # f_pos = 0.75 * (ppos/2) * Φ * p_fix
@@ -160,13 +163,13 @@
         @test maximum(MKtest._ppos_residual(pa, pa.p_weak, pa.p_strong)) < 1e-6
         @test pa.p_weak > 0 && pa.p_strong > 0
 
-        # al_low == 0 means ppos_l == 0 IS the root, not a failure.
+        # α_weak == 0 means p_weak == 0 IS the root, not a failure.
         pz = mkp(); pz.α = 0.4; pz.α_weak = 0.0; MKtest.set_θ!(pz)
         MKtest.set_ppos!(pz)
         @test pz.p_weak < 1e-20
         @test maximum(MKtest._ppos_residual(pz, pz.p_weak, pz.p_strong)) < 1e-6
 
-        # A very peaked deleterious DFE fixes almost nothing, so a low al_tot needs a tiny
+        # A very peaked deleterious DFE fixes almost nothing, so a low α needs a tiny
         # ppos that nlsolve misses from every start. The system is linear in ppos and its
         # exact root is accepted.
         pj = mkp(); pj.shape = 7.5; pj.γ_deleterious = -500
@@ -330,8 +333,12 @@
     # abcmk_des.jld2 for a ρ-drawn table and RjSampling (make_des_fixture.jl). Both must
     # be reproduced at one thread.
     function check_table(r, fx, DAC)
-        @test Matrix(r.models) == fx["models"]
-        @test names(r.models) == fx["model_names"]
+        # the fixtures hold the pre-2026-10-22 column names and a constant ne_ratio column
+        fxnames = [get(MKtest._LEGACY_MODEL_NAMES, n, n) for n in fx["model_names"]]
+        keep = findall(!=("ne_ratio"), fxnames)
+        @test all(==(1.0), fx["models"][:, findfirst(==("ne_ratio"), fxnames)])
+        @test Matrix(r.models) == fx["models"][:, keep]
+        @test names(r.models) == fxnames[keep]
         # At ONE thread the rates match to the last bits: another CPU (SIMD width, FMA)
         # changes the summation order and flips the last digit. With more threads, `dsdn` /
         # `sel` drift at the 1e-9 level (the per-task ppos warm start depends on how rows

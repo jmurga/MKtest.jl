@@ -95,6 +95,23 @@ _dac_dict(d::AbstractDict, dac::AbstractVector{<:Integer}) =
 _dac_matrix(d::AbstractDict, dac::AbstractVector{<:Integer}) =
     reduce(hcat, [convert(Vector{Float64}, d[k]) for k in dac])
 
+# The `models` columns of a table: the names of the `parameters` fields they are draws of
+# (`B` is stored as B x 1000).
+const _MODEL_COLUMNS = [:B, :α_weak, :α, :γ_flanking, :γ_weak, :γ_strong, :shape, :γ_deleterious, :ρ]
+
+# Column names of tables written before 2026-10-22, renamed on read; their `ne_ratio`
+# column (always 1 in `rates`) is dropped.
+const _LEGACY_MODEL_NAMES = Dict("al_low" => "α_weak", "al_tot" => "α", "gam_flanking" => "γ_flanking",
+                                 "gL" => "γ_weak", "gH" => "γ_strong", "gam_dfe" => "γ_deleterious",
+                                 "rho" => "ρ")
+
+"The `models` of a file block with the current column names (see `_LEGACY_MODEL_NAMES`)."
+function _canonical_models(df::DataFrame)
+    out = rename(df, [n => get(_LEGACY_MODEL_NAMES, n, n) for n in names(df)])
+    "ne_ratio" in names(out) && select!(out, Not(:ne_ratio))
+    return out
+end
+
 """
     _read_rates(input_file, param) -> NamedTuple
 
@@ -111,8 +128,8 @@ function _read_rates(input_file::String, param::parameters)
         tmp = h[grp]
         dac = Vector{Int}(tmp["dac"])
         stored = tmp["models"]
-        models = stored isa AbstractMatrix ?
-            DataFrame(Matrix{Float64}(stored), Symbol.(tmp["model_names"])) : stored
+        models = _canonical_models(stored isa AbstractMatrix ?
+            DataFrame(Matrix{Float64}(stored), Symbol.(tmp["model_names"])) : stored)
         (;
             models,
             neut   = _dac_dict(tmp["neut"], dac),
@@ -130,7 +147,8 @@ end
 
 One `(N, n, cutoff)` block of a rates file, loaded by [`load_rates`](@ref) and passed to
 [`abcmk`](@ref) or [`summary_statistics`](@ref) as `rates = t` instead of a file path.
-Fields: `file`, `N`, `n`, `cutoff`, `models` (`DataFrame`), `neut`, `sel`
+Fields: `file`, `N`, `n`, `cutoff`, `models` (`DataFrame`, columns `B` x 1000, `α_weak`,
+`α`, `γ_flanking`, `γ_weak`, `γ_strong`, `shape`, `γ_deleterious`, `ρ`), `neut`, `sel`
 (`OrderedDict{Int,Vector{Float64}}`, DAC => expected tails), `dsdn` (`Matrix`), `dac`,
 `options`, plus a cache of row-prior weights, computed by the first call that needs them
 and reused by every later call with the same `row_prior`, `alpha` and `B_bins`.
@@ -365,8 +383,6 @@ function solve_rates!(
     @inbounds m_row[7] = shape
     @inbounds m_row[8] = -(shape / scale)
     @inbounds m_row[9] = param.ρ
-    # Column 10 (ne_ratio) is always 1 in `rates()`.
-    @inbounds m_row[10] = 1.0
 
     @inbounds f_row[1] = f_n
     @inbounds f_row[2] = f_neg + f_pos_l + f_pos_h
@@ -484,10 +500,11 @@ All coefficients are `2N` times the heterozygote selection coefficient.
 # Returns
 The written block as a [`RatesTable`](@ref), the same value `load_rates(output_file, param)`
 gives, so it can go straight to [`abcmk`](@ref) as `rates = t`. Its fields:
- - `models`: `DataFrame`, one row per (draw, B). Its columns keep their stored names, so
-   earlier tables stay readable: `B` (B x 1000), `al_low` (`α_weak`), `al_tot` (`α`),
-   `gam_flanking` (`γ_flanking`), `gL` (`γ_weak`), `gH` (`γ_strong`), `shape`, `gam_dfe`
-   (`γ_deleterious`), `rho` (`ρ`), `ne_ratio` (always 1).
+ - `models`: `DataFrame`, one row per (draw, B), the drawn `parameters` fields under their
+   names: `B` (B x 1000), `α_weak`, `α`, `γ_flanking`, `γ_weak`, `γ_strong`, `shape`,
+   `γ_deleterious`, `ρ`. Files written before 2026-10-22 hold the earlier names (`al_low`,
+   `al_tot`, `gam_flanking`, `gL`, `gH`, `gam_dfe`, `rho`) and a constant `ne_ratio`
+   column; `load_rates` renames them and drops `ne_ratio`.
  - `neut`, `sel`: `OrderedDict{Int,Vector{Float64}}` from each DAC to the expected
    synonymous and nonsynonymous tails of every row.
  - `dsdn`: matrix of fixation rates, columns `Ds`, `Dn`, and the parts of `Dn` from
@@ -562,7 +579,7 @@ function rates(
     n_b = length(B_bins)
     total_rows = iterations * n_b
     n_dac = length(param.dac)
-    m  = zeros(Float64, total_rows, 10)
+    m  = zeros(Float64, total_rows, 9)
     r_ps = zeros(Float64, total_rows, n_dac)
     r_pn = zeros(Float64, total_rows, n_dac)
     r_f  = zeros(Float64, total_rows, 4)
@@ -599,13 +616,7 @@ function rates(
             "($(round(100n_drop/length(idx), digits=2))%)"
     end
 
-    models = @view DataFrame(
-        m,
-        [:B, :al_low, :al_tot, :gam_flanking, :gL, :gH, :shape, :gam_dfe, :rho, :ne_ratio],
-    )[
-        idx,
-        :,
-    ]
+    models = @view DataFrame(m, _MODEL_COLUMNS)[idx, :]
     neut = @view r_ps[idx, :]
     sel  = @view r_pn[idx, :]
     dsdn = @view r_f[idx,  :]

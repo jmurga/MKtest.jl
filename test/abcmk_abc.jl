@@ -40,15 +40,14 @@ const TAB300 = quiet(() -> MKtest.rates(P500(); iterations = 300,
         for (method, ss, tl) in (("abcreg", 5000, 200), ("abc", 5e3, 200.0))
             seed!(2)
             res = MKtest.abcmk(p(), sfs, div; h5_file = tab, summstat_size = ss,
-                               output_folder = joinpath(td, method), tol = tl,
+                               output_folder = joinpath(td, method), tol = tl, in_memory = false,
                                abc_method = method, sampling = MKtest.IndependentSampling(),
                                row_prior = MKtest.TableRowPrior(), stat = MKtest.PosteriorMode())
             @test issorted(res[:inference].α)
         end
 
         # a single set as parse_sfs returns it (Matrix, Vector) equals the wrapped call
-        one(s, d) = (seed!(3); MKtest.abcmk(p(), s, d; h5_file = tab, summstat_size = 2000,
-                                            output_folder = joinpath(td, "one"), tol = 100))
+        one(s, d) = (seed!(3); MKtest.abcmk(p(), s, d; h5_file = tab, summstat_size = 2000, tol = 100))
         @test one(sfs[1], div[1])[:inference] == one([sfs[1]], [div[1]])[:inference]
 
         # --- alpha composition: α == α_weak + α_strong through the ABC ---------------
@@ -128,8 +127,8 @@ const TAB300 = quiet(() -> MKtest.rates(P500(); iterations = 300,
             for (j, tv) in enumerate(truth)
                 @test minimum(post[:, j]) <= tv <= maximum(post[:, j])
             end
-            # abcmk passes both keywords on: Composed composes exactly with every stat, and
-            # the default Marginal is the same posterior summarised column by column
+            # abcmk passes both keywords on: Composed (the default) composes exactly with
+            # every stat, and Marginal is the same posterior summarised column by column
             for st in (MKtest.PosteriorMedian(), MKtest.PosteriorMode(), MKtest.PosteriorMean())
                 seed!(10)
                 rc = MKtest.abcmk(p(), syn_sfs, syn_div; h5_file = tab, summstat_size = 2000,
@@ -140,7 +139,7 @@ const TAB300 = quiet(() -> MKtest.rates(P500(); iterations = 300,
                 seed!(10)
                 rm = MKtest.abcmk(p(), syn_sfs, syn_div; h5_file = tab, summstat_size = 2000,
                                   tol = 100, in_memory = true,
-                                  stat = st)[:inference]
+                                  stat = st, components = MKtest.Marginal())[:inference]
                 @test rm.α[1] == rc.α[1] && rm.α_weak[1] == rc.α_weak[1]
                 @test rm.γ_weak[1] == rc.γ_weak[1]
             end

@@ -754,9 +754,9 @@ at each `param.dac`; a row whose draw gives `Ds = 0` or `dn = 0` is dropped) and
    path). Give `h5_file` or `rates`, not both.
  - `summstat_size::Real`: rows per dataset, a positive whole number (`1e5` works).
  - `output_folder::String`: created if missing; use one folder per analysis.
- - `alpha::Union{Nothing,Vector{Float64}} = nothing`: keep only rows with `al_tot` in
-   `[alpha[1], alpha[end]]`. `al_tot` is the model's α label, which equals the realised
-   fixation α only at `B = 0.999`.
+ - `alpha::Union{Nothing,Vector{Float64}} = nothing`: keep only rows whose α label
+   (`models.α`) is in `[alpha[1], alpha[end]]`. The label equals the realised fixation α
+   only at `B = 0.999`.
  - `B_bins::Union{Nothing,Vector{Float64}} = nothing`: keep only rows with `B` in
    `[B_bins[1], B_bins[end]]`.
  - `sampling::AbstractPoissonSampling = RjSampling()`: [`RjSampling`](@ref) or
@@ -868,7 +868,7 @@ function _summaries_setup(
         println(io, "cutoff      = ", param.cutoff)
         println(io, "dac         = ", param.dac)
         println(io, "summstat    = ", summstat_size)
-        println(io, "alpha_filt  = ", alpha, "  (on al_tot)")
+        println(io, "alpha_filt  = ", alpha, "  (on the α label)")
         println(io, "B_bins_filt = ", B_bins)
         println(io, "written     = ", Libc.strftime("%Y-%m-%d %H:%M:%S", time()))
     end
@@ -892,8 +892,8 @@ function _summaries_setup(
     idx_B = trues(length(idx))
 
     if !isnothing(alpha)
-        # `al_tot` is the alpha LABEL: the realised fixation alpha only at B = 0.999.
-        a_col = tmp.models.al_tot
+        # `models.α` is the alpha LABEL: the realised fixation alpha only at B = 0.999.
+        a_col = tmp.models.α
         idx_alpha = a_col .>= alpha[1] .&& a_col .<= alpha[end]
     end
 
@@ -928,9 +928,9 @@ function _summaries_setup(
         _gather_row!(sel, i, tmp.sel[v], sampled_idx)
     end
 
-    # Model columns by position, the same in old (8 columns) and new (10) rates files:
-    # B, al_low, al_tot, gam_flanking, gL, gH, shape, gam_dfe[, rho, ne_ratio].
-    gn = abs.(view(models, :, 8))                  # |gam_dfe|
+    # Model columns by position (_MODEL_COLUMNS; old files are renamed on read):
+    # B, α_weak, α, γ_flanking, γ_weak, γ_strong, shape, γ_deleterious[, ρ].
+    gn = abs.(view(models, :, 8))                  # |γ_deleterious|
     sh = round.(view(models, :, 7), digits=5)      # shape (rounded)
     gL = ceil.(abs.(view(models, :, 5)))
     gH = ceil.(abs.(view(models, :, 6)))

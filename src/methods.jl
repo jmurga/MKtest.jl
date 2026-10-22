@@ -799,16 +799,17 @@ end
 """
     abcmk(param::parameters, sfs, divergence; h5_file (or rates), summstat_size, output_folder = "",
           alpha = nothing, B_bins = nothing, tol = 1000, abc_method = "abcreg",
-          in_memory = false, rm_summaries = true, stat = PosteriorMedian(),
-          components = Marginal(), sampling = RjSampling(), row_prior = FlatAlphaPrior())
+          in_memory = true, rm_summaries = true, stat = PosteriorMode(),
+          components = Composed(), sampling = RjSampling(), row_prior = FlatAlphaPrior())
 
 ABC-MK inference (Murga-Moreno et al. 2024): posterior distributions of alpha, its weak
 and strong components and the DFE parameters for each dataset.
 
-Three steps: [`summary_statistics`](@ref) samples the rates table and writes the observed
-and simulated summary statistics of every dataset to `output_folder`
-(`alphas_<i>.txt.gz`, `summstat_<i>.txt.gz`); ABC accepts the `tol` closest simulations of
-each dataset; [`summary_abc`](@ref) summarizes the posteriors.
+Three steps: the rates table is sampled and each row becomes the Poisson realisation of
+every dataset (the summary statistics, in memory by default; with `in_memory = false`
+[`summary_statistics`](@ref) writes them to `output_folder` as `alphas_<i>.txt.gz`,
+`summstat_<i>.txt.gz`); ABC accepts the `tol` closest simulations of each dataset;
+[`summary_abc`](@ref) summarizes the posteriors.
 
 # Arguments
  - `param::parameters`: the model used to build the rates table; `param.dac` gives the
@@ -827,35 +828,38 @@ each dataset; [`summary_abc`](@ref) summarizes the posteriors.
    results as `h5_file`. A path is also accepted. Give `h5_file` or `rates`, not both.
  - `summstat_size::Real`: rows sampled from the rates table per dataset, a positive whole
    number (`1e5` works).
- - `output_folder::String`: folder for the summary statistics and ABC outputs; created if
-   missing, and stale `summstat_*`, `alphas_*` and `out_*` files in it are removed. Not
-   used (and may be omitted) with `in_memory = true`.
+ - `output_folder::String`: with `in_memory = false`, the folder for the summary statistics
+   and ABC outputs; created if missing, and stale `summstat_*`, `alphas_*` and `out_*` files
+   in it are removed. Not used (and may be omitted) with the default `in_memory = true`.
  - `alpha`, `B_bins`: keep only table rows with the alpha label, or B, in this range.
  - `tol::Real`: number of accepted simulations per dataset, a positive whole number.
  - `abc_method::String`: `"abcreg"`, the ABCreg binary at `scripts/reg` (see
    [`ABCreg`](@ref)), or `"abc"`, the Julia local-linear ABC (its regression-adjusted
    posteriors are used).
- - `in_memory::Bool = false`: run the ABC step without files. The summaries are the same
+ - `in_memory::Bool = true`: run the ABC step without files. The summaries are the same
    draws as on disk (same seed and thread count); `"abc"` then gives the file route's
    posteriors exactly, and `"abcreg"` runs [`abcreg_loclinear`](@ref), the Julia port of
    the ABCreg binary (equal to its printed 6 significant digits). No disk use and much
-   faster for many datasets (case/control).
+   faster for many datasets (case/control). `in_memory = false` writes the summaries to
+   `output_folder` and runs the binary (or the file `"abc"`).
  - `rm_summaries::Bool`: delete the summary statistics files afterwards (and, for
    `"abcreg"`, the posterior files).
  - `stat::AbstractPointEstimate`: the point estimate of each posterior column,
-   [`PosteriorMedian`](@ref)`()` (default), [`PosteriorMean`](@ref)`()`,
-   [`PosteriorMode`](@ref)`()` (v1.0.0) or [`PosteriorQuantile`](@ref)`(p)`.
- - `components::AbstractComponents`: [`Marginal`](@ref)`()` (default) summarises each column
-   on its own; [`Composed`](@ref)`()` reports `α_strong = α - α_weak` and
-   `ωₐ_strong = ωₐ - ωₐ_weak` of the point estimates, so `α == α_weak + α_strong` holds
-   exactly in `:inference` (see [`summary_abc`](@ref)).
+   [`PosteriorMode`](@ref)`()` (default), [`PosteriorMedian`](@ref)`()`,
+   [`PosteriorMean`](@ref)`()` or [`PosteriorQuantile`](@ref)`(p)`.
+ - `components::AbstractComponents`: [`Composed`](@ref)`()` (default) reports
+   `α_strong = α - α_weak` and `ωₐ_strong = ωₐ - ωₐ_weak` of the point estimates, so
+   `α == α_weak + α_strong` holds exactly in `:inference`; [`Marginal`](@ref)`()`
+   summarises each column on its own (see [`summary_abc`](@ref)).
  - `sampling::AbstractPoissonSampling`: [`RjSampling`](@ref) or
    [`IndependentSampling`](@ref).
  - `row_prior::AbstractRowPrior`: [`FlatAlphaPrior`](@ref) or [`TableRowPrior`](@ref).
 
-The defaults (`RjSampling()`, `FlatAlphaPrior()`, `PosteriorMedian()`) are the configuration
-measured against SLiM in the two-epoch and Tennessen benchmarks. ABC-MK v1.0.0 is
-`sampling = IndependentSampling(), row_prior = TableRowPrior(), stat = PosteriorMode()`.
+The defaults since 2026-10-22 are `RjSampling()`, `FlatAlphaPrior()`, `PosteriorMode()`,
+`Composed()` and the in-memory ABCreg port; the sampler and the row prior are the
+configuration measured against SLiM in the two-epoch and Tennessen benchmarks. ABC-MK
+v1.0.0 is `sampling = IndependentSampling(), row_prior = TableRowPrior(),
+stat = PosteriorMode(), components = Marginal(), in_memory = false`.
 
 Throws an `AssertionError` for another `abc_method`, a DAC of 1 in `param.dac`, or
 filters that leave fewer than `summstat_size` table rows, and an
@@ -885,10 +889,10 @@ function abcmk(
     B_bins::Union{Nothing,Vector{Float64}} = nothing,
     tol::Real=1000,
     abc_method::String="abcreg",
-    in_memory::Bool=false,
+    in_memory::Bool=true,
     rm_summaries::Bool=true,
-    stat::AbstractPointEstimate=PosteriorMedian(),
-    components::AbstractComponents=Marginal(),
+    stat::AbstractPointEstimate=PosteriorMode(),
+    components::AbstractComponents=Composed(),
     sampling::AbstractPoissonSampling=RjSampling(),
     row_prior::AbstractRowPrior=FlatAlphaPrior(),
 )
