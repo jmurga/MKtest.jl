@@ -1,7 +1,7 @@
 # dfe_ml engine: the testsets ported from dev (9d752e40), rewritten for the new
 # interface with their meaning kept, plus the output and axis checks of the move.
 #
-# Shared synthetic data (n = 40): Pn_j = 2000/j, Ps_j = 3000/j.
+# Shared synthetic data: test/ml/data.jl.
 
 using MKtest
 using Test
@@ -16,9 +16,7 @@ import MKtest: GammaZero, GammaExpo, GammaGamma, ExpoZero, ExpoExpo, ExpoGamma, 
                ExactSojourn, GaussLegendreSojourn, RombergIntegrator, LogGammaGrid, GrapesGrid,
                PoissonKernel, NegativeBinomialKernel, MidpointDensity, IntervalCDF, DFECache
 
-const ML_JS = collect(1.0:39.0)
-const ML_SFS = hcat(ML_JS, round.(2000.0 ./ ML_JS), round.(3000.0 ./ ML_JS))
-const ML_DIV = [900.0, 1200.0, 1.0e6, 3.0e5]
+isdefined(Main, :ML_SFS) || include("data.jl")      # ML_JS, ML_SFS, ML_DIV
 
 # A DFE quadrature defined outside the package (the axis is open): the density
 # averaged at the two cell bounds.

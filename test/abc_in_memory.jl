@@ -5,14 +5,13 @@
 # exactly; `abcreg_loclinear` equals the binary to its printed precision (6 significant
 # digits, so |a - b| <= 1e-5 |b| + 1e-9) with the same accepted rows.
 #
-# Standalone: julia --project=. -e 'using MKtest, Test, JLD2, Logging; using Random: seed!,
-#   MersenneTwister; using DelimitedFiles: writedlm; include("test/abc_in_memory.jl")'
+# Included by test/abcmk_abc.jl (group "abc": `Pkg.test(test_args = ["abc"])`), which
+# provides `quiet`, `BEST`, `P500` and the shared 300-draw table `TAB300`.
 
 @testset "ABCreg in memory" begin
     reg = joinpath(pkgdir(MKtest), "scripts", "reg")
     have_reg = Sys.islinux() && isfile(reg)
     close6(a, b) = size(a) == size(b) && all(abs.(a .- b) .<= 1e-5 .* abs.(b) .+ 1e-9)
-    quiet(f) = Logging.with_logger(f, Logging.NullLogger())
 
     # -- direct: an all-positive fixture, so ABCreg's -L is defined everywhere ------
     rng = MersenneTwister(20261018)
@@ -51,12 +50,10 @@
     end
 
     # -- end to end: the same table rows and Poisson draws on disk and in memory ----
-    best = JLD2.load(joinpath(@__DIR__, "fixtures", "abcmk_best_model.jld2"))
-    p() = MKtest.parameters(N = 500, n = 50, dac = [2, 4, 5, 10, 20, 50])
+    best = BEST
+    p = P500
     td = mktempdir()
-    tab = joinpath(td, "t.jld2")
-    seed!(1)
-    quiet(() -> MKtest.rates(p(); iterations = 300, output_file = tab))
+    tab = TAB300.file
     K = 4
     sfs = [best["sfs"] for _ in 1:K]
     div = [[3000.0, 2000.0 * (1 - 0.06k), best["div"][3], best["div"][4]] for k in 1:K]
@@ -144,7 +141,6 @@ end
 # on the same table and seed (identical files and posteriors), and the Dict-counting
 # `_row_weights` that the array version replaced (copied below, identical weights).
 @testset "load_rates" begin
-    quiet(f) = Logging.with_logger(f, Logging.NullLogger())
     function weights_dict(p::MKtest.FlatAlphaPrior, dsdn, idx; B = nothing)
         key = Vector{Tuple{Float64,Int}}(undef, length(idx))
         cnt = Dict{Tuple{Float64,Int},Int}(); nB = Dict{Float64,Int}()
@@ -173,12 +169,10 @@ end
     end
     @test all(iszero, MKtest._row_weights(MKtest.FlatAlphaPrior(), dsdn, 1:50; B = Bc))
 
-    best = JLD2.load(joinpath(@__DIR__, "fixtures", "abcmk_best_model.jld2"))
-    p() = MKtest.parameters(N = 500, n = 50, dac = [2, 4, 5, 10, 20, 50])
+    best = BEST
+    p = P500
     td = mktempdir()
-    tab = joinpath(td, "t.jld2")
-    seed!(1)
-    quiet(() -> MKtest.rates(p(); iterations = 300, output_file = tab))
+    tab = TAB300.file
     sfs = [best["sfs"] for _ in 1:3]
     div = [[3000.0, 2000.0 * (1 - 0.06k), best["div"][3], best["div"][4]] for k in 1:3]
 
@@ -240,17 +234,14 @@ end
 # independent of ω), the file route with the binary (6 digits) and with `abc` (exact), on
 # the same draws.
 @testset "the ω block follows the site counts, not the draws" begin
-    quiet(f) = Logging.with_logger(f, Logging.NullLogger())
     closeNaN(a, b) = size(a) == size(b) &&
         all((isnan(x) && isnan(y)) || abs(x - y) <= 1e-5 * abs(y) + 1e-9 for (x, y) in zip(a, b))
     reg = joinpath(pkgdir(MKtest), "scripts", "reg")
     have_reg = Sys.islinux() && isfile(reg)
-    best = JLD2.load(joinpath(@__DIR__, "fixtures", "abcmk_best_model.jld2"))
-    p() = MKtest.parameters(N = 500, n = 50, dac = [2, 4, 5, 10, 20, 50])
+    best = BEST
+    p = P500
     td = mktempdir()
-    tab = joinpath(td, "t.jld2")
-    seed!(1)
-    quiet(() -> MKtest.rates(p(); iterations = 300, output_file = tab))
+    tab = TAB300.file
     sfs = [best["sfs"], best["sfs"], best["sfs"]]
     div = [best["div"],
            [6.0, 4.0, best["div"][3], best["div"][4]],        # Dn + Ds = 10: Ds = 0 draws

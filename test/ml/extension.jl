@@ -1,6 +1,8 @@
 # The extension examples of the brief, as written (with the `MKtest.` qualification a
 # method added from outside the package needs), one user subtype per axis, and the
-# type-stability and allocation checks of the hot path.
+# type-stability and allocation checks of the hot path. Group "extension" of runtests.jl.
+
+isdefined(Main, :ML_SFS) || include("data.jl")      # ML_SFS, ML_DIV, shared with engine.jl
 
 module UserDFEs
 using MKtest
