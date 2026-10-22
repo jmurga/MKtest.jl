@@ -99,7 +99,7 @@ _dac_matrix(d::AbstractDict, dac::AbstractVector{<:Integer}) =
     _read_rates(input_file, param) -> NamedTuple
 
 `(; models, neut, sel, dsdn, dac, options)` of the `(N, n, cutoff)` block of a rates file,
-the fields of a [`RatesTable`](@ref). Reads the block as [`_write_rates`](@ref) stores it
+the fields of a [`RatesTable`](@ref). Reads the block as `_write_rates` stores it
 (plain arrays) and the layout of files written before 2026-10-22 (`models` as a
 `DataFrame`, `neut` and `sel` as `OrderedDict{Int,Array}`). Throws an `ArgumentError` if
 the file has no block for `param`.
@@ -134,8 +134,8 @@ Fields: `file`, `N`, `n`, `cutoff`, `models` (`DataFrame`), `neut`, `sel`
 (`OrderedDict{Int,Vector{Float64}}`, DAC => expected tails), `dsdn` (`Matrix`), `dac`,
 `options`, plus a cache of row-prior weights, computed by the first call that needs them
 and reused by every later call with the same `row_prior`, `alpha` and `B_bins`.
-[`rates`](@ref) returns one and writes it with [`_write_rates`](@ref); [`load_rates`](@ref)
-reads it back with [`_read_rates`](@ref). The file holds the same fields as plain arrays.
+[`rates`](@ref) returns one and writes it with `_write_rates`; [`load_rates`](@ref)
+reads it back with `_read_rates`. The file holds the same fields as plain arrays.
 """
 struct RatesTable{TM,TN,TS,TD}
     file::String
@@ -162,11 +162,11 @@ end
     _write_rates(output_file, t::RatesTable) -> output_file
 
 Append the block of `t` to the JLD2 file `output_file` under the group
-`"N/n/cutoff=[lo,hi]"` (see [`_jld2_group_key`](@ref)), which must not exist yet
+`"N/n/cutoff=[lo,hi]"` (see `_jld2_group_key`), which must not exist yet
 (`ArgumentError`). The block holds plain arrays only, so it reads back on any Julia and
 DataFrames version: `models` (`Matrix{Float64}`) with `model_names`, `neut` and `sel`
 (`Matrix{Float64}`, rows x DACs in `dac` order), `dsdn`, `dac` and `options`.
-[`_read_rates`](@ref) is the inverse.
+`_read_rates` is the inverse.
 """
 function _write_rates(output_file::String, t::RatesTable)
     grp = _jld2_group_key(t.N, t.n, t.cutoff[1], t.cutoff[2])
@@ -460,7 +460,7 @@ seed, the table reproduces only at the same thread count.
    `iterations * length(B_bins)` rows.
  - `output_file::String`: JLD2 file, opened in append mode; the block is written under
    the group `"N/n/cutoff=[lo,hi]"`, which must not exist yet (`ArgumentError`), as plain
-   arrays (see [`_write_rates`](@ref)).
+   arrays (see `_write_rates`).
  - `γ_strong`, `γ_weak::Vector{Int64}`: ranges of the strongly and weakly beneficial coefficients,
    drawn as `floor(Uniform(lo, hi))` (so `γ_weak` reaches 9, not 10).
  - `γ_flanking`, `γ_deleterious::Vector{Int64}`: ranges of the flanking and coding
