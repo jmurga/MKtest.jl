@@ -34,18 +34,18 @@ _abc_param_names(P::Integer) = P == 12 ?
     [:α_weak, :α_strong, :α, :ωₐ_weak, :ωₐ_strong, :ωₐ, :ωₙₐ, :γ_deleterious, :β, :γ_weak, :γ_strong, :B] :
     [:α_weak, :α_strong, :α, :γ_deleterious, :β, :γ_weak, :γ_strong, :B]
 
-# A dataset's summaries lose the ω block when a draw leaves ω undefined (Ds = 0 with no
-# adaptive fixation: 0/0), so its ABC runs on 8 parameters. Its ω columns are then
-# reported as NaN, after the α columns, so every posterior has them. Each parameter is
-# regressed on its own over the same accepted rows, so the other columns are what the ABC
-# gives on the table without the block.
+# A dataset without site counts (Ln or Ls = 0) has no ω block in its summaries, so its
+# ABC runs on 8 parameters. Its ω columns are then reported as NaN, after the α columns,
+# so every posterior has them. Each parameter is regressed on its own over the same
+# accepted rows, so the other columns are what the ABC gives on the table without the
+# block. (A draw with Ds = 0 drops its row only; see `_assemble_summaries!`.)
 _with_ω_columns(post::AbstractMatrix, P::Integer) =
     P == 12 ? post : hcat(post[:, 1:3], fill(NaN, size(post, 1), 4), post[:, 4:end])
 
 function _report_ω_missing(Ps)
     k = count(<(12), Ps)
-    k > 0 && @info "ω not estimated for $k of $(length(Ps)) datasets (a draw left ω " *
-                   "undefined: Ds = 0 with no adaptive fixation); their ω columns are NaN"
+    k > 0 && @info "ω not estimated for $k of $(length(Ps)) datasets (Ln or Ls = 0: " *
+                   "ω is undefined); their ω columns are NaN"
 end
 
 """
@@ -59,7 +59,7 @@ posteriors.
 
 Each pair `alphas_i.txt.gz` / `summstat_i.txt.gz` is run on its own thread, accepting the
 `tol` closest table rows; ABCreg writes `out_i.0.post.gz`. A dataset whose summaries have
-no ω columns (a draw left ω undefined) runs with `P - 4` and reports its ω columns as NaN.
+no ω columns (no site counts, Ln or Ls = 0) runs with `P - 4` and reports its ω columns as NaN.
 
 # Keywords
  - `output_folder::String`: folder with the observed α(x) and the summaries.
@@ -394,7 +394,7 @@ The alternative to [`ABCreg`](@ref) in `abcmk(...; abc_method = "abc")`.
 
 Each pair `alphas_i.txt.gz` / `summstat_i.txt.gz` goes through `abc_loclinear`,
 one dataset per thread (BLAS runs on one thread meanwhile). A dataset whose summaries have
-no ω columns (a draw left ω undefined) runs with `P - 4` and reports its ω columns as NaN.
+no ω columns (no site counts, Ln or Ls = 0) runs with `P - 4` and reports its ω columns as NaN.
 
 # Keywords
  - `output_folder::String`: folder with the observed α(x) and the summaries.
@@ -865,7 +865,7 @@ function _abc_in_memory(param::parameters, sfs::Vector, divergence::Vector;
                 out = _assemble_summaries!(buf, st.sfs_p[i], st.divergence_p[i],
                                            st.neut, st.sel, st.dsdn, st.gn, st.sh, st.gL, st.gH,
                                            st.B, st.summstat_size, st.samplers[i])
-                # The ω block is dropped when any ω is NaN, as ABCreg / abc then read P = 8.
+                # No ω block without site counts (Ln or Ls = 0): ABCreg / abc then read P = 8.
                 P = size(out, 2) == 12 + S ? 12 : 8
                 target = vec(st.α[i])
                 pa, ss = view(out, :, 1:P), view(out, :, (P+1):size(out, 2))

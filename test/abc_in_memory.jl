@@ -231,12 +231,15 @@ end
                                                         in_memory = true))
 end
 
-# A dataset whose summaries lose the ω block (a draw with Ds = 0 and no adaptive fixation
-# leaves ω undefined) next to one that keeps it: no error, the same columns for both, NaN ω
-# for the first. Oracles: the ABC on that dataset's 8-parameter table (the regression of
-# every other column is independent of ω), the file route with the binary (6 digits) and
-# with `abc` (exact), on the same draws.
-@testset "datasets without the ω block" begin
+# The ω block is a property of the data: present when Ln > 0 and Ls > 0, absent (NaN ω,
+# ABC on 8 parameters) without site counts. A draw with Ds = 0 leaves ω undefined for that
+# row only, and the row is dropped like any non-finite row, as alpha's are (dn = 0).
+# Three datasets on the same draws: one with ample divergence, one with Dn + Ds = 10 (many
+# Ds = 0 draws, keeps its ω block with fewer rows) and one without site counts. Oracles:
+# the ABC on the last one's 8-parameter table (the regression of every other column is
+# independent of ω), the file route with the binary (6 digits) and with `abc` (exact), on
+# the same draws.
+@testset "the ω block follows the site counts, not the draws" begin
     quiet(f) = Logging.with_logger(f, Logging.NullLogger())
     closeNaN(a, b) = size(a) == size(b) &&
         all((isnan(x) && isnan(y)) || abs(x - y) <= 1e-5 * abs(y) + 1e-9 for (x, y) in zip(a, b))
@@ -248,38 +251,70 @@ end
     tab = joinpath(td, "t.jld2")
     seed!(1)
     quiet(() -> MKtest.rates(p(); iterations = 300, output_file = tab))
-    sfs = [best["sfs"], best["sfs"]]
-    div = [best["div"], [6.0, 4.0, best["div"][3], best["div"][4]]]   # Dn + Ds = 10
+    sfs = [best["sfs"], best["sfs"], best["sfs"]]
+    div = [best["div"],
+           [6.0, 4.0, best["div"][3], best["div"][4]],        # Dn + Ds = 10: Ds = 0 draws
+           [best["div"][1], best["div"][2], 0.0, 0.0]]         # no site counts: no ω
     S = length(p().dac)
     kw = (h5_file = tab, summstat_size = 5000, alpha = nothing, B_bins = nothing,
           sampling = MKtest.RjSampling(), row_prior = MKtest.FlatAlphaPrior())
+
+    # summaries, row by row: the Ds = 0 rows leave, the ω columns stay
+    seed!(2)
+    st = quiet(() -> MKtest._summaries_setup(p(), sfs, div; kw...))
+    buf = MKtest._dataset_buffer(st)
+    seed!(3)
+    out2 = MKtest._assemble_summaries!(buf, st.sfs_p[2], st.divergence_p[2], st.neut, st.sel, st.dsdn,
+                                       st.gn, st.sh, st.gL, st.gH, st.B, st.summstat_size, st.samplers[2])
+    finite_row(i) = all(isfinite, view(buf.α_mat, i, :)) && all(isfinite, view(buf.ω_mat, i, :)) &&
+                    all(isfinite, view(buf.α_summaries, i, :))
+    nds0 = count(==(0), buf.sampled_ds)
+    @test nds0 > 0 && any(i -> any(isnan, view(buf.ω_mat, i, :)), 1:st.N)   # the case under test
+    @test size(out2, 2) == 12 + S
+    @test size(out2, 1) == count(finite_row, 1:st.N) == count(buf.mask)
+    @test all(i -> buf.mask[i] == finite_row(i), 1:st.N)
+    @test !any(buf.mask[i] for i in 1:st.N if buf.sampled_ds[i] == 0)
+    @test all(isfinite, out2)
+    # the α columns of the kept rows are the draws themselves, untouched
+    @test out2[:, 1:3] == round.(buf.α_mat[buf.mask, :], digits = 5)
+    # without site counts: 8 columns, every finite-α row kept
+    buf3 = MKtest._dataset_buffer(st)
+    seed!(3)
+    out3 = MKtest._assemble_summaries!(buf3, st.sfs_p[3], st.divergence_p[3], st.neut, st.sel, st.dsdn,
+                                       st.gn, st.sh, st.gL, st.gH, st.B, st.summstat_size, st.samplers[3])
+    @test size(out3, 2) == 8 + S
+    @test size(out3, 1) == count(i -> all(isfinite, view(buf3.α_mat, i, :)) &&
+                                      all(isfinite, view(buf3.α_summaries, i, :)), 1:st.N)
+
     mem(m) = (seed!(2); quiet(() -> MKtest._abc_in_memory(p(), sfs, div; abc_method = m, tol = 200, kw...)))
     fo = joinpath(td, "files")
     seed!(2)
     quiet(() -> MKtest.summary_statistics(p(), sfs, div; h5_file = tab, summstat_size = 5000,
                                           output_folder = fo))
     files = MKtest._dataset_files(fo, "summstat_")
-    @test MKtest._count_cols.(files) == [12 + S, 8 + S]
-    t2 = quiet(() -> MKtest.read_gz(files[2]))
-    a2 = vec(quiet(() -> MKtest.read_gz(MKtest._dataset_files(fo, "alphas_")[2])))
+    @test MKtest._count_cols.(files) == [12 + S, 12 + S, 8 + S]
+    n_rows = [quiet(() -> MKtest._with_gz(countlines, f)) for f in files]
+    @test n_rows[2] < 5000 && !any(isnan, quiet(() -> MKtest.read_gz(files[2])))
+    t3 = quiet(() -> MKtest.read_gz(files[3]))
+    a3 = vec(quiet(() -> MKtest.read_gz(MKtest._dataset_files(fo, "alphas_")[3])))
     ω = 4:7
     rest = [1:3; 8:12]
 
     names12 = MKtest._abc_param_names(12)
-    for (m, direct) in (("abcreg", MKtest.abcreg_loclinear(a2, t2[:, 1:8], t2[:, 9:end]; tol = 200)),
-                        ("abc", MKtest.abc_loclinear(a2, t2[:, 1:8], t2[:, 9:end]; tol = 200)[2]))
+    for (m, direct) in (("abcreg", MKtest.abcreg_loclinear(a3, t3[:, 1:8], t3[:, 9:end]; tol = 200)),
+                        ("abc", MKtest.abc_loclinear(a3, t3[:, 1:8], t3[:, 9:end]; tol = 200)[2]))
         post = mem(m)
-        @test length(post) == 2
-        @test names(post[1]) == names(post[2]) == string.(names12)
-        @test !any(isnan, Matrix(post[1]))
-        @test all(isnan, Matrix(post[2][:, ω])) && !any(isnan, Matrix(post[2][:, rest]))
-        @test Matrix(post[2][:, rest]) == direct
+        @test length(post) == 3
+        @test names(post[1]) == names(post[2]) == names(post[3]) == string.(names12)
+        @test !any(isnan, Matrix(post[1])) && !any(isnan, Matrix(post[2]))
+        @test all(isnan, Matrix(post[3][:, ω])) && !any(isnan, Matrix(post[3][:, rest]))
+        @test Matrix(post[3][:, rest]) == direct
     end
 
     # file route: the same posteriors, NaN ω included
     fa = quiet(() -> MKtest.abc(output_folder = fo, S = S, tol = 200))["loclinear"]
     @test all(isequal(Matrix(a), Matrix(b)) for (a, b) in zip(fa, mem("abc")))
-    @test names(fa[2]) == string.(names12)
+    @test names(fa[3]) == string.(names12)
     if have_reg
         fr = quiet(() -> MKtest.ABCreg(output_folder = fo, S = S, tol = 200))
         @test all(closeNaN(Matrix(a), Matrix(b)) for (a, b) in zip(fr, mem("abcreg")))
@@ -290,9 +325,10 @@ end
     # summaries: NaN statistics for the unestimated ω, the usual ones elsewhere
     post = mem("abcreg")
     res = quiet(() -> MKtest.summary_abc(post; stat = MKtest.PosteriorMedian()))
-    @test all(isnan, Matrix(res[:inference][2:2, ω])) && !any(isnan, Matrix(res[:inference][:, rest]))
+    @test all(isnan, Matrix(res[:inference][3:3, ω])) && !any(isnan, Matrix(res[:inference][:, rest]))
+    @test !any(isnan, Matrix(res[:inference][1:2, :]))
     @test isequal(Matrix(res[:inference][1:1, :]), Matrix(quiet(() -> MKtest.summary_abc(post[1:1]; stat = MKtest.PosteriorMedian()))[:inference]))
-    @test occursin("NaN", res[:quantiles][2, :ωₐ])
+    @test occursin("NaN", res[:quantiles][3, :ωₐ])
     # and through abcmk
     r = quiet(() -> (seed!(2); MKtest.abcmk(p(), sfs, div; h5_file = tab, summstat_size = 5000,
                                             tol = 200, in_memory = true)))

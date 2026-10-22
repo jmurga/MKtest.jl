@@ -361,7 +361,7 @@ function empirical_test(
     for c in vcat([:analysis, :type], params)
         hasproperty(tbl, c) || throw(ArgumentError(
             "column $c is missing" * (c in _empirical_params(true) ?
-            " (abcmk drops the ω columns when any ω is NaN)" : "")))
+            " (abcmk reports NaN ω for a dataset with Ln or Ls = 0)" : "")))
     end
 
     out = DataFrame(analysis = String[], param = String[], case = Float64[],

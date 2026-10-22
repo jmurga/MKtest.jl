@@ -867,8 +867,8 @@ warning, so the rows then no longer follow the dataset order.
 `OrderedDict` from [`summary_abc`](@ref):
  - `:inference`: `DataFrame`, one row per dataset with the point estimate of each parameter:
    `α_weak, α_strong, α, ωₐ_weak, ωₐ_strong, ωₐ, ωₙₐ, γ_deleterious, β, γ_weak, γ_strong, B`. The
-   four ω columns are NaN for a dataset with too little divergence to define ω in every
-   draw (a draw with Ds = 0 and no adaptive fixation); the other columns are unaffected.
+   four ω columns are NaN for a dataset without site counts (Ln or Ls = 0); the other
+   columns are unaffected.
  - `:quantiles`: the same values as strings with the marginal 95% interval, `"0.2 [0.1-0.3]"`.
  - `:stats`: Min., 2.5% Perc., Median, Mean, Mode, 97.5% Perc. and Max. of every
    parameter, 7 rows per dataset with a `Stats` column.

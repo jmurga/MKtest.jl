@@ -603,9 +603,9 @@ end
                          sampling = IndependentSampling()) -> Matrix{Float64}
 
 Draw one dataset's Poisson realisations for every sampled table row, assemble
-`[α(3), ω(4, dropped if any is NaN), gn, sh, gL, gH, B, α(x)(n_dac)]`, drop the
-non-finite rows and keep at most `summstat_size`: the matrix `sampling_summaries!`
-writes. The in-memory ABC route (`abcmk(...; in_memory = true)`) uses it directly.
+`[α(3), ω(4, absent when Ln or Ls is 0), gn, sh, gL, gH, B, α(x)(n_dac)]`, drop the
+non-finite rows (a draw with dn = 0 or Ds = 0) and keep at most `summstat_size`: the
+matrix `sampling_summaries!` writes. The in-memory ABC route (`abcmk(...; in_memory = true)`) uses it directly.
 
 The result is a view of `buf`'s memory: use it before `buf` is filled for the next
 dataset.
@@ -647,8 +647,12 @@ function _assemble_summaries!(
         end
     end
 
-    # Drop the ω block entirely if any ω value is NaN (ABCreg then reads P = 8).
-    has_ω = !any(isnan, buf.ω_mat)
+    # The ω block is present iff the data define ω: Ln > 0 and Ls > 0 (d = [Dn + Ds, Ln, Ls]).
+    # A row whose draw leaves ω non-finite (Ds = 0) is dropped below with the other
+    # non-finite rows, as a row with dn = 0 is for α. Until 2026-10-22 one NaN ω row
+    # dropped the block for the whole dataset (ABCreg then read P = 8), which at human
+    # divergence counts happened on every dataset (~35 rows per 100,000 draws).
+    has_ω = length(d) >= 3 && d[2] > 0 && d[3] > 0
     n_cols = has_ω ? 12 + n_dac : 8 + n_dac
 
     # Assemble expected_values column-by-column into preallocated buffer.
@@ -737,8 +741,9 @@ reference table and turn each into the Poisson realisation of the data under tha
 Use [`valid_data`](@ref) first to drop the datasets that would stop the run.
 
 For dataset `i`, `output_folder` receives `summstat_i.txt.gz` (one row per sampled
-table row: `α_weak, α_strong, α`, then `ωₐ_weak, ωₐ_strong, ωₐ, ωₙₐ` unless any is
-NaN, then `|γ_deleterious|, shape, γ_weak, γ_strong, B x 1000`, then α(x) at each `param.dac`) and
+table row: `α_weak, α_strong, α`, then `ωₐ_weak, ωₐ_strong, ωₐ, ωₙₐ` when the dataset has
+`Ln > 0` and `Ls > 0`, then `|γ_deleterious|, shape, γ_weak, γ_strong, B x 1000`, then α(x)
+at each `param.dac`; a row whose draw gives `Ds = 0` or `dn = 0` is dropped) and
 `alphas_i.txt.gz` (the observed α(x)), plus a `provenance.txt`. Earlier `summstat_*`,
 `alphas_*` and `out_*` files in `output_folder` are deleted.
 
