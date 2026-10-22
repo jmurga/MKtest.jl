@@ -7,7 +7,8 @@
 # or a local edit cannot make the check pass where CI fails.
 #   scripts/check_ci.sh [rev] [--serial]   (default HEAD; logs kept in the printed folder)
 # The tests run through scripts/test_parallel.sh (the same groups as Pkg.test(), as parallel
-# single-thread processes); --serial runs the one Pkg.test() process CI.yml runs.
+# single-thread processes) when the commit has it; --serial, or a commit without the
+# runner (the dev branch), runs the one Pkg.test() process CI.yml runs.
 set -euo pipefail
 
 serial=0
@@ -37,7 +38,7 @@ if ! JULIA_NUM_THREADS=1 julia --project=. -e '
     echo "check_ci: FAILED (instantiate), $sha; full log $work/tests.log"
     exit 1
 fi
-if (( serial )); then
+if (( serial )) || [[ ! -x scripts/test_parallel.sh ]]; then
     echo "check_ci: tests (one Pkg.test process, as CI.yml) ..."
     test_cmd=(env JULIA_NUM_THREADS=1 julia --project=. -e 'using Pkg; Pkg.test()')
 else
