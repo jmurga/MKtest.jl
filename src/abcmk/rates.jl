@@ -432,18 +432,21 @@ deleterious mutation fixes, so such a draw keeps a realistic Dn/Ds only at an α
 All coefficients are `2N` times the heterozygote selection coefficient.
 
 # Returns
-A `Dict` with the same content as the file block:
- - `:models`: `DataFrame`, one row per (draw, B). Its columns keep their stored names, so
+The written block as a [`RatesTable`](@ref), the same value `load_rates(output_file, param)`
+gives, so it can go straight to [`abcmk`](@ref) as `rates = t`. Its fields:
+ - `models`: `DataFrame`, one row per (draw, B). Its columns keep their stored names, so
    earlier tables stay readable: `B` (B x 1000), `al_low` (`α_weak`), `al_tot` (`α`),
    `gam_flanking` (`γ_flanking`), `gL` (`γ_weak`), `gH` (`γ_strong`), `shape`, `gam_dfe`
    (`γ_deleterious`), `rho` (`ρ`), `ne_ratio` (always 1).
- - `:neut`, `:sel`: `OrderedDict{Int,Array}` from each DAC to the expected synonymous and
+ - `neut`, `sel`: `OrderedDict{Int,Array}` from each DAC to the expected synonymous and
    nonsynonymous tails of every row.
- - `:dsdn`: matrix of fixation rates, columns `Ds`, `Dn`, and the parts of `Dn` from
+ - `dsdn`: matrix of fixation rates, columns `Ds`, `Dn`, and the parts of `Dn` from
    weakly and from strongly beneficial mutations.
- - `:dac`: `param.dac`.
+ - `dac`: `param.dac`; `options`: a description of the forward model, also stored in the
+   file block; `file`, `N`, `n`, `cutoff`.
 
-The file block also stores `options`, a description of the forward model.
+Until 2026-10-22 the return value was a `Dict` with keys `:models`, `:neut`, `:sel`,
+`:dsdn`, `:dac` (views of the solved matrices): use `t.models` in place of `t[:models]`.
 """
 function rates(
     param::parameters;
@@ -575,11 +578,13 @@ function rates(
         file[grp * "/options"] = _rates_options()
     end
 
-    return (Dict(
-        :models => models,
-        :neut => n,
-        :sel => s,
-        :dsdn => dsdn,
-        :dac => param.dac,
+    # The same table `load_rates(output_file, param)` returns, without re-reading the file.
+    return RatesTable(output_file, param, (;
+        models = DataFrame(models; copycols=true),
+        neut = n,
+        sel = s,
+        dsdn = Matrix{Float64}(dsdn),
+        dac = Vector{Int}(param.dac),
+        options = _rates_options(),
     ))
 end

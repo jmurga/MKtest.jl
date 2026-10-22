@@ -30,7 +30,7 @@ import Logging
 
         # one draw per model, shared by that model's B bins, inside the range
         r, f = run_rates([1e-4, 5e-3])
-        m = r[:models]
+        m = r.models
         @test :rho in propertynames(m)
         @test names(m)[9] == "rho"          # appended last: cols 1-8 keep their meaning
         @test all(1e-4 .<= m.rho .<= 5e-3)
@@ -38,11 +38,17 @@ import Logging
         @test all(allequal(m.rho[(i-1)*nb+1:i*nb]) for i in 1:nmodels)
         @test length(unique(m.rho)) == nmodels
         @test names(MKtest._read_rates(f, param).models)[9] == "rho"
+        # the return value is the table load_rates reads back, field by field
+        @test r isa MKtest.RatesTable
+        t = MKtest.load_rates(f, param)
+        @test (r.models, r.neut, r.sel, r.dsdn, r.dac, r.options, r.file, r.N, r.n, r.cutoff) ==
+              (t.models, t.neut, t.sel, t.dsdn, t.dac, t.options, t.file, t.N, t.n, t.cutoff)
+        @test typeof(r.models) == typeof(t.models) && typeof(r.neut) == typeof(t.neut)
 
         # fixed forms
-        @test all(==(0.002), run_rates(0.002; iterations=20)[1][:models].rho)
-        @test all(==(0.002), run_rates([0.002]; iterations=20)[1][:models].rho)
-        @test all(==(param.ρ), run_rates(nothing; iterations=20)[1][:models].rho)
+        @test all(==(0.002), run_rates(0.002; iterations=20)[1].models.rho)
+        @test all(==(0.002), run_rates([0.002]; iterations=20)[1].models.rho)
+        @test all(==(param.ρ), run_rates(nothing; iterations=20)[1].models.rho)
 
         # invalid ranges must throw rather than silently pick something
         for bad in ([-1.0, 1.0], [5e-3, 1e-4], -0.001, Float64[])
@@ -69,7 +75,7 @@ import Logging
         seed!(21)
         r = MKtest.rates(param; iterations=20, output_file=joinpath(od, "tw.jld2"),
                          B_bins=B_bins)
-        m = r[:models]
+        m = r.models
         # every stored row equals the full-spectrum model at the same parameters
         for i in (1, 2, 3, nrow(m))
             q = MKtest.copy_param(param)
@@ -81,15 +87,15 @@ import Logging
             # ppos recovered EXACTLY from the stored fixation rates:
             # f_pos = 0.75 * (ppos/2) * Φ * p_fix
             pp(f, g) = f == 0 ? 0.0 : 2f / (0.75 * MKtest.Φ(q, g) * MKtest.p_fix(q, g))
-            q.p_weak = pp(r[:dsdn][i, 3], q.γ_weak)
-            q.p_strong = pp(r[:dsdn][i, 4], q.γ_strong)
+            q.p_weak = pp(r.dsdn[i, 3], q.γ_weak)
+            q.p_strong = pp(r.dsdn[i, 4], q.γ_strong)
             bn = MKtest.binom_op(q)
             neut = MKtest.cumulative_vector!(MKtest.sfs_neut(q, bn))
             sel  = MKtest.cumulative_vector!(MKtest.sfs_pos(q, q.γ_strong, q.p_strong, bn) .+
                                              MKtest.sfs_pos(q, q.γ_weak, q.p_weak, bn) .+
                                              MKtest.sfs_neg(q, q.p_weak + q.p_strong, bn))
-            @test reldiff([r[:neut][k][i] for k in param.dac], neut[param.dac]) < 1e-12
-            @test reldiff([r[:sel][k][i]  for k in param.dac], sel[param.dac])  < 1e-12
+            @test reldiff([r.neut[k][i] for k in param.dac], neut[param.dac]) < 1e-12
+            @test reldiff([r.sel[k][i]  for k in param.dac], sel[param.dac])  < 1e-12
         end
 
         # The tail-weight cache is keyed on the DAC vector as well as B.
@@ -100,9 +106,9 @@ import Logging
         seed!(5)
         r3 = MKtest.rates(p3; iterations=30, output_file=joinpath(od, "k3.jld2"),
                           B_bins=B_bins)
-        for k in keys(r3[:neut])
-            @test reldiff(r3[:neut][k], r6[:neut][k]) < 1e-12
-            @test reldiff(r3[:sel][k],  r6[:sel][k])  < 1e-12
+        for k in keys(r3.neut)
+            @test reldiff(r3.neut[k], r6.neut[k]) < 1e-12
+            @test reldiff(r3.sel[k],  r6.sel[k])  < 1e-12
         end
 
         # the identity the whole projection rests on
@@ -243,9 +249,9 @@ import Logging
         a = MKtest.rates(mkp(0.25); iterations = 5, output_file = joinpath(od, "a.jld2"))
         seed!(3)
         b = MKtest.rates(mkp(0.3); iterations = 5, output_file = joinpath(od, "b.jld2"))
-        @test b[:models][:, 1:8] == a[:models][:, 1:8]
+        @test b.models[:, 1:8] == a.models[:, 1:8]
         # the neutral SFS is linear in the ratio
-        @test all(isapprox(b[:neut][k], a[:neut][k] .* (0.3 / 0.25); rtol = 1e-12) for k in [2, 50])
+        @test all(isapprox(b.neut[k], a.neut[k] .* (0.3 / 0.25); rtol = 1e-12) for k in [2, 50])
     end
 
     # --- the DFE shape prior is derived from param.shape ----------------------
@@ -256,13 +262,13 @@ import Logging
         out = MKtest.rates(MKtest.parameters(N = 500, n = 50, shape = 0.184,
                                              dac = [2, 4, 5, 10, 20, 50]);
                            iterations = 10, output_file = joinpath(od, "s1.jld2"), ρ = 0.001)
-        @test minimum(out[:models].shape) >= lo - 1e-12
-        @test maximum(out[:models].shape) <= hi + 1e-12
+        @test minimum(out.models.shape) >= lo - 1e-12
+        @test maximum(out.models.shape) <= hi + 1e-12
         seed!(7)
         out2 = MKtest.rates(MKtest.parameters(N = 500, n = 50, shape = 0.4,
                                               dac = [2, 4, 5, 10, 20, 50]);
                             iterations = 10, output_file = joinpath(od, "s2.jld2"), ρ = 0.001)
-        @test maximum(out2[:models].shape) > hi
+        @test maximum(out2.models.shape) > hi
     end
 
     @testset "shape_factor widens the DFE shape prior" begin
@@ -282,15 +288,15 @@ import Logging
         seed!(11)
         d2 = MKtest.rates(mkp(); iterations = 10, output_file = joinpath(od, "d2.jld2"),
                           ρ = 0.001, shape_factor = 2)
-        @test d[:sel] == d2[:sel] && d[:dsdn] == d2[:dsdn]
+        @test d.sel == d2.sel && d.dsdn == d2.dsdn
         # f = 4: [0.0115, 2.944]; draws above shape 1 are solved, not refused
         seed!(11)
         w = MKtest.rates(mkp(); iterations = 40, output_file = joinpath(od, "w.jld2"),
                          ρ = 0.001, shape_factor = 4)
-        sh = w[:models].shape
+        sh = w.models.shape
         @test minimum(sh) >= 0.184 / 16 - 1e-12 && maximum(sh) <= 0.184 * 16 + 1e-12
         @test count(>(1), sh) >= 10
-        @test size(w[:models], 1) == 40 * 37               # nothing refused
+        @test size(w.models, 1) == 40 * 37               # nothing refused
     end
 
     # --- reference outputs ----------------------------------------------------

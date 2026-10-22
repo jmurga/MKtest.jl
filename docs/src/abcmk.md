@@ -42,11 +42,13 @@ Most of these are drawn from priors when the table is built; set `N`, `n`, `dac`
 ## 2. The reference table: `rates`
 
 ```julia
-MKtest.rates(param; iterations = 100_000, output_file = "rates_tgp.jld2")
+t = MKtest.rates(param; iterations = 100_000, output_file = "rates_tgp.jld2")
 ```
 
 Each iteration draws a model from the priors and solves its expected SFS (at the
-`dac`) and fixation rates for 37 values of `B`. Priors (keywords, ranges):
+`dac`) and fixation rates for 37 values of `B`. The table is appended to the file and
+returned as a [`RatesTable`](@ref), the same value `load_rates` reads back, so a session
+that builds a table can pass it on as `rates = t` without reading the file (section 7). Priors (keywords, ranges):
 
 | keyword | default | prior |
 |---|---|---|
