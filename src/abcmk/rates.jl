@@ -83,36 +83,59 @@ _rates_options() = "model=best-2026-09-28 (Phi published (eq 9); beneficial SFS 
 _jld2_group_key(N::Int, n::Int, cutoff_lo, cutoff_hi) =
     string(N) * "/" * string(n) * "/cutoff=[" * string(cutoff_lo) * "," * string(cutoff_hi) * "]"
 
+# The expected tails per DAC, as `RatesTable` holds them, from a (rows x DACs) matrix in
+# `dac` order (the file since 2026-10-22, and `rates()` itself) or from the
+# `OrderedDict{Int,Array}` of earlier files.
+_dac_dict(m::AbstractMatrix, dac::AbstractVector{<:Integer}) =
+    OrderedDict{Int,Vector{Float64}}(Int(dac[i]) => Vector{Float64}(view(m, :, i)) for i in eachindex(dac))
+_dac_dict(d::AbstractDict, dac::AbstractVector{<:Integer}) =
+    OrderedDict{Int,Vector{Float64}}(Int(k) => convert(Vector{Float64}, d[k]) for k in dac)
+
+# The tails of a `RatesTable` as the (rows x DACs) matrix the file stores.
+_dac_matrix(d::AbstractDict, dac::AbstractVector{<:Integer}) =
+    reduce(hcat, [convert(Vector{Float64}, d[k]) for k in dac])
+
 """
     _read_rates(input_file, param) -> NamedTuple
 
-`(; models, neut, sel, dsdn, dac, options)` of the `(N, n, cutoff)` block of a rates file.
-Reads files written by this and earlier versions.
+`(; models, neut, sel, dsdn, dac, options)` of the `(N, n, cutoff)` block of a rates file,
+the fields of a [`RatesTable`](@ref). Reads the block as [`_write_rates`](@ref) stores it
+(plain arrays) and the layout of files written before 2026-10-22 (`models` as a
+`DataFrame`, `neut` and `sel` as `OrderedDict{Int,Array}`). Throws an `ArgumentError` if
+the file has no block for `param`.
 """
 function _read_rates(input_file::String, param::parameters)
     grp = _jld2_group_key(param.N, param.n, param.cutoff[1], param.cutoff[end])
     return jldopen(input_file, "r") do h
+        haskey(h, grp) || throw(ArgumentError("$input_file has no block \"$grp\" (N, n, cutoff of param)"))
         tmp = h[grp]
+        dac = Vector{Int}(tmp["dac"])
+        stored = tmp["models"]
+        models = stored isa AbstractMatrix ?
+            DataFrame(Matrix{Float64}(stored), Symbol.(tmp["model_names"])) : stored
         (;
-            models = tmp["models"],
-            neut   = tmp["neut"],
-            sel    = tmp["sel"],
+            models,
+            neut   = _dac_dict(tmp["neut"], dac),
+            sel    = _dac_dict(tmp["sel"], dac),
             dsdn   = tmp["dsdn"],
-            dac    = tmp["dac"],
+            dac,
             options = ("options" in keys(tmp)) ? tmp["options"] : _NO_PROVENANCE,
         )
     end
 end
+
 
 """
     RatesTable
 
 One `(N, n, cutoff)` block of a rates file, loaded by [`load_rates`](@ref) and passed to
 [`abcmk`](@ref) or [`summary_statistics`](@ref) as `rates = t` instead of a file path.
-Fields: `file`, `N`, `n`, `cutoff`, `models`, `neut`, `sel`, `dsdn`, `dac`, `options` (as
-[`rates`](@ref) wrote them), plus a cache of row-prior weights, computed by the first call
-that needs them and reused by every later call with the same `row_prior`, `alpha` and
-`B_bins`.
+Fields: `file`, `N`, `n`, `cutoff`, `models` (`DataFrame`), `neut`, `sel`
+(`OrderedDict{Int,Vector{Float64}}`, DAC => expected tails), `dsdn` (`Matrix`), `dac`,
+`options`, plus a cache of row-prior weights, computed by the first call that needs them
+and reused by every later call with the same `row_prior`, `alpha` and `B_bins`.
+[`rates`](@ref) returns one and writes it with [`_write_rates`](@ref); [`load_rates`](@ref)
+reads it back with [`_read_rates`](@ref). The file holds the same fields as plain arrays.
 """
 struct RatesTable{TM,TN,TS,TD}
     file::String
@@ -133,6 +156,32 @@ function RatesTable(file::String, param::parameters, tmp)
     return RatesTable(file, param.N, param.n, (Float64(param.cutoff[1]), Float64(param.cutoff[end])),
                       tmp.models, tmp.neut, tmp.sel, tmp.dsdn, Vector{Int}(tmp.dac), String(tmp.options),
                       Dict{Any,Union{Nothing,Vector{Float64}}}(), ReentrantLock())
+end
+
+"""
+    _write_rates(output_file, t::RatesTable) -> output_file
+
+Append the block of `t` to the JLD2 file `output_file` under the group
+`"N/n/cutoff=[lo,hi]"` (see [`_jld2_group_key`](@ref)), which must not exist yet
+(`ArgumentError`). The block holds plain arrays only, so it reads back on any Julia and
+DataFrames version: `models` (`Matrix{Float64}`) with `model_names`, `neut` and `sel`
+(`Matrix{Float64}`, rows x DACs in `dac` order), `dsdn`, `dac` and `options`.
+[`_read_rates`](@ref) is the inverse.
+"""
+function _write_rates(output_file::String, t::RatesTable)
+    grp = _jld2_group_key(t.N, t.n, t.cutoff[1], t.cutoff[2])
+    JLD2.jldopen(output_file, "a+") do file
+        haskey(file, grp) && throw(ArgumentError(
+            "$output_file already has the block \"$grp\": use another file, or delete the block"))
+        file[grp * "/models"]      = Matrix{Float64}(t.models)
+        file[grp * "/model_names"] = String.(names(t.models))
+        file[grp * "/neut"]        = _dac_matrix(t.neut, t.dac)
+        file[grp * "/sel"]         = _dac_matrix(t.sel, t.dac)
+        file[grp * "/dsdn"]        = Matrix{Float64}(t.dsdn)
+        file[grp * "/dac"]         = Vector{Int}(t.dac)
+        file[grp * "/options"]     = String(t.options)
+    end
+    return output_file
 end
 
 """
@@ -410,7 +459,8 @@ seed, the table reproduces only at the same thread count.
  - `iterations::Int64`: number of prior draws; the table has up to
    `iterations * length(B_bins)` rows.
  - `output_file::String`: JLD2 file, opened in append mode; the block is written under
-   the group `"N/n/cutoff=[lo,hi]"`, which must not exist yet.
+   the group `"N/n/cutoff=[lo,hi]"`, which must not exist yet (`ArgumentError`), as plain
+   arrays (see [`_write_rates`](@ref)).
  - `γ_strong`, `γ_weak::Vector{Int64}`: ranges of the strongly and weakly beneficial coefficients,
    drawn as `floor(Uniform(lo, hi))` (so `γ_weak` reaches 9, not 10).
  - `γ_flanking`, `γ_deleterious::Vector{Int64}`: ranges of the flanking and coding
@@ -438,8 +488,8 @@ gives, so it can go straight to [`abcmk`](@ref) as `rates = t`. Its fields:
    earlier tables stay readable: `B` (B x 1000), `al_low` (`α_weak`), `al_tot` (`α`),
    `gam_flanking` (`γ_flanking`), `gL` (`γ_weak`), `gH` (`γ_strong`), `shape`, `gam_dfe`
    (`γ_deleterious`), `rho` (`ρ`), `ne_ratio` (always 1).
- - `neut`, `sel`: `OrderedDict{Int,Array}` from each DAC to the expected synonymous and
-   nonsynonymous tails of every row.
+ - `neut`, `sel`: `OrderedDict{Int,Vector{Float64}}` from each DAC to the expected
+   synonymous and nonsynonymous tails of every row.
  - `dsdn`: matrix of fixation rates, columns `Ds`, `Dn`, and the parts of `Dn` from
    weakly and from strongly beneficial mutations.
  - `dac`: `param.dac`; `options`: a description of the forward model, also stored in the
@@ -560,31 +610,16 @@ function rates(
     sel  = @view r_pn[idx, :]
     dsdn = @view r_f[idx,  :]
 
-    # Saving multiple summary statistics
-    n = OrderedDict{Int,Array}()
-    s = OrderedDict{Int,Array}()
-    for i in eachindex(param.dac)
-        n[param.dac[i]] = neut[:, i]
-        s[param.dac[i]] = sel[:, i]
-    end
-
-    grp = _jld2_group_key(param.N, param.n, param.cutoff[1], param.cutoff[end])
-    JLD2.jldopen(output_file, "a+") do file
-        file[grp * "/models"]  = DataFrame(models; copycols=true)
-        file[grp * "/neut"]    = n
-        file[grp * "/sel"]     = s
-        file[grp * "/dsdn"]    = Matrix{Float64}(dsdn)
-        file[grp * "/dac"]     = Vector{Int}(param.dac)
-        file[grp * "/options"] = _rates_options()
-    end
-
-    # The same table `load_rates(output_file, param)` returns, without re-reading the file.
-    return RatesTable(output_file, param, (;
+    # The table as `load_rates(output_file, param)` returns it, written through the same
+    # layout `_read_rates` reads.
+    t = RatesTable(output_file, param, (;
         models = DataFrame(models; copycols=true),
-        neut = n,
-        sel = s,
+        neut = _dac_dict(neut, param.dac),
+        sel = _dac_dict(sel, param.dac),
         dsdn = Matrix{Float64}(dsdn),
         dac = Vector{Int}(param.dac),
         options = _rates_options(),
     ))
+    _write_rates(output_file, t)
+    return t
 end

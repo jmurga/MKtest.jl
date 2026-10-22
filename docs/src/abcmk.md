@@ -65,8 +65,11 @@ default `[shape/4, 4 shape]`), and the weak share of alpha from `0:0.05:1` (`wea
 for none). Above shape ~1 the deleterious DFE fixes almost nothing, so at the default α
 prior such draws imply a Dn/Ds of 1e-3 or less: a wider `shape_factor` adds rows that real
 data rarely accept. The table is written to `output_file`
-(JLD2), under the group `"N/n/cutoff"`, with the drawn models, the expected
-synonymous and nonsynonymous tails at each DAC, the fixation rates and the options used.
+(JLD2), under the group `"N/n/cutoff"`, as plain arrays: the drawn models with their
+column names, the expected synonymous and nonsynonymous tails at each DAC (one matrix
+each, rows x DACs), the fixation rates, the DACs and the options used. These are the
+fields of the returned `RatesTable`, and `load_rates` reads them back (files written by
+earlier versions, with a `DataFrame` and `Dict`s inside, are read too).
 
 This is the expensive step: build it once per population, sample size and cutoff, on
 many threads (`julia -t auto`), and reuse it for every gene set.

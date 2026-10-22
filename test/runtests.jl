@@ -44,6 +44,33 @@ import Logging
         @test (r.models, r.neut, r.sel, r.dsdn, r.dac, r.options, r.file, r.N, r.n, r.cutoff) ==
               (t.models, t.neut, t.sel, t.dsdn, t.dac, t.options, t.file, t.N, t.n, t.cutoff)
         @test typeof(r.models) == typeof(t.models) && typeof(r.neut) == typeof(t.neut)
+        # on disk the block holds the same fields as plain arrays, and the block is unique
+        grp = MKtest._jld2_group_key(param.N, param.n, param.cutoff[1], param.cutoff[end])
+        jldopen(f, "r") do h
+            g = h[grp]
+            @test g["models"] isa Matrix{Float64} && g["models"] == Matrix(r.models)
+            @test g["model_names"] == names(r.models)
+            @test g["neut"] isa Matrix{Float64} && size(g["neut"]) == (size(r.dsdn, 1), length(r.dac))
+            @test g["neut"][:, 2] == r.neut[r.dac[2]] && g["sel"][:, end] == r.sel[r.dac[end]]
+            @test g["dsdn"] == r.dsdn && g["dac"] == r.dac && g["options"] == r.options
+        end
+        @test_throws ArgumentError MKtest._write_rates(f, r)
+        @test_throws ArgumentError MKtest.load_rates(f, MKtest.parameters(N = 500, n = 10, dac = [2, 4]))
+        # a file of the layout before 2026-10-22 (DataFrame + OrderedDict{Int,Array}) reads
+        # to the same table
+        f_old = joinpath(od, "old_layout.jld2")
+        jldopen(f_old, "w") do h
+            h[grp * "/models"] = r.models
+            h[grp * "/neut"]   = MKtest.OrderedDict{Int,Array}(k => r.neut[k] for k in r.dac)
+            h[grp * "/sel"]    = MKtest.OrderedDict{Int,Array}(k => r.sel[k] for k in r.dac)
+            h[grp * "/dsdn"]   = r.dsdn
+            h[grp * "/dac"]    = r.dac
+            h[grp * "/options"] = r.options
+        end
+        t_old = MKtest.load_rates(f_old, param)
+        @test (t_old.models, t_old.neut, t_old.sel, t_old.dsdn, t_old.dac, t_old.options) ==
+              (r.models, r.neut, r.sel, r.dsdn, r.dac, r.options)
+        @test typeof(t_old.neut) == typeof(r.neut)
 
         # fixed forms
         @test all(==(0.002), run_rates(0.002; iterations=20)[1].models.rho)
